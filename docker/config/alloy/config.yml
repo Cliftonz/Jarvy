@@ -1,0 +1,47 @@
+  // Receive OTLP from apps (jarvy, etc.)
+    otelcol.receiver.otlp "from_apps" {
+    grpc { endpoint = "0.0.0.0:4317" }
+    http { endpoint = "0.0.0.0:4318" }
+    
+    output {
+    metrics = [otelcol.processor.batch.all.input]
+    logs    = [otelcol.processor.batch.all.input]
+    traces  = [otelcol.processor.batch.all.input]
+    }
+  }
+    
+    // Batch to reduce load
+    otelcol.processor.batch "all" {
+    output {
+    metrics = [otelcol.exporter.prometheus.to_prom.input]
+    logs    = [otelcol.exporter.loki.to_loki.input]
+    traces  = [otelcol.exporter.otlp.to_tempo.input]
+    }
+  }
+    
+    // --- Metrics → Prometheus (remote_write)
+    otelcol.exporter.prometheus "to_prom" {
+    forward_to = [prometheus.remote_write.local.receiver]
+  }
+    prometheus.remote_write "local" {
+    endpoint { url = "http://prometheus:9090/api/v1/write" }
+  }
+    
+    // --- Logs → Loki
+    otelcol.exporter.loki "to_loki" {
+    forward_to = [loki.write.default.receiver]
+  }
+    loki.write "default" {
+    endpoint { url = "http://loki:3100/loki/api/v1/push" }
+  }
+    
+    // --- Traces → Tempo (OTLP gRPC)
+    otelcol.exporter.otlp "to_tempo" {
+    client {
+    endpoint = "tempo:4317"
+    tls {
+    insecure = true
+    insecure_skip_verify = true
+    }
+    }
+  }

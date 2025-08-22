@@ -1,0 +1,54 @@
+services:
+  grafana:
+    image: grafana/grafana:latest
+    ports: ["3201:3000"]
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      # Provision data sources from a single file
+      - ./config/grafana/config.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      # Persist Grafana state (dashboards, users, etc.)
+      - ./data/grafana:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-remote-write-receiver
+    ports: ["9090:9090"]
+    volumes:
+      - ./config/prometheus/config.yml:/etc/prometheus/prometheus.yml:ro
+      - ./data/prometheus:/prometheus
+
+  loki:
+    image: grafana/loki:latest
+    command: ["-config.file=/etc/loki/config.yml"]
+    ports: ["3100:3100"]
+    volumes:
+      - ./config/loki/config.yml:/etc/loki/config.yml:ro
+      - ./data/loki:/loki
+
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    ports: ["3300:3000"]
+    volumes:
+      - ./config/tempo/config.yml:/etc/tempo/tempo.yaml:ro
+      - ./data/tempo:/var/tempo
+
+  alloy:
+    image: grafana/alloy:latest
+    # File name can be .yml; Alloy reads the River config from the path you pass.
+    command: ["run", "/etc/alloy/config.yml"]
+    ports: ["4317:4317", "4318:4318"]   # OTLP gRPC/HTTP for your apps (e.g., jarvy)
+    volumes:
+      - ./config/alloy/config.yml:/etc/alloy/config.yml:ro
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
