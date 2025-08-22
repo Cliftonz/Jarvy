@@ -59,14 +59,10 @@ fn main() {
             create_default_config()
         }
     }
-    if global_config.telemetry  {
-        global::shutdown_tracer_provider(); // Ensure all spans are exported before exit
-    }
     print_logo();
 
     println!(
-        "\t\tHi, I'm Jarvy by Autoscaler!
-Welcome to the codebase of the open-source autoscaling infrastructure for all!"
+        "\t\tHi, I'm Jarvy! I'm here to help you get your development environment set up."
     );
 
 }

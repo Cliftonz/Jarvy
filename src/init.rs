@@ -2,8 +2,8 @@ use std::fs;
 use std::io::Write;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Default)]
-struct CliConfig {
+#[derive(Serialize, Deserialize, Debug)]
+pub(crate) struct CliConfig {
     pub telemetry: bool,
     pub silent: bool
 }
@@ -17,7 +17,7 @@ impl Default for CliConfig {
     }
 }
 
-pub fn initialize() -> CliConfig {
+pub(crate) fn initialize() -> CliConfig {
 
     // check jarvy config for the usr
     let home_dir = dirs::home_dir().expect("Failed to get home directory");

@@ -1,0 +1,29 @@
+{
+  "language": "rust",
+  "packageManager": "cargo",
+  "commands": {
+    "format": "cargo fmt --all",
+    "lint": "cargo clippy --all-features -- -D warnings",
+    "check": "cargo check --verbose",
+    "test": "cargo test --verbose -- --show-output",
+    "build": "cargo build --release"
+  },
+  "commitConvention": "conventional-commits",
+  "ci": {
+    "workflows": [
+      "Test",
+      "Rust-Clippy-Analyzer",
+      "Build and Release"
+    ],
+    "targetOs": [
+      "macos-latest",
+      "ubuntu-latest",
+      "windows-latest"
+    ]
+  },
+  "review": {
+    "requireTestsForNewCode": true,
+    "requireFormatting": true,
+    "requireLintClean": true
+  }
+}
