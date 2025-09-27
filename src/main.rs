@@ -29,7 +29,7 @@ mod tools;
 )]
 struct Cli {
     #[clap(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -65,6 +65,9 @@ enum Commands {
         #[clap(short, long)]
         output: Option<String>,
     },
+    /// Catch-all for unknown subcommands and their args
+    #[clap(external_subcommand)]
+    External(Vec<String>),
 }
 
 #[derive(Serialize)]
@@ -104,13 +107,26 @@ fn main() {
     // Run the CLI Parser first so that -h/--help and -V/--version can exit without side effects
     let cli = Cli::parse();
 
+    // If user typed an unknown subcommand, handle it here (before any initialization)
+    if let Some(Commands::External(args)) = &cli.command {
+        if let Some(first) = args.first() {
+            eprintln!("Unrecognized command: '{}'", first);
+            eprintln!("Tip: run 'jarvy --help' to see available commands.");
+        } else {
+            eprintln!("Unrecognized command");
+        }
+        // Fall back to an interactive menu
+        user_select();
+        return;
+    }
+
     // Initialize after parsing arguments
     let global_config = initialize();
 
     init_logging(global_config.telemetry);
 
     match &cli.command {
-        Commands::Setup { file } => {
+        Some(Commands::Setup { file }) => {
             let config = Config::new(file);
 
             setup();
@@ -124,13 +140,13 @@ fn main() {
                 // Call the appropriate installer function here
             }
         }
-        Commands::Bootstrap {} => {}
-        Commands::Configure {} => create_default_config(),
-        Commands::Get {
+        Some(Commands::Bootstrap {}) => {}
+        Some(Commands::Configure {}) => create_default_config(),
+        Some(Commands::Get {
             file,
             output_format,
             output,
-        } => {
+        }) => {
             let config = Config::new(file);
             let reports = collect_reports(&config);
 
@@ -165,13 +181,20 @@ fn main() {
                 println!("{}", content);
             }
         }
-        _ => {
+        None => {
             user_select();
         }
+        Some(Commands::External(_)) => unreachable!("External subcommand handled before init"),
     }
 }
 
 fn user_select() {
+    // Test mode: avoid interactive prompts and side-effects
+    if std::env::var("JARVY_TEST_MODE").as_deref() == Ok("1") {
+        println!("TEST: user_select invoked");
+        return;
+    }
+
     print_logo();
 
     println!("\t\tHi, I'm Jarvy! I'm here to help you get your development environment set up.");

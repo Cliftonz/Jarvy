@@ -14,6 +14,15 @@ impl Default for CliConfig {
 }
 
 pub(crate) fn initialize() -> CliConfig {
+    // Test probe: allow tests to assert initialization ordering without side-effects
+    if std::env::var("JARVY_INIT_PROBE").as_deref() == Ok("1") {
+        eprintln!("TEST: initialize called");
+    }
+    // In test mode, avoid any filesystem side effects and just return defaults
+    if std::env::var("JARVY_TEST_MODE").as_deref() == Ok("1") {
+        return CliConfig::default();
+    }
+
     // check jarvy config for the usr
     let home_dir = dirs::home_dir().expect("Failed to get home directory");
 

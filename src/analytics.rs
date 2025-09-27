@@ -4,7 +4,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_stdout as stdout;
-use tracing::{error, span};
+// use tracing::{error, span};
 
 pub fn init_logging(enable_analytics: bool) {
     if enable_analytics {
