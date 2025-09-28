@@ -125,6 +125,29 @@ fn main() {
 
     init_logging(global_config.telemetry);
 
+    // Test-only telemetry smoke: if set, emit a span and an error, then flush.
+    if std::env::var("JARVY_TELEMETRY_SMOKE").as_deref() == Ok("1") {
+        // Emit a tracing span and events that the tracing->OTel bridge should forward.
+        let span = tracing::info_span!("telemetry_smoke");
+        let _entered = span.enter();
+        tracing::info!("telemetry smoke info");
+        tracing::error!("telemetry smoke error");
+        drop(_entered);
+
+        // Also emit an OpenTelemetry span directly to guarantee a trace is exported.
+        #[allow(deprecated)]
+        {
+            use opentelemetry::trace::Tracer as _;
+            let tracer = opentelemetry::global::tracer("jarvy-smoke");
+            tracer.in_span("otel_smoke_span", |_cx| {
+                // no-op work
+            });
+        }
+
+        // Give exporters a brief moment to ship data.
+        std::thread::sleep(std::time::Duration::from_millis(800));
+    }
+
     match &cli.command {
         Some(Commands::Setup { file }) => {
             let config = Config::new(file);

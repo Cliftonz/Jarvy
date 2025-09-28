@@ -7,6 +7,7 @@
 //   traces -> http://localhost:4318/v1/traces
 //   logs   -> http://localhost:4318/v1/logs
 
+use std::env;
 use tracing_subscriber::Layer;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -33,7 +34,7 @@ pub fn init_logging(enable_analytics: bool) {
         // - fmt (human-readable stdout for all levels)
         // - otel_logs_layer (errors only to OTEL logs)
         let telemetry = tracing_opentelemetry::layer();
-        let fmt_layer = tracing_subscriber::fmt::layer();
+        let fmt_layer = tracing_subscriber::fmt::layer().with_filter(LevelFilter::INFO);
         let subscriber = Registry::default()
             .with(telemetry)
             .with(fmt_layer)
@@ -68,9 +69,13 @@ fn build_otlp_tracer_provider() -> SdkTracerProvider {
         .build()
         .expect("failed to build OTLP span exporter");
 
-    SdkTracerProvider::builder()
-        .with_batch_exporter(exporter)
-        .build()
+    let mut provider_builder = SdkTracerProvider::builder();
+    if env::var("JARVY_TELEMETRY_SMOKE").as_deref() == Ok("1") {
+        provider_builder = provider_builder.with_simple_exporter(exporter);
+    } else {
+        provider_builder = provider_builder.with_batch_exporter(exporter);
+    }
+    provider_builder.build()
 }
 
 fn build_otlp_logger_provider() -> opentelemetry_sdk::logs::SdkLoggerProvider {
@@ -83,7 +88,11 @@ fn build_otlp_logger_provider() -> opentelemetry_sdk::logs::SdkLoggerProvider {
         .build()
         .expect("failed to build OTLP log exporter");
 
-    opentelemetry_sdk::logs::SdkLoggerProvider::builder()
-        .with_batch_exporter(exporter)
-        .build()
+    let mut logger_builder = opentelemetry_sdk::logs::SdkLoggerProvider::builder();
+    if env::var("JARVY_TELEMETRY_SMOKE").as_deref() == Ok("1") {
+        logger_builder = logger_builder.with_simple_exporter(exporter);
+    } else {
+        logger_builder = logger_builder.with_batch_exporter(exporter);
+    }
+    logger_builder.build()
 }

@@ -1,3 +1,4 @@
+name: jarvy
 services:
   grafana:
     image: grafana/grafana:latest
