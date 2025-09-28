@@ -8,6 +8,8 @@ use inquire::{InquireError, Select};
 use serde::Serialize;
 use std::fs;
 
+mod posthog;
+
 mod analytics;
 mod config;
 mod error_codes;
@@ -123,26 +125,56 @@ fn main() {
     // Initialize after parsing arguments
     let global_config = initialize();
 
-    init_logging(global_config.telemetry);
+    // Initialize PostHog client (no-op if disabled or no API key) before logging,
+    // so that the PostHog error layer can send events immediately.
+    let fingerprint = global_config
+        .settings
+        .fingerprint
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string());
+    posthog::init(global_config.settings.telemetry, fingerprint.clone());
 
-    // Test-only telemetry smoke: if set, emit a span and an error, then flush.
+    // Initialize logging (stderr for errors, stdout for other logs, OTLP logs if enabled)
+    init_logging(global_config.settings.telemetry);
+
+    // Send a cli_start event
+    {
+        let cmd_name = match &cli.command {
+            Some(Commands::Setup { .. }) => "setup",
+            Some(Commands::Bootstrap { .. }) => "bootstrap",
+            Some(Commands::Configure { .. }) => "configure",
+            Some(Commands::Get { .. }) => "get",
+            Some(Commands::External(..)) => "external",
+            None => "interactive",
+        };
+        let mut props = serde_json::Map::new();
+        props.insert(
+            "command".to_string(),
+            serde_json::Value::String(cmd_name.to_string()),
+        );
+        posthog::capture("cli_start", props);
+    }
+
+    // Install panic hook to report CLI errors to PostHog and stderr
+    {
+        std::panic::set_hook(Box::new(|info| {
+            // Print to stderr
+            eprintln!("Jarvy panic: {}", info);
+
+            // Send to PostHog
+            let mut props = serde_json::Map::new();
+            props.insert(
+                "panic".to_string(),
+                serde_json::Value::String(format!("{}", info)),
+            );
+            posthog::capture("cli_panic", props);
+        }));
+    }
+
+    // Test-only telemetry smoke: if set, emit only logging events and then flush.
     if std::env::var("JARVY_TELEMETRY_SMOKE").as_deref() == Ok("1") {
-        // Emit a tracing span and events that the tracing->OTel bridge should forward.
-        let span = tracing::info_span!("telemetry_smoke");
-        let _entered = span.enter();
         tracing::info!("telemetry smoke info");
         tracing::error!("telemetry smoke error");
-        drop(_entered);
-
-        // Also emit an OpenTelemetry span directly to guarantee a trace is exported.
-        #[allow(deprecated)]
-        {
-            use opentelemetry::trace::Tracer as _;
-            let tracer = opentelemetry::global::tracer("jarvy-smoke");
-            tracer.in_span("otel_smoke_span", |_cx| {
-                // no-op work
-            });
-        }
 
         // Give exporters a brief moment to ship data.
         std::thread::sleep(std::time::Duration::from_millis(800));
@@ -198,7 +230,7 @@ fn main() {
 
             if let Some(path) = output {
                 if let Err(e) = fs::write(path, content) {
-                    eprintln!("Failed to write output: {}", e);
+                    tracing::error!("Failed to write output: {}", e);
                 }
             } else {
                 println!("{}", content);

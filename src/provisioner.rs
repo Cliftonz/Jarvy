@@ -2,6 +2,8 @@ use std::env;
 use std::process::Command;
 use std::str;
 
+use crate::posthog;
+
 pub fn install_homebrew() {
     // Macos Only
     let test_brew_cmd = Command::new("brew")
@@ -11,6 +13,7 @@ pub fn install_homebrew() {
 
     if !test_brew_cmd.status.success() {
         println!("Installing Homebrew");
+        let start = posthog::now();
 
         let curl_cmd = r#"/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)""#;
         let _output = Command::new("sh")
@@ -44,8 +47,24 @@ pub fn install_homebrew() {
 
         if !after_install_test_cmd.status.success() {
             eprintln!("Error: Homebrew");
+            let mut props = serde_json::Map::new();
+            props.insert(
+                "tool".to_string(),
+                serde_json::Value::String("homebrew".to_string()),
+            );
+            posthog::capture("tool_install_error", props);
         } else {
             println!("Successfully installed Homebrew");
+            let mut props = serde_json::Map::new();
+            props.insert(
+                "tool".to_string(),
+                serde_json::Value::String("homebrew".to_string()),
+            );
+            props.insert(
+                "duration_ms".to_string(),
+                serde_json::Value::from(posthog::ms(start.elapsed()) as u64),
+            );
+            posthog::capture("tool_installed", props);
         }
     } else {
         println!("Homebrew is already installed");
@@ -134,6 +153,7 @@ pub fn install_docker() {
         // If docker not found or any other problem occurred
         if !test_docker_output.status.success() {
             println!("Installing Docker");
+            let start = posthog::now();
             let brew_install_output = Command::new("brew")
                 .arg("install")
                 .arg("docker")
@@ -151,9 +171,32 @@ pub fn install_docker() {
                 // If Docker now runs properly
                 if after_install_test_output.status.success() {
                     println!("Successfully installed Docker");
+                    let mut props = serde_json::Map::new();
+                    props.insert(
+                        "tool".to_string(),
+                        serde_json::Value::String("docker".to_string()),
+                    );
+                    props.insert(
+                        "duration_ms".to_string(),
+                        serde_json::Value::from(posthog::ms(start.elapsed()) as u64),
+                    );
+                    posthog::capture("tool_installed", props);
                 } else {
                     println!("Error: Docker");
+                    let mut props = serde_json::Map::new();
+                    props.insert(
+                        "tool".to_string(),
+                        serde_json::Value::String("docker".to_string()),
+                    );
+                    posthog::capture("tool_install_error", props);
                 }
+            } else {
+                let mut props = serde_json::Map::new();
+                props.insert(
+                    "tool".to_string(),
+                    serde_json::Value::String("docker".to_string()),
+                );
+                posthog::capture("tool_install_error", props);
             }
         } else {
             println!("Docker is already installed");
@@ -165,6 +208,7 @@ pub fn install_docker() {
 
 // TODO: figure out command and process to start from cli
 pub fn start_docker_infra() {
+    let start = posthog::now();
     let docker_compose_output = Command::new("docker-compose")
         .arg("-f")
         .arg("./docker//docker-compose.yml")
@@ -175,11 +219,21 @@ pub fn start_docker_infra() {
 
     if docker_compose_output.status.success() {
         println!("Successfully started Docker Infrastructure");
+        let mut props = serde_json::Map::new();
+        props.insert(
+            "duration_ms".to_string(),
+            serde_json::Value::from(posthog::ms(start.elapsed()) as u64),
+        );
+        posthog::capture("docker_infra_up", props);
     } else {
+        let err = String::from_utf8_lossy(&docker_compose_output.stderr).to_string();
         eprintln!(
             "An error occurred: \n\t {}. \nPlease run this from the root of your repository.",
-            String::from_utf8_lossy(&docker_compose_output.stderr)
+            err
         );
+        let mut props = serde_json::Map::new();
+        props.insert("stderr".to_string(), serde_json::Value::String(err));
+        posthog::capture("docker_infra_error", props);
     }
 }
 

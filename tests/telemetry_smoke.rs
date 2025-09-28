@@ -90,7 +90,7 @@ fn handle_client(
 }
 
 #[test]
-fn telemetry_smoke_traces_and_error_logs() -> Result<(), Box<dyn std::error::Error>> {
+fn telemetry_smoke_error_logs_only() -> Result<(), Box<dyn std::error::Error>> {
     // Try to bind the default compile-time OTLP HTTP port on both IPv4 and IPv6. If both are in use, skip.
     let listener_v4 = TcpListener::bind(("127.0.0.1", 4318)).ok();
     let listener_v6 = TcpListener::bind(("::1", 4318)).ok();
@@ -143,7 +143,7 @@ fn telemetry_smoke_traces_and_error_logs() -> Result<(), Box<dyn std::error::Err
                 }
                 thread::sleep(Duration::from_millis(10));
             }
-            if traces_seen_srv.load(Ordering::SeqCst) && logs_seen_srv.load(Ordering::SeqCst) {
+            if logs_seen_srv.load(Ordering::SeqCst) {
                 break;
             }
         }
@@ -159,9 +159,9 @@ fn telemetry_smoke_traces_and_error_logs() -> Result<(), Box<dyn std::error::Err
     // The CLI should exit successfully
     assert.success();
 
-    // Wait until server observes both endpoints or timeout
+    // Wait until server observes the logs endpoint or timeout
     let timeout = Instant::now() + Duration::from_secs(10);
-    while !(traces_seen.load(Ordering::SeqCst) && logs_seen.load(Ordering::SeqCst)) {
+    while !logs_seen.load(Ordering::SeqCst) {
         if Instant::now() > timeout {
             break;
         }
@@ -171,10 +171,6 @@ fn telemetry_smoke_traces_and_error_logs() -> Result<(), Box<dyn std::error::Err
     // Tear down server thread
     let _ = server.join();
 
-    assert!(
-        traces_seen.load(Ordering::SeqCst),
-        "no request to /v1/traces observed"
-    );
     assert!(
         logs_seen.load(Ordering::SeqCst),
         "no request to /v1/logs observed"

@@ -7,6 +7,7 @@ use inquire::Select;
 
 use crate::os_setup::set_up_os;
 use crate::outputs::{error_message, installing_dependency, success_message};
+use crate::posthog;
 use crate::provisioner::{
     check_and_install_git, install_docker, install_homebrew, start_docker_infra,
 };
@@ -14,6 +15,7 @@ use crate::provisioner::{
 // Main function
 pub fn setup() {
     const PLATFORM: &str = env::consts::OS;
+    let start = posthog::now();
 
     println!("Detecting Platform is: {}\n", PLATFORM);
 
@@ -38,6 +40,14 @@ pub fn setup() {
 
     start_docker_infra();
     refresh_shell(PLATFORM);
+
+    // Emit setup_complete with duration
+    let mut props = serde_json::Map::new();
+    props.insert(
+        "duration_ms".to_string(),
+        serde_json::Value::from(posthog::ms(start.elapsed()) as u64),
+    );
+    posthog::capture("setup_complete", props);
 }
 
 fn check_hard_dependencies(platform: &str) {

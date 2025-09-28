@@ -1,15 +1,35 @@
+use machineid_rs::{Encryption, HWIDComponent, IdBuilder};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
+use uuid::Uuid;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub(crate) struct CliConfig {
-    pub telemetry: bool,
+    pub settings: Settings,
 }
 
-impl Default for CliConfig {
+#[derive(Serialize, Deserialize, Debug)]
+pub(crate) struct Settings {
+    #[serde(default = "default_true")]
+    pub telemetry: bool,
+    #[serde(default)]
+    pub fingerprint: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for Settings {
     fn default() -> Self {
-        Self { telemetry: true }
+        Settings {
+            telemetry: true,
+            fingerprint: match get_hwid_fingerprint() {
+                Ok(hw_id) => Some(hw_id),
+                Err(_) => Some(Uuid::now_v7().to_string()),
+            },
+        }
     }
 }
 
@@ -34,9 +54,6 @@ pub(crate) fn initialize() -> CliConfig {
 
     // Create the .jarvy directory if it doesn't exist
     if !jarvy_dir.exists() {
-        // Sample configuration content
-        let config = CliConfig::default();
-
         fs::create_dir(&jarvy_dir).expect("Unable to create jarvy config file");
         println!(
             r"
@@ -50,30 +67,44 @@ pub(crate) fn initialize() -> CliConfig {
                 "
         );
 
-        // Define the path to the config.toml file
-        let config_file_path = jarvy_dir.join("config.toml");
-
-        // Sample configuration content
-        let config_content = r#"
-                [settings]
-                telemetry = true
-                "#;
-
-        // Write the content to the config.toml file
-        let mut file = fs::File::create(config_file_path).expect("Unable to create config file");
-        file.write_all(config_content.as_bytes())
+        // Write initial config
+        let config = CliConfig {
+            settings: Settings::default(),
+        };
+        let toml = toml::to_string(&config).expect("serialize default config");
+        let mut file = fs::File::create(&config_file_path).expect("Unable to create config file");
+        file.write_all(toml.as_bytes())
             .expect("Unable to write content to config file");
+    }
 
-        config
-    } else {
-        // Read the existing config.toml file
-        let config_content =
-            fs::read_to_string(&config_file_path).expect("Unable to read config file");
+    // Read existing or just-created config.toml
+    let mut config: CliConfig = {
+        let config_content = fs::read_to_string(&config_file_path).unwrap_or_default();
+        if config_content.trim().is_empty() {
+            CliConfig::default()
+        } else {
+            toml::from_str(&config_content).unwrap_or_default()
+        }
+    };
 
-        // Deserialize the config.toml file
-        let config: CliConfig =
-            toml::from_str(&config_content).expect("Unable to parse config file");
+    config
+}
 
-        config
+fn get_hwid_fingerprint() -> Result<String, Box<dyn std::error::Error>> {
+    let mut builder = IdBuilder::new(Encryption::SHA256);
+
+    // Add components for the fingerprint.
+    builder
+        .add_component(HWIDComponent::SystemID) // System UUID
+        .add_component(HWIDComponent::CPUCores) // CPU core count
+        .add_component(HWIDComponent::OSName) // Operating System name
+        .add_component(HWIDComponent::DriveSerial); // Main disk serial
+
+    // Build the ID with a custom key.
+    const SALT: &str = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15ac1e289f66085";
+    // The key should be constant for your application to ensure consistency.
+    match builder.build(SALT) {
+        Ok(hwid) => Ok(hwid),
+        _ => Err("No such HWID".into()),
     }
 }
