@@ -5,7 +5,10 @@ pub mod git;
 pub mod htop;
 pub mod jq;
 pub mod nvm;
+pub mod opentofu;
+pub mod packer;
 pub mod registry;
+pub mod terraform;
 pub mod tmux;
 pub mod tree;
 pub mod vscode;
@@ -35,4 +38,7 @@ pub fn register_all() {
     let _ = register_tool("tree", crate::tools::tree::tree::add_handler);
     let _ = register_tool("tmux", crate::tools::tmux::tmux::add_handler);
     let _ = register_tool("htop", crate::tools::htop::htop::add_handler);
+    let _ = register_tool("opentofu", crate::tools::opentofu::opentofu::add_handler);
+    let _ = register_tool("terraform", crate::tools::terraform::terraform::add_handler);
+    let _ = register_tool("packer", crate::tools::packer::packer::add_handler);
 }

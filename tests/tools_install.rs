@@ -18,6 +18,9 @@ fn tools_add_handlers_are_invocable() {
         ("tree", ""),
         ("tmux", ""),
         ("htop", ""),
+        ("opentofu", ""),
+        ("terraform", ""),
+        ("packer", ""),
     ];
 
     for (name, hint) in cases {
