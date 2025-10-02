@@ -8,14 +8,14 @@ use inquire::{InquireError, Select};
 use serde::Serialize;
 use std::fs;
 
-mod posthog;
-
 mod analytics;
+mod bootstrap;
 mod config;
 mod error_codes;
 mod init;
 mod os_setup;
 mod outputs;
+mod posthog;
 mod provisioner;
 mod report;
 mod setup;
@@ -213,7 +213,9 @@ fn main() {
                 // Call the appropriate installer function here
             }
         }
-        Some(Commands::Bootstrap {}) => {}
+        Some(Commands::Bootstrap {}) => {
+            bootstrap::bootstrap();
+        }
         Some(Commands::Configure {}) => create_default_config(),
         Some(Commands::Get {
             file,

@@ -1,8 +1,9 @@
-pub mod common;
-// pub mod docker;
 pub mod brew;
+pub mod common;
+pub mod docker;
 pub mod git;
 pub mod registry;
+pub mod vscode;
 
 #[allow(unused_imports)]
 pub use common::{
@@ -20,5 +21,6 @@ pub fn register_all() {
     // Ignore duplicate returns; the last one wins.
     let _ = register_tool("git", crate::tools::git::git::add_handler);
     let _ = register_tool("brew", crate::tools::brew::brew::add_handler);
-    // let _ = register_tool("docker", crate::tools::docker::docker::add_handler);
+    let _ = register_tool("vscode", crate::tools::vscode::vscode::add_handler);
+    let _ = register_tool("docker", crate::tools::docker::docker::add_handler);
 }

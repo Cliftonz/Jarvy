@@ -44,13 +44,14 @@ fn install_macos() -> Result<(), InstallError> {
 
 #[cfg(target_os = "linux")]
 fn install_linux() -> Result<(), InstallError> {
-    let apt = crate::tools::common::require_any(
-        &["apt", "apt-get"],
-        "Need apt or apt-get on PATH for Debian/Ubuntu",
-    )?;
-    crate::tools::common::run("sudo", &[apt, "update"])?;
-    crate::tools::common::run("sudo", &[apt, "install", "-y", "git"])?;
-    Ok(())
+    if let Some(pm) = crate::tools::common::detect_linux_pm() {
+        let _ = crate::tools::common::PkgOps::update(pm, true);
+        crate::tools::common::PkgOps::install(pm, "git", true)
+    } else {
+        Err(InstallError::Prereq(
+            "No supported Linux package manager on PATH (apt/dnf/yum/zypper/pacman/apk)",
+        ))
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -123,18 +124,17 @@ mod tests {
         }
     }
 
-    // Linux: Debian/Ubuntu path expects apt or apt-get; if both missing, expect Prereq.
+    // Linux: use detected package manager; if none detected, expect Prereq.
     // Otherwise, it should not be Unsupported (commands may fail in CI due to permissions).
     #[cfg(target_os = "linux")]
     #[test]
     fn git_linux_expected_outcome() {
-        let has_apt = crate::tools::common::has("apt");
-        let has_apt_get = crate::tools::common::has("apt-get");
+        let has_pm = crate::tools::common::detect_linux_pm().is_some();
         let res = ensure("");
-        if !has_apt && !has_apt_get {
+        if !has_pm {
             assert!(
                 matches!(res, Err(InstallError::Prereq(_))),
-                "Expected Prereq when apt/apt-get are absent"
+                "Expected Prereq when no supported package manager is detected"
             );
         } else {
             assert!(

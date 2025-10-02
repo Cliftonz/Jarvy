@@ -173,6 +173,7 @@ pub fn detect_linux_pm() -> Option<PackageManager> {
     None
 }
 
+#[allow(dead_code)]
 pub struct PkgOps {
     name: &'static str,
 }

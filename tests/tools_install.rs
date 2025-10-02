@@ -7,7 +7,7 @@ fn tools_add_handlers_are_invocable() {
     jarvy::tools::register_all();
 
     // (name, version_hint) pairs; keep hints minimal/generic
-    let cases: &[(&str, &str)] = &[("git", ""), ("brew", "")];
+    let cases: &[(&str, &str)] = &[("git", ""), ("brew", ""), ("vscode", ""), ("docker", "")];
 
     for (name, hint) in cases {
         let res = jarvy::tools::add(name, hint);
