@@ -15,6 +15,7 @@ fn tools_add_handlers_are_invocable() {
         ("wget", ""),
         ("nvm", ""),
         ("tree", ""),
+        ("tmux", ""),
     ];
 
     for (name, hint) in cases {

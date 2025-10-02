@@ -4,6 +4,7 @@ pub mod docker;
 pub mod git;
 pub mod nvm;
 pub mod registry;
+pub mod tmux;
 pub mod tree;
 pub mod vscode;
 pub mod wget;
@@ -29,4 +30,5 @@ pub fn register_all() {
     let _ = register_tool("wget", crate::tools::wget::wget::add_handler);
     let _ = register_tool("nvm", crate::tools::nvm::nvm::add_handler);
     let _ = register_tool("tree", crate::tools::tree::tree::add_handler);
+    let _ = register_tool("tmux", crate::tools::tmux::tmux::add_handler);
 }
