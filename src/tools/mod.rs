@@ -2,8 +2,11 @@ pub mod brew;
 pub mod common;
 pub mod docker;
 pub mod git;
+pub mod nvm;
 pub mod registry;
+pub mod tree;
 pub mod vscode;
+pub mod wget;
 
 #[allow(unused_imports)]
 pub use common::{
@@ -23,4 +26,7 @@ pub fn register_all() {
     let _ = register_tool("brew", crate::tools::brew::brew::add_handler);
     let _ = register_tool("vscode", crate::tools::vscode::vscode::add_handler);
     let _ = register_tool("docker", crate::tools::docker::docker::add_handler);
+    let _ = register_tool("wget", crate::tools::wget::wget::add_handler);
+    let _ = register_tool("nvm", crate::tools::nvm::nvm::add_handler);
+    let _ = register_tool("tree", crate::tools::tree::tree::add_handler);
 }
