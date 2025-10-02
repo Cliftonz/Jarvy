@@ -7,10 +7,13 @@ pub mod jq;
 pub mod k6;
 pub mod make;
 pub mod ngrok;
+pub mod nvim;
 pub mod nvm;
 pub mod opentofu;
 pub mod packer;
 pub mod registry;
+pub mod rust;
+pub mod talosctl;
 pub mod terraform;
 pub mod tmux;
 pub mod tree;
@@ -49,4 +52,7 @@ pub fn register_all() {
     let _ = register_tool("make", crate::tools::make::make::add_handler);
     let _ = register_tool("k6", crate::tools::k6::k6::add_handler);
     let _ = register_tool("ngrok", crate::tools::ngrok::ngrok::add_handler);
+    let _ = register_tool("nvim", crate::tools::nvim::nvim::add_handler);
+    let _ = register_tool("rust", crate::tools::rust::rust::add_handler);
+    let _ = register_tool("talosctl", crate::tools::talosctl::talosctl::add_handler);
 }

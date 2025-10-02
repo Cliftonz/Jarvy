@@ -25,6 +25,9 @@ fn tools_add_handlers_are_invocable() {
         ("make", ""),
         ("k6", ""),
         ("ngrok", ""),
+        ("nvim", ""),
+        ("rust", ""),
+        ("talosctl", ""),
     ];
 
     for (name, hint) in cases {
