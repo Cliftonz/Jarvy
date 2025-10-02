@@ -138,7 +138,7 @@ fn refresh_shell(platform: &str) {
 
             if output.status.success() {
                 let shell = env::var("SHELL").expect("SHELL is not set");
-                Command::new(shell).exec();
+                let _ = Command::new(shell).exec();
             } else {
                 eprintln!("Error: {}", String::from_utf8_lossy(&output.stderr));
                 exit(1);

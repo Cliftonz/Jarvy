@@ -6,6 +6,8 @@ pub enum InstallError {
     Unsupported,
     #[error("prerequisite missing: {0}")]
     Prereq(&'static str),
+    #[error("invalid permissions: {0}")]
+    InvalidPermissions(&'static str),
     #[error("command failed: {cmd} (code: {code:?})\n{stderr}")]
     CommandFailed {
         cmd: String,
@@ -48,7 +50,9 @@ pub fn run(cmd: &str, args: &[&str]) -> Result<Output, InstallError> {
         use std::io::ErrorKind::*;
         match e.kind() {
             NotFound => InstallError::Prereq("required command not found on PATH"),
-            PermissionDenied => InstallError::Prereq("operation requires elevated privileges"),
+            PermissionDenied => {
+                InstallError::InvalidPermissions("operation requires elevated privileges")
+            }
             _ => InstallError::Io(e),
         }
     })?;
