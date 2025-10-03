@@ -1,3 +1,4 @@
+pub mod atlas;
 pub mod awscli;
 pub mod brew;
 pub mod common;
@@ -18,6 +19,7 @@ pub mod opentofu;
 pub mod packer;
 pub mod python;
 pub mod registry;
+pub mod ripgrep;
 pub mod rust;
 pub mod talosctl;
 pub mod terraform;
@@ -27,6 +29,7 @@ pub mod tree;
 pub mod up;
 pub mod vscode;
 pub mod wget;
+pub mod xz;
 pub mod yq;
 pub mod zsh;
 
@@ -73,4 +76,7 @@ pub fn register_all() {
     let _ = register_tool("tilt", crate::tools::tilt::tilt::add_handler);
     let _ = register_tool("up", crate::tools::up::up::add_handler);
     let _ = register_tool("zsh", crate::tools::zsh::zsh::add_handler);
+    let _ = register_tool("atlas", crate::tools::atlas::atlas::add_handler);
+    let _ = register_tool("ripgrep", crate::tools::ripgrep::ripgrep::add_handler);
+    let _ = register_tool("xz", crate::tools::xz::xz::add_handler);
 }

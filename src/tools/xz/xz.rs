@@ -1,17 +1,16 @@
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::tools::common::run;
 use crate::tools::common::{InstallError, has};
 
-/// Ensure `tilt` CLI is available. We don't enforce a specific version; having
-/// the command present is sufficient for typical workflows.
+/// Ensure `xz` is available.
 pub fn ensure(_min_hint: &str) -> Result<(), InstallError> {
-    if has("tilt") {
+    if has("xz") {
         return Ok(());
     }
     install()
 }
 
-/// Registry adapter: allows tools::add("tilt", version) to dispatch here
+/// Registry adapter: allows tools::add("xz", version) to dispatch here
 pub fn add_handler(min_hint: &str) -> Result<(), InstallError> {
     let _ = min_hint;
     ensure("")
@@ -41,36 +40,36 @@ fn install_macos() -> Result<(), InstallError> {
             "Homebrew not found. Install https://brew.sh and re-run.",
         ));
     }
-    // Official formula name
-    run("brew", &["install", "tilt"])?;
+    run("brew", &["install", "xz"])?;
     Ok(())
 }
 
 #[cfg(target_os = "linux")]
 fn install_linux() -> Result<(), InstallError> {
-    // Prefer distro package if available (name: tilt). Not all distros provide it.
     if let Some(pm) = crate::tools::common::detect_linux_pm() {
         let _ = crate::tools::common::PkgOps::update(pm, true);
-        let try_pkg = crate::tools::common::PkgOps::install(pm, "tilt", true);
-        if try_pkg.is_ok() {
-            return try_pkg;
+        // Debian/Ubuntu use xz-utils; others often use xz. We try xz first, falling back to xz-utils.
+        if crate::tools::common::PkgOps::install(pm, "xz", true).is_ok() {
+            return Ok(());
         }
+        crate::tools::common::PkgOps::install(pm, "xz-utils", true)
+    } else {
+        Err(InstallError::Prereq(
+            "No supported Linux package manager on PATH (apt/dnf/yum/zypper/pacman/apk)",
+        ))
     }
-    // Fallback: if Homebrew is present on Linux, use it
-    if has("brew") {
-        return run("brew", &["install", "tilt"]).map(|_| ());
-    }
-    Err(InstallError::Prereq(
-        "Unable to install tilt automatically on this platform. Install via your package manager or Homebrew (brew install tilt).",
-    ))
 }
 
 #[cfg(target_os = "windows")]
 fn install_windows() -> Result<(), InstallError> {
-    // No widely supported official Windows package in this project.
-    Err(InstallError::Prereq(
-        "tilt installation on Windows is not automated. Consider using WSL or install manually from tilt.dev.",
-    ))
+    if !has("winget") {
+        return Err(InstallError::Prereq(
+            "winget not found. Install Windows Package Manager, then re-run.",
+        ));
+    }
+    // Common xz package on winget (XZUtils.XZ). If this fails in practice, users can install via MSYS2/Chocolatey.
+    run("winget", &["install", "-e", "--id", "XZUtils.XZ"])?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -78,7 +77,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ensure_tilt_no_panic() {
+    fn ensure_xz_no_panic() {
         let res = ensure("");
         assert!(res.is_ok() || res.is_err());
     }
