@@ -21,9 +21,12 @@ pub mod nvim;
 pub mod nvm;
 pub mod opentofu;
 pub mod packer;
+pub mod php;
+pub mod powershell;
 pub mod python;
 pub mod registry;
 pub mod ripgrep;
+pub mod ruby;
 pub mod rust;
 pub mod talosctl;
 pub mod terraform;
@@ -89,4 +92,12 @@ pub fn register_all() {
     let _ = register_tool("dotnet", crate::tools::dotnet::dotnet::add_handler);
     let _ = register_tool("elixir", crate::tools::elixir::elixir::add_handler);
     let _ = register_tool("gleam", crate::tools::gleam::gleam::add_handler);
+
+    // Language runtimes and shells
+    let _ = register_tool("php", crate::tools::php::php::add_handler);
+    let _ = register_tool("ruby", crate::tools::ruby::ruby::add_handler);
+    let _ = register_tool(
+        "powershell",
+        crate::tools::powershell::powershell::add_handler,
+    );
 }
