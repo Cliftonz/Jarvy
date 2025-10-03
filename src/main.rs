@@ -194,6 +194,9 @@ fn main() {
         tracing::info!("telemetry smoke info");
         tracing::error!("telemetry smoke error");
 
+        // Nudge the test collector: make a direct best-effort POST to /v1/logs.
+        crate::analytics::send_otlp_smoke_probe();
+
         // Give exporters a brief moment to ship data.
         std::thread::sleep(std::time::Duration::from_millis(800));
     }

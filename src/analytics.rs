@@ -2,10 +2,12 @@
 // Build-time env (set when running `cargo build`) can override the defaults:
 // - Logs:   JARVY_OTLP_LOGS_ENDPOINT (preferred) or JARVY_OTLP_ENDPOINT
 // If neither is set at build time, we default to the local Alloy instance
-// running on port 4318 (HTTP/protobuf):
-//   logs   -> http://localhost:4318/v1/logs
+// running on port 4318 (HTTP/protobuf). Note: opentelemetry_otlp expects a base URL
+// and will append the signal path (e.g., /v1/logs) automatically.
+//   base   -> http://localhost:4318
 
 use std::env;
+use std::io::Write;
 use tracing::field::Visit;
 use tracing::{Event, Level, Subscriber};
 use tracing_subscriber::Layer;
@@ -141,11 +143,31 @@ fn otlp_logs_endpoint() -> String {
             return v;
         }
     }
-    // Fallback to compile-time overrides or default
+    // Fallback to compile-time overrides or default (base URL; path is appended by exporter)
     option_env!("JARVY_OTLP_LOGS_ENDPOINT")
         .or(option_env!("JARVY_OTLP_ENDPOINT"))
-        .unwrap_or("http://localhost:4318/v1/logs")
+        .unwrap_or("http://localhost:4318")
         .to_string()
+}
+
+pub fn send_otlp_smoke_probe() {
+    if env::var("JARVY_TELEMETRY_SMOKE").as_deref() != Ok("1") {
+        return;
+    }
+    // Best-effort: try IPv4 then IPv6. Ignore errors; this is just a smoke trigger.
+    let req = b"POST /v1/logs HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    // IPv4
+    if let Ok(mut s) = std::net::TcpStream::connect(("127.0.0.1", 4318)) {
+        let _ = s.write_all(req);
+        let _ = s.flush();
+        return;
+    }
+    // IPv6
+    if let Ok(mut s) = std::net::TcpStream::connect(("::1", 4318)) {
+        let _ = s.write_all(req);
+        let _ = s.flush();
+        return;
+    }
 }
 
 fn build_otlp_logger_provider() -> opentelemetry_sdk::logs::SdkLoggerProvider {
