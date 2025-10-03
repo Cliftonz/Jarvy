@@ -40,7 +40,7 @@ jobs:
         env:
           JARVY_BIN: target/release/jarvy
           PACKAGE_MANAGER: ${{ matrix.pm }}
-        run: cargo test --test tools_matrix -- --nocapture
+        run: cargo test --tests -- --nocapture
 
   native-host:
     name: Native host (brew on macOS, winget on Windows)
