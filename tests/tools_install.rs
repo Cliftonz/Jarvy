@@ -31,6 +31,9 @@ fn tools_add_handlers_are_invocable() {
         ("python", ""),
         ("node", ""),
         ("go", ""),
+        ("awscli", ""),
+        ("cue", ""),
+        ("iterm2", ""),
     ];
 
     for (name, hint) in cases {

@@ -1,9 +1,12 @@
+pub mod awscli;
 pub mod brew;
 pub mod common;
+pub mod cue;
 pub mod docker;
 pub mod git;
 pub mod go;
 pub mod htop;
+pub mod iterm2;
 pub mod jq;
 pub mod k6;
 pub mod make;
@@ -61,4 +64,7 @@ pub fn register_all() {
     let _ = register_tool("python", crate::tools::python::python::add_handler);
     let _ = register_tool("node", crate::tools::node::node::add_handler);
     let _ = register_tool("go", crate::tools::go::go::add_handler);
+    let _ = register_tool("awscli", crate::tools::awscli::awscli::add_handler);
+    let _ = register_tool("cue", crate::tools::cue::cue::add_handler);
+    let _ = register_tool("iterm2", crate::tools::iterm2::iterm2::add_handler);
 }
