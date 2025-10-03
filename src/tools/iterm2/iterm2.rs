@@ -1,4 +1,6 @@
-use crate::tools::common::{InstallError, has, run};
+use crate::tools::common::InstallError;
+#[cfg(target_os = "macos")]
+use crate::tools::common::{has, run};
 
 /// Ensure iTerm2 is installed. Only supported on macOS via Homebrew cask.
 /// Version hint is ignored.

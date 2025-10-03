@@ -1,4 +1,6 @@
-use crate::tools::common::{InstallError, has, run};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use crate::tools::common::run;
+use crate::tools::common::{InstallError, has};
 
 /// Ensure Homebrew is installed. On macOS and Linux, attempts installation if missing.
 /// Not supported on Windows.

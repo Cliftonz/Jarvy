@@ -1,4 +1,6 @@
-use crate::tools::common::{InstallError, has, run};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use crate::tools::common::run;
+use crate::tools::common::{InstallError, has};
 
 /// Ensure CUE language CLI is installed. Version hint is ignored; we install
 /// the latest available from the platform package manager.

@@ -1,4 +1,6 @@
-use crate::tools::common::{InstallError, has, run};
+#[cfg(target_os = "macos")]
+use crate::tools::common::run;
+use crate::tools::common::{InstallError, has};
 
 /// Ensure `htop` is installed. We don't enforce a specific version; presence is enough.
 pub fn ensure(_min_hint: &str) -> Result<(), InstallError> {
