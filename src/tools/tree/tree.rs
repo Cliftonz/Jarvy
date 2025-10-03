@@ -1,4 +1,6 @@
-use crate::tools::common::{InstallError, has, run};
+#[cfg(target_os = "macos")]
+use crate::tools::common::run;
+use crate::tools::common::{InstallError, has};
 
 /// Ensure `tree` command is available. `min_hint` is ignored since
 /// the system-provided package is sufficient for most workflows.

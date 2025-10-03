@@ -1,4 +1,6 @@
-use crate::tools::common::{InstallError, has, run};
+#[cfg(target_os = "macos")]
+use crate::tools::common::run;
+use crate::tools::common::{InstallError, has};
 
 /// Ensure `tmux` is available. We don't enforce a specific version; having
 /// the command present is sufficient for typical workflows.

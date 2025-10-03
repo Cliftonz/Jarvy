@@ -1,4 +1,6 @@
-use crate::tools::common::{InstallError, has, run};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use crate::tools::common::run;
+use crate::tools::common::{InstallError, has};
 
 /// Ensure `yq` (mikefarah/yq) is installed. Version hint is ignored; we just
 /// ensure the command is available.
