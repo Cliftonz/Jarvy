@@ -46,7 +46,7 @@ fn install_macos() -> Result<(), InstallError> {
 #[cfg(target_os = "linux")]
 fn install_linux() -> Result<(), InstallError> {
     if let Some(pm) = crate::tools::common::detect_linux_pm() {
-        let _ = crate::tools::common::PkgOps::update(pm, true);
+        let _ = crate::tools::common::PkgOps::update(pm, crate::tools::common::default_use_sudo());
         let pkg = match pm {
             crate::tools::common::PackageManager::Apt => "golang",
             crate::tools::common::PackageManager::Dnf => "golang",
@@ -56,7 +56,7 @@ fn install_linux() -> Result<(), InstallError> {
             crate::tools::common::PackageManager::Apk => "go",
             _ => "golang",
         };
-        crate::tools::common::PkgOps::install(pm, pkg, true)
+        crate::tools::common::PkgOps::install(pm, pkg, crate::tools::common::default_use_sudo())
     } else {
         Err(InstallError::Prereq(
             "No supported Linux package manager on PATH (apt/dnf/yum/zypper/pacman/apk)",

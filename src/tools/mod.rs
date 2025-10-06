@@ -42,8 +42,8 @@ pub mod zsh;
 
 #[allow(unused_imports)]
 pub use common::{
-    InstallError, Os, PackageManager, PkgOps, cmd_satisfies, current_os, has, require, require_any,
-    run,
+    InstallError, Os, PackageManager, PkgOps, cmd_satisfies, current_os, default_use_sudo, has,
+    require, require_any, run, set_default_use_sudo,
 };
 
 #[allow(unused_imports)]

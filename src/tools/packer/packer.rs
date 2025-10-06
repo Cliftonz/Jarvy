@@ -49,9 +49,13 @@ fn install_macos() -> Result<(), InstallError> {
 fn install_linux() -> Result<(), InstallError> {
     if let Some(pm) = crate::tools::common::detect_linux_pm() {
         // Best effort package index update
-        let _ = crate::tools::common::PkgOps::update(pm, true);
+        let _ = crate::tools::common::PkgOps::update(pm, crate::tools::common::default_use_sudo());
         // Try common package name
-        crate::tools::common::PkgOps::install(pm, "packer", true)
+        crate::tools::common::PkgOps::install(
+            pm,
+            "packer",
+            crate::tools::common::default_use_sudo(),
+        )
     } else {
         Err(InstallError::Prereq(
             "No supported Linux package manager on PATH (apt/dnf/yum/zypper/pacman/apk)",

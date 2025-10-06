@@ -47,8 +47,12 @@ fn install_macos() -> Result<(), InstallError> {
 fn install_linux() -> Result<(), InstallError> {
     // Try distro package manager first
     if let Some(pm) = crate::tools::common::detect_linux_pm() {
-        let _ = crate::tools::common::PkgOps::update(pm, true);
-        let res = crate::tools::common::PkgOps::install(pm, "awscli", true);
+        let _ = crate::tools::common::PkgOps::update(pm, crate::tools::common::default_use_sudo());
+        let res = crate::tools::common::PkgOps::install(
+            pm,
+            "awscli",
+            crate::tools::common::default_use_sudo(),
+        );
         if res.is_ok() {
             return res;
         }

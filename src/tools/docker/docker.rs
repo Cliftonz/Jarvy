@@ -60,7 +60,7 @@ fn install_windows() -> Result<(), InstallError> {
 fn install_linux() -> Result<(), InstallError> {
     if let Some(pm) = crate::tools::common::detect_linux_pm() {
         // Best-effort update (ignore failure to keep minimal behavior)
-        let _ = crate::tools::common::PkgOps::update(pm, true);
+        let _ = crate::tools::common::PkgOps::update(pm, crate::tools::common::default_use_sudo());
         // Package names vary; prefer distro packages over vendor repos for simplicity
         let pkg = match pm {
             crate::tools::common::PackageManager::Apt => "docker.io",
@@ -71,7 +71,7 @@ fn install_linux() -> Result<(), InstallError> {
             crate::tools::common::PackageManager::Apk => "docker",
             _ => "docker",
         };
-        crate::tools::common::PkgOps::install(pm, pkg, true)
+        crate::tools::common::PkgOps::install(pm, pkg, crate::tools::common::default_use_sudo())
     } else {
         Err(InstallError::Prereq(
             "No supported Linux package manager on PATH (apt/dnf/yum/zypper/pacman/apk)",

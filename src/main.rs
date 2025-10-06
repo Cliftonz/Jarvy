@@ -208,17 +208,21 @@ fn main() {
         Some(Commands::Setup { file }) => {
             let config = Config::new(file);
 
+            // Set the global default for sudo usage based on config
+            crate::tools::set_default_use_sudo(config.use_sudo());
+
             setup();
 
             let tools = config.get_tool_configs();
+
             for (id, tool) in tools {
                 // If the tool is not in the registry, log and guide the user
-                if crate::tools::get_tool(&tool.name).is_none() {
+                if tools::get_tool(&tool.name).is_none() {
                     let msg = format!(
                         "We do not currently have support for {} package but we have logged it and will be adding it soon.",
                         tool.name
                     );
-                    if crate::posthog::telemetry_enabled() {
+                    if posthog::telemetry_enabled() {
                         let mut props = serde_json::Map::new();
                         props.insert(
                             "tool".to_string(),
@@ -232,7 +236,7 @@ fn main() {
                             "source".to_string(),
                             serde_json::Value::String("config".to_string()),
                         );
-                        crate::posthog::capture_error("unknown_tool_in_config", &msg, props);
+                        posthog::capture_error("unknown_tool_in_config", &msg, props);
                         eprintln!("{}", msg);
                     } else {
                         eprintln!("{}", msg);
@@ -247,7 +251,35 @@ fn main() {
                     "Installing {}: {} version {} using package manager: {}",
                     id, tool.name, tool.version, tool.version_manager
                 );
-                // Call the appropriate installer function here
+
+                match tools::add(&tool.name, &tool.version) {
+                    Ok(()) => {
+                        println!("Successfully installed {} ({})", tool.name, tool.version);
+                    }
+                    Err(e) => {
+                        let msg = format!(
+                            "Failed to install {} ({}): {:?}",
+                            tool.name, tool.version, e
+                        );
+                        eprintln!("{}", msg);
+                        if posthog::telemetry_enabled() {
+                            let mut props = serde_json::Map::new();
+                            props.insert(
+                                "tool".to_string(),
+                                serde_json::Value::String(tool.name.clone()),
+                            );
+                            props.insert(
+                                "version_hint".to_string(),
+                                serde_json::Value::String(tool.version.clone()),
+                            );
+                            props.insert(
+                                "error".to_string(),
+                                serde_json::Value::String(format!("{:?}", e)),
+                            );
+                            posthog::capture_error("tool_install_failed", &msg, props);
+                        }
+                    }
+                }
             }
         }
         Some(Commands::Bootstrap {}) => {

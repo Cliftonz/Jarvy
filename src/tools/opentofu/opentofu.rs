@@ -49,11 +49,19 @@ fn install_linux() -> Result<(), InstallError> {
     // Prefer well-known distro package managers
     if let Some(pm) = crate::tools::common::detect_linux_pm() {
         // Best-effort update
-        let _ = crate::tools::common::PkgOps::update(pm, true);
+        let _ = crate::tools::common::PkgOps::update(pm, crate::tools::common::default_use_sudo());
         // Try common package names: "opentofu" first, then fallback to "tofu"
-        match crate::tools::common::PkgOps::install(pm, "opentofu", true) {
+        match crate::tools::common::PkgOps::install(
+            pm,
+            "opentofu",
+            crate::tools::common::default_use_sudo(),
+        ) {
             Ok(()) => Ok(()),
-            Err(_) => crate::tools::common::PkgOps::install(pm, "tofu", true),
+            Err(_) => crate::tools::common::PkgOps::install(
+                pm,
+                "tofu",
+                crate::tools::common::default_use_sudo(),
+            ),
         }
     } else {
         Err(InstallError::Prereq(

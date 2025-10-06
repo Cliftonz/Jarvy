@@ -49,10 +49,14 @@ fn install_macos() -> Result<(), InstallError> {
 #[cfg(target_os = "linux")]
 fn install_linux() -> Result<(), InstallError> {
     if let Some(pm) = crate::tools::common::detect_linux_pm() {
-        let _ = crate::tools::common::PkgOps::update(pm, true);
+        let _ = crate::tools::common::PkgOps::update(pm, crate::tools::common::default_use_sudo());
         // Many distros require Microsoft's repo for up-to-date PowerShell.
         // We attempt a best-effort install using the package name "powershell".
-        crate::tools::common::PkgOps::install(pm, "powershell", true)
+        crate::tools::common::PkgOps::install(
+            pm,
+            "powershell",
+            crate::tools::common::default_use_sudo(),
+        )
     } else {
         Err(InstallError::Prereq(
             "No supported Linux package manager on PATH (apt/dnf/yum/zypper/pacman/apk)",

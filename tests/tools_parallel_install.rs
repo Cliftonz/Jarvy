@@ -7,13 +7,44 @@
 // - On macOS and Windows, GUI/cask installers (e.g., Docker Desktop) or winget prompts
 //   may cause flakiness in CI, so we scope this test to Linux only.
 
-#[cfg(target_os = "linux")]
 #[test]
 fn install_git_docker_jq_in_parallel() {
     use std::thread;
 
-    // Make sure registry has the built-in tools
+    // Make sure the registry has the built-in tools
     jarvy::tools::register_all();
+
+    // Environment guard: require sudo or root for package installs
+    let is_root = std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0")
+        .unwrap_or(false);
+    if !is_root {
+        let has_sudo = std::process::Command::new("sudo")
+            .arg("--version")
+            .output()
+            .is_ok();
+        if !has_sudo {
+            eprintln!(
+                "Skipping test: sudo not available and not running as root; cannot install packages"
+            );
+            return;
+        }
+        // Ensure sudo works non-interactively (no password prompt)
+        let sudo_works = std::process::Command::new("sudo")
+            .arg("-n")
+            .arg("true")
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !sudo_works {
+            eprintln!(
+                "Skipping test: sudo requires a password or TTY; cannot install packages non-interactively"
+            );
+            return;
+        }
+    }
 
     let tool_names = ["git", "docker", "jq"];
 

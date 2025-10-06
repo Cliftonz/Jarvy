@@ -5,6 +5,7 @@
 // The CI workflow sets JARVY_BIN to the path of the built jarvy binary.
 // We simply invoke `--help` to ensure the binary runs on the host.
 
+use assert_cmd::cargo::cargo_bin;
 use std::env;
 use std::path::PathBuf;
 use std::process::Command;
@@ -13,17 +14,8 @@ fn jarvy_bin_path() -> PathBuf {
     if let Ok(p) = env::var("JARVY_BIN") {
         return PathBuf::from(p);
     }
-    // Fallback for local runs: assume release binary in target/release
-    let mut p = PathBuf::from("target/release");
-    #[cfg(windows)]
-    {
-        p.push("jarvy.exe");
-    }
-    #[cfg(not(windows))]
-    {
-        p.push("jarvy");
-    }
-    p
+    // Resolve the host-correct path to the binary built by Cargo for this test run
+    cargo_bin("jarvy")
 }
 
 #[test]

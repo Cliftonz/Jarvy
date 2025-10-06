@@ -1,4 +1,5 @@
 use std::process::{Command, Output};
+use std::sync::OnceLock;
 
 #[derive(thiserror::Error, Debug)]
 pub enum InstallError {
@@ -42,6 +43,24 @@ pub fn current_os() -> Os {
     #[cfg(target_os = "windows")]
     {
         Os::Windows
+    }
+}
+
+// Global default for whether to use sudo on POSIX installs. Can be set from Config in main.
+static USE_SUDO_DEFAULT: OnceLock<bool> = OnceLock::new();
+
+pub fn set_default_use_sudo(val: bool) {
+    let _ = USE_SUDO_DEFAULT.set(val);
+}
+
+pub fn default_use_sudo() -> bool {
+    if let Some(v) = USE_SUDO_DEFAULT.get() {
+        *v
+    } else {
+        match current_os() {
+            Os::Linux => true,
+            Os::Macos | Os::Windows => false,
+        }
     }
 }
 
@@ -195,7 +214,6 @@ pub struct PkgOps {
 }
 
 impl PkgOps {
-    // use_sudo should come from config.use_sudo()
     pub fn update(pm: PackageManager, use_sudo: bool) -> Result<(), InstallError> {
         match pm {
             PackageManager::Apt => {
@@ -228,7 +246,6 @@ impl PkgOps {
         Ok(())
     }
 
-    // use_sudo should come from config.use_sudo()
     pub fn install(pm: PackageManager, pkg: &str, use_sudo: bool) -> Result<(), InstallError> {
         match pm {
             PackageManager::Apt => {

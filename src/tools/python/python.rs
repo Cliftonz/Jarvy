@@ -48,7 +48,7 @@ fn install_macos() -> Result<(), InstallError> {
 #[cfg(target_os = "linux")]
 fn install_linux() -> Result<(), InstallError> {
     if let Some(pm) = crate::tools::common::detect_linux_pm() {
-        let _ = crate::tools::common::PkgOps::update(pm, true);
+        let _ = crate::tools::common::PkgOps::update(pm, crate::tools::common::default_use_sudo());
         let pkg = match pm {
             crate::tools::common::PackageManager::Apt => "python3",
             crate::tools::common::PackageManager::Dnf => "python3",

@@ -48,8 +48,8 @@ fn install_macos() -> Result<(), InstallError> {
 #[cfg(target_os = "linux")]
 fn install_linux() -> Result<(), InstallError> {
     if let Some(pm) = crate::tools::common::detect_linux_pm() {
-        let _ = crate::tools::common::PkgOps::update(pm, true);
-        crate::tools::common::PkgOps::install(pm, "tmux", true)
+        let _ = crate::tools::common::PkgOps::update(pm, crate::tools::common::default_use_sudo());
+        crate::tools::common::PkgOps::install(pm, "tmux", crate::tools::common::default_use_sudo())
     } else {
         Err(InstallError::Prereq(
             "No supported Linux package manager on PATH (apt/dnf/yum/zypper/pacman/apk)",
