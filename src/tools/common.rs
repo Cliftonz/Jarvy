@@ -47,20 +47,19 @@ pub fn current_os() -> Os {
 }
 
 // Global default for whether to use sudo on POSIX installs. Can be set from Config in main.
-static USE_SUDO_DEFAULT: OnceLock<bool> = OnceLock::new();
+// None means: auto-detect per operation (try without sudo, then with if available).
+static USE_SUDO_DEFAULT: OnceLock<Option<bool>> = OnceLock::new();
 
-pub fn set_default_use_sudo(val: bool) {
+pub fn set_default_use_sudo(val: Option<bool>) {
     let _ = USE_SUDO_DEFAULT.set(val);
 }
 
-pub fn default_use_sudo() -> bool {
+pub fn default_use_sudo() -> Option<bool> {
     if let Some(v) = USE_SUDO_DEFAULT.get() {
         *v
     } else {
-        match current_os() {
-            Os::Linux => true,
-            Os::Macos | Os::Windows => false,
-        }
+        // Unset -> auto mode
+        None
     }
 }
 
@@ -160,6 +159,19 @@ pub fn cmd_satisfies(cmd: &str, min_prefix: &str) -> bool {
     false
 }
 
+pub fn plan_sudo_attempts(use_sudo: Option<bool>, sudo_available: bool) -> Vec<bool> {
+    match use_sudo {
+        Some(flag) => vec![flag],
+        None => {
+            if sudo_available {
+                vec![false, true]
+            } else {
+                vec![false]
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum PackageManager {
     Apt,
@@ -208,37 +220,110 @@ pub fn detect_linux_pm() -> Option<PackageManager> {
     None
 }
 
+#[cfg(test)]
+mod sudo_plan_tests {
+    use super::plan_sudo_attempts;
+
+    #[test]
+    fn plan_some_true_only_true() {
+        let v = plan_sudo_attempts(Some(true), true);
+        assert_eq!(v, vec![true]);
+    }
+
+    #[test]
+    fn plan_some_false_only_false() {
+        let v = plan_sudo_attempts(Some(false), true);
+        assert_eq!(v, vec![false]);
+    }
+
+    #[test]
+    fn plan_none_with_sudo_available() {
+        let v = plan_sudo_attempts(None, true);
+        assert_eq!(v, vec![false, true]);
+    }
+
+    #[test]
+    fn plan_none_without_sudo_available() {
+        let v = plan_sudo_attempts(None, false);
+        assert_eq!(v, vec![false]);
+    }
+}
+
 #[allow(dead_code)]
 pub struct PkgOps {
     name: &'static str,
 }
 
 impl PkgOps {
-    pub fn update(pm: PackageManager, use_sudo: bool) -> Result<(), InstallError> {
+    pub fn update(pm: PackageManager, use_sudo: Option<bool>) -> Result<(), InstallError> {
         match pm {
             PackageManager::Apt => {
                 // Ensure prerequisites exist before attempting the update
                 let apt = require_any(&["apt-get", "apt"], "apt is required to update packages")?;
-                if use_sudo {
-                    require("sudo", "sudo is required to update packages")?;
+                // Decide sudo strategy
+                match use_sudo {
+                    Some(flag) => {
+                        if flag {
+                            require("sudo", "sudo is required to update packages")?;
+                        }
+                        run_maybe_sudo(flag, apt, &["update"])?;
+                    }
+                    None => {
+                        // Try without sudo first
+                        if let Err(e) = run_maybe_sudo(false, apt, &["update"]) {
+                            // Retry with sudo if available
+                            if has("sudo") {
+                                run_maybe_sudo(true, apt, &["update"])?;
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                    }
                 }
-                run_maybe_sudo(use_sudo, apt, &["update"])?;
             }
             PackageManager::Dnf => { /* dnf auto-refreshes; optional */ }
             PackageManager::Yum => { /* optional */ }
             PackageManager::Zypper => {
                 require("zypper", "zypper is required to update packages")?;
-                if use_sudo {
-                    require("sudo", "sudo is required to update packages")?;
+                match use_sudo {
+                    Some(flag) => {
+                        if flag {
+                            require("sudo", "sudo is required to update packages")?;
+                        }
+                        run_maybe_sudo(flag, "zypper", &["--non-interactive", "refresh"])?;
+                    }
+                    None => {
+                        if let Err(e) =
+                            run_maybe_sudo(false, "zypper", &["--non-interactive", "refresh"])
+                        {
+                            if has("sudo") {
+                                run_maybe_sudo(true, "zypper", &["--non-interactive", "refresh"])?;
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                    }
                 }
-                run_maybe_sudo(use_sudo, "zypper", &["--non-interactive", "refresh"])?;
             }
             PackageManager::Pacman => {
                 require("pacman", "pacman is required to update packages")?;
-                if use_sudo {
-                    require("sudo", "sudo is required to update packages")?;
+                match use_sudo {
+                    Some(flag) => {
+                        if flag {
+                            require("sudo", "sudo is required to update packages")?;
+                        }
+                        run_maybe_sudo(flag, "pacman", &["-Sy"])?;
+                    }
+                    None => {
+                        if let Err(e) = run_maybe_sudo(false, "pacman", &["-Sy"]) {
+                            if has("sudo") {
+                                run_maybe_sudo(true, "pacman", &["-Sy"])?;
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                    }
                 }
-                run_maybe_sudo(use_sudo, "pacman", &["-Sy"])?;
             }
             PackageManager::Apk => { /* `apk add` refreshes on demand */ }
             _ => {}
@@ -246,62 +331,153 @@ impl PkgOps {
         Ok(())
     }
 
-    pub fn install(pm: PackageManager, pkg: &str, use_sudo: bool) -> Result<(), InstallError> {
+    pub fn install(
+        pm: PackageManager,
+        pkg: &str,
+        use_sudo: Option<bool>,
+    ) -> Result<(), InstallError> {
         match pm {
             PackageManager::Apt => {
                 let apt = require_any(&["apt-get", "apt"], "apt is required to install packages")?;
-                if use_sudo {
-                    require("sudo", "sudo is required to install packages")?;
+                match use_sudo {
+                    Some(flag) => {
+                        if flag {
+                            require("sudo", "sudo is required to install packages")?;
+                        }
+                        run_maybe_sudo(flag, apt, &["install", "-y", pkg])?;
+                    }
+                    None => {
+                        if let Err(e) = run_maybe_sudo(false, apt, &["install", "-y", pkg]) {
+                            if has("sudo") {
+                                run_maybe_sudo(true, apt, &["install", "-y", pkg])?;
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                    }
                 }
-                run_maybe_sudo(use_sudo, apt, &["install", "-y", pkg])?
             }
             PackageManager::Dnf => {
                 require("dnf", "dnf is required to install packages")?;
-                if use_sudo {
-                    require("sudo", "sudo is required to install packages")?;
+                match use_sudo {
+                    Some(flag) => {
+                        if flag {
+                            require("sudo", "sudo is required to install packages")?;
+                        }
+                        run_maybe_sudo(flag, "dnf", &["install", "-y", pkg])?;
+                    }
+                    None => {
+                        if let Err(e) = run_maybe_sudo(false, "dnf", &["install", "-y", pkg]) {
+                            if has("sudo") {
+                                run_maybe_sudo(true, "dnf", &["install", "-y", pkg])?;
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                    }
                 }
-                run_maybe_sudo(use_sudo, "dnf", &["install", "-y", pkg])?
             }
             PackageManager::Yum => {
                 require("yum", "yum is required to install packages")?;
-                if use_sudo {
-                    require("sudo", "sudo is required to install packages")?;
+                match use_sudo {
+                    Some(flag) => {
+                        if flag {
+                            require("sudo", "sudo is required to install packages")?;
+                        }
+                        run_maybe_sudo(flag, "yum", &["install", "-y", pkg])?;
+                    }
+                    None => {
+                        if let Err(e) = run_maybe_sudo(false, "yum", &["install", "-y", pkg]) {
+                            if has("sudo") {
+                                run_maybe_sudo(true, "yum", &["install", "-y", pkg])?;
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                    }
                 }
-                run_maybe_sudo(use_sudo, "yum", &["install", "-y", pkg])?
             }
             PackageManager::Zypper => {
                 require("zypper", "zypper is required to install packages")?;
-                if use_sudo {
-                    require("sudo", "sudo is required to install packages")?;
+                match use_sudo {
+                    Some(flag) => {
+                        if flag {
+                            require("sudo", "sudo is required to install packages")?;
+                        }
+                        run_maybe_sudo(
+                            flag,
+                            "zypper",
+                            &["--non-interactive", "install", "--no-confirm", pkg],
+                        )?;
+                    }
+                    None => {
+                        if let Err(e) = run_maybe_sudo(
+                            false,
+                            "zypper",
+                            &["--non-interactive", "install", "--no-confirm", pkg],
+                        ) {
+                            if has("sudo") {
+                                run_maybe_sudo(
+                                    true,
+                                    "zypper",
+                                    &["--non-interactive", "install", "--no-confirm", pkg],
+                                )?;
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                    }
                 }
-                run_maybe_sudo(
-                    use_sudo,
-                    "zypper",
-                    &["--non-interactive", "install", "--no-confirm", pkg],
-                )?
             }
             PackageManager::Pacman => {
                 require("pacman", "pacman is required to install packages")?;
-                if use_sudo {
-                    require("sudo", "sudo is required to install packages")?;
+                match use_sudo {
+                    Some(flag) => {
+                        if flag {
+                            require("sudo", "sudo is required to install packages")?;
+                        }
+                        run_maybe_sudo(flag, "pacman", &["--noconfirm", "-S", pkg])?;
+                    }
+                    None => {
+                        if let Err(e) = run_maybe_sudo(false, "pacman", &["--noconfirm", "-S", pkg])
+                        {
+                            if has("sudo") {
+                                run_maybe_sudo(true, "pacman", &["--noconfirm", "-S", pkg])?;
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                    }
                 }
-                run_maybe_sudo(use_sudo, "pacman", &["--noconfirm", "-S", pkg])?
             }
             PackageManager::Apk => {
                 require("apk", "apk is required to install packages")?;
-                if use_sudo {
-                    require("sudo", "sudo is required to install packages")?;
+                match use_sudo {
+                    Some(flag) => {
+                        if flag {
+                            require("sudo", "sudo is required to install packages")?;
+                        }
+                        run_maybe_sudo(flag, "apk", &["add", pkg])?;
+                    }
+                    None => {
+                        if let Err(e) = run_maybe_sudo(false, "apk", &["add", pkg]) {
+                            if has("sudo") {
+                                run_maybe_sudo(true, "apk", &["add", pkg])?;
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                    }
                 }
-                run_maybe_sudo(use_sudo, "apk", &["add", pkg])?
             }
             // These package managers generally do not require sudo by design here
             PackageManager::Brew => {
                 require("brew", "Homebrew is required to install packages")?;
-                run("brew", &["install", pkg])?
+                run("brew", &["install", pkg])?;
             }
             PackageManager::Winget => {
                 require("winget", "Winget is required to install packages")?;
-                run("winget", &["install", "-e", "--id", pkg])?
+                run("winget", &["install", "-e", "--id", pkg])?;
             }
         };
         Ok(())

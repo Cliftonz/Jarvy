@@ -26,19 +26,16 @@ pub struct PrivilegeConfig {
 
 impl PrivilegeConfig {
     // Sensible defaults if nothing specified
-    fn default_for(os: Os) -> bool {
-        match os {
-            Os::Linux => true,
-            Os::Macos => false,
-            Os::Windows => false,
-        }
+    fn default_for(_os: Os) -> Option<bool> {
+        // Returning None indicates: auto-detect per operation
+        None
     }
 
-    pub fn effective_for(&self, os: Os) -> bool {
+    pub fn effective_for(&self, os: Os) -> Option<bool> {
         if let Some(v) = self.per_os.get(&os) {
-            *v
+            Some(*v)
         } else if let Some(global) = self.use_sudo {
-            global
+            Some(global)
         } else {
             Self::default_for(os)
         }
@@ -102,8 +99,8 @@ impl Config {
             .collect()
     }
 
-    // Returns whether sudo should be used on the current OS
-    pub fn use_sudo(&self) -> bool {
+    // Returns whether sudo should be used on the current OS; None => auto-detect per op
+    pub fn use_sudo(&self) -> Option<bool> {
         let os = current_os();
         self.privileges
             .as_ref()
