@@ -75,7 +75,7 @@ $ jarvy --help
 Jarvy X.Y.Z - Standardize and automate local dev environment setup
 
 USAGE:
-jarvy [OPTIONS] [COMMAND]
+jarvy \[OPTIONS\] \[COMMAND\]
 
 ... (help output) ...
 
