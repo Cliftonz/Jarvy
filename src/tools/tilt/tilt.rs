@@ -50,8 +50,12 @@ fn install_macos() -> Result<(), InstallError> {
 fn install_linux() -> Result<(), InstallError> {
     // Prefer distro package if available (name: tilt). Not all distros provide it.
     if let Some(pm) = crate::tools::common::detect_linux_pm() {
-        let _ = crate::tools::common::PkgOps::update(pm, true);
-        let try_pkg = crate::tools::common::PkgOps::install(pm, "tilt", true);
+        let _ = crate::tools::common::PkgOps::update(pm, crate::tools::common::default_use_sudo());
+        let try_pkg = crate::tools::common::PkgOps::install(
+            pm,
+            "tilt",
+            crate::tools::common::default_use_sudo(),
+        );
         if try_pkg.is_ok() {
             return try_pkg;
         }

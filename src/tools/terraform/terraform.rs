@@ -50,7 +50,7 @@ fn install_macos() -> Result<(), InstallError> {
 fn install_linux() -> Result<(), InstallError> {
     if let Some(pm) = crate::tools::common::detect_linux_pm() {
         // Best effort package index update
-        let _ = crate::tools::common::PkgOps::update(pm, true);
+        let _ = crate::tools::common::PkgOps::update(pm, crate::tools::common::default_use_sudo());
         // Try common package name
         crate::tools::common::PkgOps::install(pm, "terraform", true)
     } else {

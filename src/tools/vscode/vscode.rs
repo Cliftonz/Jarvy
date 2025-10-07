@@ -56,9 +56,9 @@ fn install_linux() -> Result<(), InstallError> {
 
     // Fallback to distro package manager if detected
     if let Some(pm) = crate::tools::common::detect_linux_pm() {
-        let _ = crate::tools::common::PkgOps::update(pm, true);
+        let _ = crate::tools::common::PkgOps::update(pm, crate::tools::common::default_use_sudo());
         // Package name is typically "code" when MS repo is configured; still attempt
-        crate::tools::common::PkgOps::install(pm, "code", true)
+        crate::tools::common::PkgOps::install(pm, "code", crate::tools::common::default_use_sudo())
     } else {
         Err(InstallError::Prereq(
             "Need snap or a supported package manager (apt/dnf/yum/zypper/pacman/apk) on PATH",

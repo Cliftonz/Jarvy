@@ -47,9 +47,11 @@ fn install_macos() -> Result<(), InstallError> {
 #[cfg(target_os = "linux")]
 fn install_linux() -> Result<(), InstallError> {
     if let Some(pm) = crate::tools::common::detect_linux_pm() {
-        let _ = crate::tools::common::PkgOps::update(pm, true);
+        let _ = crate::tools::common::PkgOps::update(pm, crate::tools::common::default_use_sudo());
         // Debian/Ubuntu use xz-utils; others often use xz. We try xz first, falling back to xz-utils.
-        if crate::tools::common::PkgOps::install(pm, "xz", true).is_ok() {
+        if crate::tools::common::PkgOps::install(pm, "xz", crate::tools::common::default_use_sudo())
+            .is_ok()
+        {
             return Ok(());
         }
         crate::tools::common::PkgOps::install(pm, "xz-utils", true)
