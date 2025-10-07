@@ -3,6 +3,7 @@ name = "jarvy"
 version = "0.1.0"
 license = "MIT"
 edition = "2024"
+description = "Jarvy is a fast, cross-platform CLI that installs and manages developer tools across macOS and Linux."
 
 [build]
 jobs=16

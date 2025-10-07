@@ -1,60 +1,66 @@
-Jarvy · Rust-based Dev Environment CLI
+<img src="assets/Vertical_Logo.svg" alt="Jarvy Vertical Logo" width="200" />
+
+# Rust-based Dev Environment CLI
+
+STOP PAYING FOR DEV PODS AND CODESPACES!
 
 Jarvy is a fast,
 Rust-based command-line tool
 that standardizes and automates local development environment setup for your application repositories.
+
 It tackles the infamous “works on my machine”
 problem by ensuring every developer on the team has the same development environment configuration,
 regardless of their OS.
+
 Instead of relying on remote dev environments like dev-pods or GitHub Codespaces, Jarvy runs on your local machine,
 using a simple config file (jarvy.toml) in your repo to provision all required tools.
+
 This approach is particularly useful for team leads and architects
 who want to enforce consistent setups across the team. 
 
-Jarvy makes it easy to define a standard dev stack once and apply it everywhere.
-
-Why Jarvy?
+## Why Jarvy?
 
 Modern development teams face challenges with environment drift and onboarding new developers.
+
 Jarvy was created to simplify and streamline this process.
+
 Here is why you might want Jarvy in your workflow:
-•	Standardized Environments:
+- **Standardized Environments:**
 Jarvy ensures all developers work in an identical environment with the same tool versions,
-no matter if they use macOS, Linux, or Windows ￼.
+no matter if they use macOS, Linux, or Windows.
 By codifying the setup in jarvy.toml,
-you eliminate cross-OS discrepancies and those hard-to-diagnose errors from mismatched setups ￼.
-•	Instant Onboarding: New team members can get up and running in seconds rather than days.
+you eliminate cross-OS discrepancies and those hard-to-diagnose errors from mismatched setups.
+- **Instant Onboarding:** New team members can get up and running in seconds rather than days.
 Instead of following lengthy setup guides,
-a developer can simply clone the repo and run jarvy to have all necessary tools installed and configured  ￼.
+a developer can simply clone the repo and run jarvy to have all necessary tools installed and configured.
 This drastically cuts down onboarding time and frustration.
-•	Dev Environment as Code: Jarvy treats your development environment configuration as source code.
+- **Dev Environment as Code:** Jarvy treats your development environment configuration as source code.
 The jarvy.toml file lives in your repository (version-controlled),
 providing a single source of truth for required tools and versions.
-This creates a consistent developer experience and captures environment knowledge in code ￼ –
+This creates a consistent developer experience and captures environment knowledge in code –
 no more wiki pages of manual setup steps.
-•	Cross-Platform Automation: Jarvy works on macOS, Linux, and Windows and intelligently adapts to each platform ￼.
+- **Cross-Platform Automation:** Jarvy works on macOS, Linux, and Windows and intelligently adapts to each platform ￼.
 It leverages native package managers and installers to set up tools
-(e.g. Homebrew on macOS, apt on Linux, Chocolatey/Winget on Windows)
-so that the same config yields the same results everywhere ￼ ￼.
+(e.g., Homebrew on macOS, apt on Linux, Chocolatey/Winget on Windows)
+so that the same config yields the same results everywhere.
 Your whole team (and CI pipelines) can share one config file regardless of OS.
-•	Local, Offline-Friendly:
-Unlike cloud-based dev environments (such as Codespaces or DevPod)
+- **Local, Offline-Friendly:** Unlike cloud-based dev environments (such as Codespaces or DevPod)
 that require internet access and remote VMs/containers,
 Jarvy configures your local machine.
 After the initial installations, you can work offline and at native performance.
 There is no heavy container overhead or vendor lock-in – you have full control of your workstation.
-•	Safe & Idempotent: Running Jarvy is safe to do repeatedly.
+- **Safe & Idempotent:** Running Jarvy is safe to do repeatedly.
 It will detect if a required tool is already installed (and at the correct version) and skip or update it as needed.
 This means you can include jarvy in routine setup scripts or CI jobs to continually ensure consistency.
 Jarvy acts as a lightweight provisioner that brings a machine to the desired state defined in jarvy.toml.
-•	Extensible and Open Source: Jarvy is open source (MIT-licensed) and built with Rust for performance and reliability.
+- **Extensible and Open Source:** Jarvy is open source (MIT-licensed) and built with Rust for performance and reliability.
 It’s designed to be extensible – if your project needs a new tool or custom setup, you can extend Jarvy’s functionality.
 We welcome contributions from the community to add support for more tools, package managers, and integrations.
 
-Installation
+## Installation
 
 Jarvy is distributed as a standalone binary, so it is easy to install on any platform:
-•	With Cargo (Rust): If you have Rust installed, you can install Jarvy from crates.io:
+- With Cargo (Rust): If you have Rust installed, you can install Jarvy from crates.io:
 
 cargo install jarvy
 
@@ -117,19 +123,19 @@ How Does Jarvy Work? (Cross-Platform Support)
 
 Jarvy is designed to work on macOS, Linux, and Windows seamlessly.
 Under the hood, it detects your operating system and uses the appropriate method to install each tool:
-•	macOS: Jarvy uses Homebrew for most package installations (if Homebrew is available),
+- macOS: Jarvy uses Homebrew for most package installations (if Homebrew is available),
 since Homebrew is a widely-used package manager on macOS ￼.
 For tools not in Homebrew, Jarvy can fall back to other installation methods
 (like downloading a binary or using an installer).
 It ensures that things like Node, Docker, etc.,
 are installed as if you installed them manually, but automatically through the config.
-•	Linux: Jarvy supports Debian/Ubuntu-based systems by using apt-get to install packages when possible.
+- Linux: Jarvy supports Debian/Ubuntu-based systems by using apt-get to install packages when possible.
 (In the future it may support other distro package managers or Homebrew on Linux as needed.)
 If a tool is not in the apt repositories or if you are on a different distro,
 Jarvy will attempt alternate approaches such as downloading official release binaries.
 The goal is that any Linux developer can get the required tools with the same single command,
 without fiddling with their distro’s specifics.
-•	Windows: Jarvy can run natively on Windows.
+- Windows: Jarvy can run natively on Windows.
 It will try to use package managers like Chocolatey or Winget to install software
 (for example, installing Node.js or Docker Desktop via those managers) ￼.
 If a tool is not available via a package manager, Jarvy may download the official installer or binary.
@@ -146,16 +152,16 @@ please check our documentation or consider contributing a new installer integrat
 Usage Tips for Developers and Architects
 
 Jarvy is meant to be straightforward, but here are a few tips to get the most out of it:
-•	Keep jarvy.toml Updated: Treat the jarvy.toml like part of your code.
+- Keep jarvy.toml Updated: Treat the jarvy.toml like part of your code.
 Whenever your project adds a new dependency (e.g., you now require Go or a new CLI tool), update the config.
 This way, Jarvy remains the up-to-date checklist of everything needed to get the project running.
-•	Review on Onboarding: If you are a tech lead or architect, you can standardize dev setups by providing a jarvy.toml.
+- Review on Onboarding: If you are a tech lead or architect, you can standardize dev setups by providing a jarvy.toml.
 When new developers join, just have them install Jarvy and run it.
 The faster they get their environment running, the faster they can be productive on the project ￼.
-•	Combine with CI: You can use Jarvy in CI pipelines to ensure the build environment matches the dev environment.
+- Combine with CI: You can use Jarvy in CI pipelines to ensure the build environment matches the dev environment.
 For example, in a GitHub Actions workflow, you might install Jarvy and run jarvy to set up tools before running tests.
 This guarantees that CI is using the same tool versions as developers, closing the “it works locally but not in CI” gap.
-•	Complement vs. Replace Containers: Jarvy is not mutually exclusive with Docker or dev containers –
+- Complement vs. Replace Containers: Jarvy is not mutually exclusive with Docker or dev containers –
 you can certainly still use containerized dev environments.
 But Jarvy shines when you want quick,
 local setups or when working on projects that do not have a full devcontainer setup.
@@ -166,15 +172,15 @@ For Contributors (Building and Extending Jarvy)
 
 We welcome contributions to make Jarvy better!
 If you would like to extend Jarvy or fix a bug, here is how to get started:
-•	Project Structure: Jarvy is written in Rust.
+- Project Structure: Jarvy is written in Rust.
 The core logic for parsing the jarvy.toml and installing tools is located in the src/ directory
 (with modules for different OS installers and tool definitions).
 It uses the clap crate for command-line argument parsing and serde for TOML parsing.
-•	Setting up for Development: First, ensure you have Rust installed (Nightly not required; stable Rust is fine).
+- Setting up for Development: First, ensure you have Rust installed (Nightly not required; stable Rust is fine).
 Fork and clone the repository, then run cargo build to compile Jarvy.
 You can run the tests with cargo test.
 We strive to keep the test suite comprehensive, especially for parsing config files and simulating installation logic.
-•	Adding Support for a New Tool/Platform:
+- Adding Support for a New Tool/Platform:
 If you want to add a new tool that Jarvy should be able to install,
 check out the existing implementations under src/tools/
 (hypothetical path).
@@ -182,24 +188,18 @@ You might need to add a definition for the tool (name, possible installation met
 and then implement installation logic for each OS.
 For example, adding support for Python might involve using pyenv on Linux/macOS and the official installer on Windows.
 We encourage discussing in an issue first if you are planning a large addition, to ensure we can integrate it smoothly.
-•	Coding Style: We follow Rust Clippy and fmt guidelines.
+- Coding Style: We follow Rust Clippy and fmt guidelines.
 Please run cargo fmt and cargo clippy before submitting a PR.
 Write clear, concise commit messages (we use Conventional Commits for release notes, e.g., feat:
 add support for Python installation).
-•	Submitting a Pull Request: Once your changes are ready and tested, open a PR on GitHub.
+- Submitting a Pull Request: Once your changes are ready and tested, open a PR on GitHub.
 Describe the change and link any relevant issues.
 The CI pipeline will run our test suite and linters.
 Maintainers will review your contribution for alignment with project goals and code quality.
 We aim to be responsive and collaborative in code reviews – contributions are valued!
-•	Community and Discussion: Feel free to open issues for feature requests or bug reports.
+- Community and Discussion: Feel free to open issues for feature requests or bug reports.
 You can also join our Slack/Discord (if available) or GitHub Discussions to talk with the maintainers and other users.
 We want Jarvy to solve real problems for dev teams, so feedback and ideas are very welcome.
-
-License
-
-This project is released under the MIT License. See the LICENSE file for details. You are free to use Jarvy in your projects – if you find it useful, we would love to hear about it!
-
-⸻
 
 Jarvy exists to make the lives of developers and architects easier by eliminating the friction of environment setup. With a single config file and a one-time setup, teams can achieve a repeatable, reliable development environment on any machine. We believe that setting up a new project’s dev environment should be quick and hassle-free – and with Jarvy, it finally is. Give it a try in your next project and join us in evolving how dev environments are managed. Happy coding! 🎉
 
