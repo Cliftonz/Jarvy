@@ -78,7 +78,7 @@ pub(crate) fn initialize() -> CliConfig {
     }
 
     // Read existing or just-created config.toml
-    let mut config: CliConfig = {
+    let config: CliConfig = {
         let config_content = fs::read_to_string(&config_file_path).unwrap_or_default();
         if config_content.trim().is_empty() {
             CliConfig::default()

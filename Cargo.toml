@@ -48,13 +48,7 @@ category = "Utility"
 homepage = "https://github.com/bearbinary/jarvy"
 licenseFile = "LICENSE"
 formats = ["all"]                  # Or ["all"] if you want every supported format
-# Icons used by cargo-packager for application bundles/installers
-# Provide platform-appropriate formats when available.
-# macOS requires .icns, Windows prefers .ico, Linux uses .png; SVGs may be used where supported.
-icons = [
-    "assets/icns/CLI_Logo.icns",   # macOS
-    "assets/CLI_Logo.png"              # Fallback for other platforms if supported
-]
+generate-desktop-entry = false
 
 [package.metadata.packager.macos]
 icons = ["assets/icns/CLI_Logo.icns"]

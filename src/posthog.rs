@@ -152,7 +152,7 @@ pub fn capture_exception(
     message: &str,
     exception_type: &str,
     stack_trace: Option<String>,
-    mut context: serde_json::Map<String, serde_json::Value>,
+    context: serde_json::Map<String, serde_json::Value>,
 ) {
     // Build exception payload according to docs
     let mut props = serde_json::Map::new();
@@ -164,14 +164,14 @@ pub fn capture_exception(
         "$exception_type".to_string(),
         serde_json::Value::String(exception_type.to_string()),
     );
-    if let Some(stack) = stack_trace {
-        if !stack.is_empty() {
-            props.insert(
-                "$exception_stack_trace".to_string(),
-                serde_json::Value::String(stack),
-            );
-        }
+
+    if let Some(stack) = stack_trace.filter(|s| !s.is_empty()) {
+        props.insert(
+            "$exception_stack_trace".to_string(),
+            serde_json::Value::String(stack),
+        );
     }
+
     if !context.is_empty() {
         props.insert(
             "$exception_properties".to_string(),
