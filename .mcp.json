@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "rust-mcp": {
+      "type": "stdio",
+      "command": "/Users/zacclifton/.cargo/bin/rust-mcp-server",
+      "args": [],
+      "env": {}
+    }
+  }
+}
