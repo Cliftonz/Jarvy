@@ -419,3 +419,25 @@ All tasks have been completed:
 - ✅ T9: Cleanup completed as part of migration
 - ✅ T10: cargo-jarvy new-tool scaffolding updated
 - ✅ T11: Documentation updated in CLAUDE.md
+- ✅ T11.2: Created docs/adding-tools.md - comprehensive guide for adding new tools
+
+---
+
+## T11.2 Completed: 2025-01-14
+
+### Created docs/adding-tools.md
+
+Comprehensive guide for adding new tools to Jarvy, including:
+
+1. **Quick Start** - 4-step process for adding simple tools
+2. **Step-by-Step Guide** - Detailed walkthrough with code examples
+3. **define_tool! Macro Reference** - All syntax variants documented
+4. **Platform-Specific Options** - macOS (brew/cask), Linux (uniform/varied), Windows (winget/choco)
+5. **Package Name Reference** - Commands for finding package names on each platform
+6. **Examples** - Simple (jq), varied (docker), tap-based (terraform), macOS-only (iterm2)
+7. **Complex Tools** - Custom installation documentation with nvm example
+8. **Auto-Registration** - How inventory crate enables automatic tool registration
+9. **Testing** - Commands for verifying new tools
+10. **Troubleshooting** - Common issues and solutions
+
+Document covers 419 lines of detailed documentation to help contributors add new tools
