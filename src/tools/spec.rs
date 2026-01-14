@@ -52,7 +52,7 @@ pub fn iter_tools() -> impl Iterator<Item = &'static ToolEntry> {
 use super::common::{default_use_sudo, PkgOps};
 
 /// macOS installation options.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct MacOsInstall {
     /// Homebrew formula name (e.g., "git", "jq")
     pub brew: Option<&'static str>,
@@ -79,7 +79,7 @@ impl MacOsInstall {
 }
 
 /// Linux installation options for various package managers.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct LinuxInstall {
     pub apt: Option<&'static str>,
     pub dnf: Option<&'static str>,
@@ -147,7 +147,7 @@ impl LinuxInstall {
 }
 
 /// Windows installation options.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct WindowsInstall {
     /// winget package ID (e.g., "Git.Git", "jqlang.jq")
     pub winget: Option<&'static str>,
@@ -181,7 +181,7 @@ pub type CustomInstallFn = fn(&str) -> Result<(), InstallError>;
 /// A `ToolSpec` defines everything needed to check for and install a tool
 /// across all supported platforms. The `ensure()` method handles the common
 /// pattern of checking version satisfaction and installing if needed.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct ToolSpec {
     /// Tool name for registry and display (e.g., "git", "docker")
     pub name: &'static str,
@@ -200,6 +200,7 @@ pub struct ToolSpec {
 
     /// Optional custom install function for complex tools (nvm, rustup, etc.)
     /// If provided, this takes precedence over standard package manager installs.
+    #[serde(skip)]
     pub custom_install: Option<CustomInstallFn>,
 }
 
@@ -447,6 +448,138 @@ macro_rules! define_tool {
 
 pub use define_tool;
 
+// ============================================================================
+// Tool Index Generation
+// ============================================================================
+
+/// Metadata about a tool's custom installation support.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CustomInstallInfo {
+    /// Whether this tool uses a custom installer (shell script, etc.)
+    pub has_custom_installer: bool,
+}
+
+/// A serializable tool entry for the tool index.
+/// This includes the full ToolSpec data plus metadata about custom installers.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ToolIndexEntry {
+    /// Tool name
+    pub name: String,
+    /// Command used to check if installed
+    pub command: String,
+    /// macOS installation options
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub macos: Option<MacOsInstall>,
+    /// Linux installation options
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub linux: Option<LinuxInstall>,
+    /// Windows installation options
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub windows: Option<WindowsInstall>,
+    /// Custom installation info
+    pub custom_install: CustomInstallInfo,
+}
+
+impl From<&ToolSpec> for ToolIndexEntry {
+    fn from(spec: &ToolSpec) -> Self {
+        Self {
+            // Normalize name to lowercase for consistency
+            name: spec.name.to_lowercase(),
+            command: spec.command.to_string(),
+            macos: spec.macos,
+            linux: spec.linux,
+            windows: spec.windows,
+            custom_install: CustomInstallInfo {
+                has_custom_installer: spec.custom_install.is_some(),
+            },
+        }
+    }
+}
+
+/// The complete tool index containing all supported tools.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ToolIndex {
+    /// Version of the index format
+    pub version: &'static str,
+    /// Total count of supported tools
+    pub count: usize,
+    /// List of all tool entries
+    pub tools: Vec<ToolIndexEntry>,
+}
+
+impl ToolIndex {
+    /// Current version of the tool index format.
+    pub const VERSION: &'static str = "1.0.0";
+}
+
+/// Manually registered tools that don't use the `define_tool!` macro.
+/// These tools have custom installation logic and are registered in `register_all()`.
+const MANUAL_TOOLS: &[(&str, &str)] = &[
+    ("nvm", "nvm"),
+    ("rust", "rustc"),
+    ("brew", "brew"),
+];
+
+/// Generate the complete tool index by collecting all tools.
+///
+/// This includes:
+/// - All tools registered via `define_tool!` macro (collected by inventory)
+/// - Manually registered tools (nvm, rust, brew) with custom installers
+pub fn generate_tool_index() -> ToolIndex {
+    let mut tools: Vec<ToolIndexEntry> = Vec::new();
+
+    // Collect all tools from inventory (define_tool! macro)
+    for entry in iter_tools() {
+        tools.push(ToolIndexEntry::from(entry.spec));
+    }
+
+    // Add manually registered tools
+    for (name, command) in MANUAL_TOOLS {
+        tools.push(ToolIndexEntry {
+            name: name.to_string(),
+            command: command.to_string(),
+            macos: None,
+            linux: None,
+            windows: None,
+            custom_install: CustomInstallInfo {
+                has_custom_installer: true,
+            },
+        });
+    }
+
+    // Sort by name for consistent output
+    tools.sort_by(|a, b| a.name.cmp(&b.name));
+
+    ToolIndex {
+        version: ToolIndex::VERSION,
+        count: tools.len(),
+        tools,
+    }
+}
+
+/// Generate the tool index as a JSON string.
+pub fn generate_tool_index_json() -> String {
+    let index = generate_tool_index();
+    serde_json::to_string_pretty(&index).unwrap_or_else(|e| {
+        format!(r#"{{"error": "{}"}}"#, e)
+    })
+}
+
+/// Get a list of all supported tool names (lowercase).
+pub fn list_tool_names() -> Vec<String> {
+    let mut names: Vec<String> = iter_tools()
+        .map(|e| e.spec.name.to_lowercase())
+        .collect();
+
+    // Add manually registered tools
+    for (name, _) in MANUAL_TOOLS {
+        names.push(name.to_string());
+    }
+
+    names.sort();
+    names
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -534,5 +667,127 @@ mod tests {
             custom_install: None,
         };
         assert!(!tool.is_satisfied("1.0"));
+    }
+
+    // ========================================================================
+    // Tool Index Tests
+    // ========================================================================
+
+    #[test]
+    fn test_tool_index_entry_from_spec() {
+        let entry = ToolIndexEntry::from(&TEST_TOOL);
+        assert_eq!(entry.name, "test");
+        assert_eq!(entry.command, "test_cmd");
+        assert!(entry.macos.is_some());
+        assert!(entry.linux.is_some());
+        assert!(entry.windows.is_some());
+        assert!(!entry.custom_install.has_custom_installer);
+    }
+
+    #[test]
+    fn test_tool_index_entry_with_custom_installer() {
+        let custom_tool = ToolSpec {
+            name: "custom",
+            command: "custom_cmd",
+            macos: None,
+            linux: None,
+            windows: None,
+            custom_install: Some(|_| Ok(())),
+        };
+        let entry = ToolIndexEntry::from(&custom_tool);
+        assert!(entry.custom_install.has_custom_installer);
+    }
+
+    #[test]
+    fn test_generate_tool_index_has_tools() {
+        let index = generate_tool_index();
+        // Should have at least the 3 manual tools (nvm, rust, brew)
+        assert!(index.count >= 3, "Expected at least 3 tools, got {}", index.count);
+        assert_eq!(index.tools.len(), index.count);
+    }
+
+    #[test]
+    fn test_generate_tool_index_version() {
+        let index = generate_tool_index();
+        assert_eq!(index.version, ToolIndex::VERSION);
+    }
+
+    #[test]
+    fn test_generate_tool_index_sorted() {
+        let index = generate_tool_index();
+        let names: Vec<&str> = index.tools.iter().map(|t| t.name.as_str()).collect();
+        let mut sorted_names = names.clone();
+        sorted_names.sort();
+        assert_eq!(names, sorted_names, "Tool index should be sorted by name");
+    }
+
+    #[test]
+    fn test_generate_tool_index_contains_manual_tools() {
+        let index = generate_tool_index();
+        let names: Vec<&str> = index.tools.iter().map(|t| t.name.as_str()).collect();
+
+        // Manual tools should be present
+        assert!(names.contains(&"nvm"), "Should contain nvm");
+        assert!(names.contains(&"rust"), "Should contain rust");
+        assert!(names.contains(&"brew"), "Should contain brew");
+    }
+
+    #[test]
+    fn test_generate_tool_index_json_valid() {
+        let json = generate_tool_index_json();
+        // Should be valid JSON
+        let parsed: Result<serde_json::Value, _> = serde_json::from_str(&json);
+        assert!(parsed.is_ok(), "Generated JSON should be valid: {}", json);
+
+        let value = parsed.unwrap();
+        assert!(value.get("version").is_some());
+        assert!(value.get("count").is_some());
+        assert!(value.get("tools").is_some());
+    }
+
+    #[test]
+    fn test_list_tool_names_not_empty() {
+        let names = list_tool_names();
+        assert!(!names.is_empty(), "Tool names list should not be empty");
+    }
+
+    #[test]
+    fn test_list_tool_names_sorted() {
+        let names = list_tool_names();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(names, sorted, "Tool names should be sorted");
+    }
+
+    #[test]
+    fn test_list_tool_names_contains_manual_tools() {
+        let names = list_tool_names();
+        assert!(names.contains(&"nvm".to_string()), "Should contain nvm");
+        assert!(names.contains(&"rust".to_string()), "Should contain rust");
+        assert!(names.contains(&"brew".to_string()), "Should contain brew");
+    }
+
+    #[test]
+    fn test_tool_spec_serialization() {
+        let json = serde_json::to_string(&TEST_TOOL);
+        assert!(json.is_ok(), "ToolSpec should serialize to JSON");
+
+        let json_str = json.unwrap();
+        assert!(json_str.contains("\"name\":\"test\""));
+        assert!(json_str.contains("\"command\":\"test_cmd\""));
+        // custom_install should be skipped
+        assert!(!json_str.contains("custom_install"));
+    }
+
+    #[test]
+    fn test_tool_index_serialization() {
+        let index = generate_tool_index();
+        let json = serde_json::to_string_pretty(&index);
+        assert!(json.is_ok(), "ToolIndex should serialize to JSON");
+
+        let json_str = json.unwrap();
+        assert!(json_str.contains("\"version\""));
+        assert!(json_str.contains("\"count\""));
+        assert!(json_str.contains("\"tools\""));
     }
 }
