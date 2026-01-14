@@ -1,0 +1,127 @@
+{
+  "id": "T7",
+  "parent_prd": "PRD-002",
+  "title": "Implement Auto-Registration",
+  "description": "Add automatic tool registration using inventory or linkme crate so tools register themselves at compile time without manual edits to register_all()",
+  "status": "pending",
+  "priority": "medium",
+  "dependencies": ["T6"],
+  "estimated_complexity": "medium",
+  "files_to_modify": [
+    "Cargo.toml",
+    "src/tools/mod.rs",
+    "src/tools/spec.rs"
+  ],
+  "acceptance_criteria": [
+    "Tools register themselves at compile time",
+    "No manual edits to register_all() needed for new tools",
+    "register_all() discovers all ToolSpec definitions automatically",
+    "Works on all target platforms (macOS, Linux, Windows)",
+    "All existing tests continue to pass"
+  ],
+  "subtasks": [
+    {
+      "id": "T7.1",
+      "title": "Evaluate inventory vs linkme crates",
+      "description": "Compare the two crates for auto-registration capability, platform support, and ergonomics",
+      "status": "pending",
+      "details": {
+        "inventory": {
+          "url": "https://crates.io/crates/inventory",
+          "pros": ["Well-maintained", "Simple API", "Works with statics"],
+          "cons": ["Requires specific linker setup on some platforms"]
+        },
+        "linkme": {
+          "url": "https://crates.io/crates/linkme",
+          "pros": ["Zero runtime cost", "Works with distributed slices"],
+          "cons": ["More complex API", "Platform-specific behavior"]
+        }
+      },
+      "acceptance_criteria": [
+        "Document which crate is selected and why",
+        "Verify selected crate works on macOS, Linux, Windows"
+      ]
+    },
+    {
+      "id": "T7.2",
+      "title": "Add selected crate dependency",
+      "description": "Add inventory or linkme to Cargo.toml with appropriate version",
+      "status": "pending",
+      "files": ["Cargo.toml"],
+      "acceptance_criteria": [
+        "Crate added to dependencies",
+        "Project compiles successfully"
+      ]
+    },
+    {
+      "id": "T7.3",
+      "title": "Create registration infrastructure",
+      "description": "Create the macro or trait that submits ToolSpec instances to global registry",
+      "status": "pending",
+      "files": ["src/tools/spec.rs"],
+      "implementation_notes": [
+        "If using inventory: inventory::submit!(TOOL_SPEC)",
+        "If using linkme: #[distributed_slice(TOOLS)] static TOOL: ToolSpec = ...",
+        "May need to wrap in a newtype for trait coherence"
+      ],
+      "acceptance_criteria": [
+        "Registration macro/attribute created",
+        "Works with existing define_tool! macro",
+        "Compile-time registration verified"
+      ]
+    },
+    {
+      "id": "T7.4",
+      "title": "Update register_all() function",
+      "description": "Modify register_all() to iterate over collected specs instead of manual registration",
+      "status": "pending",
+      "files": ["src/tools/mod.rs"],
+      "before_code": "let _ = register_tool(\"git\", crate::tools::git::git::add_handler);\nlet _ = register_tool(\"jq\", crate::tools::jq::jq::add_handler);\n// ... 40+ more lines",
+      "after_code": "for spec in inventory::iter::<ToolSpec> {\n    let _ = register_tool(spec.name, spec.handler());\n}",
+      "acceptance_criteria": [
+        "register_all() uses auto-discovered specs",
+        "All 42 tools still accessible via registry",
+        "No manual registration lines needed for migrated tools"
+      ]
+    },
+    {
+      "id": "T7.5",
+      "title": "Update define_tool! macro for auto-registration",
+      "description": "Extend define_tool! macro to automatically submit the created ToolSpec to the registry",
+      "status": "pending",
+      "files": ["src/tools/spec.rs"],
+      "acceptance_criteria": [
+        "define_tool! automatically registers the tool",
+        "No additional code needed in tool files",
+        "Backward compatible with existing tool definitions"
+      ]
+    },
+    {
+      "id": "T7.6",
+      "title": "Test auto-registration",
+      "description": "Add tests verifying auto-registration works correctly",
+      "status": "pending",
+      "files": ["src/tools/spec.rs", "tests/tools_registry.rs"],
+      "acceptance_criteria": [
+        "Test that migrated tools appear in registry",
+        "Test that get_tool() works for auto-registered tools",
+        "Test on CI for all platforms"
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "description": "Platform-specific linker issues with inventory/linkme",
+      "mitigation": "Test on all platforms before committing, have fallback to manual registration"
+    },
+    {
+      "description": "Ordering issues with static initialization",
+      "mitigation": "Use lazy initialization patterns, test thoroughly"
+    }
+  ],
+  "references": [
+    "https://docs.rs/inventory/latest/inventory/",
+    "https://docs.rs/linkme/latest/linkme/",
+    "https://rust-lang.github.io/rfcs/1861-extern-types.html"
+  ]
+}

@@ -1,5 +1,7 @@
 pub mod air;
 pub mod atlas;
+pub mod spec;
+pub mod version;
 pub mod awscli;
 pub mod brew;
 pub mod common;

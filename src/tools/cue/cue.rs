@@ -1,78 +1,16 @@
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-use crate::tools::common::run;
-use crate::tools::common::{InstallError, has};
+//! cue - CUE configuration language CLI
+//!
+//! This tool uses the ToolSpec pattern for declarative installation.
+//! Note: Not supported on Windows natively.
 
-/// Ensure CUE language CLI is installed. Version hint is ignored; we install
-/// the latest available from the platform package manager.
-pub fn ensure(_min_hint: &str) -> Result<(), InstallError> {
-    if has("cue") {
-        return Ok(());
-    }
-    install()
-}
+use crate::define_tool;
 
-/// Registry adapter: allows tools::add("cue", version) to dispatch here
-pub fn add_handler(min_hint: &str) -> Result<(), InstallError> {
-    let _ = min_hint;
-    ensure("")
-}
-
-fn install() -> Result<(), InstallError> {
-    #[cfg(target_os = "macos")]
-    {
-        return install_macos();
-    }
-    #[cfg(target_os = "linux")]
-    {
-        return install_linux();
-    }
-    #[cfg(target_os = "windows")]
-    {
-        return install_windows();
-    }
-    #[allow(unreachable_code)]
-    Err(InstallError::Unsupported)
-}
-
-#[cfg(target_os = "macos")]
-fn install_macos() -> Result<(), InstallError> {
-    if !has("brew") {
-        return Err(InstallError::Prereq(
-            "Homebrew not found. Install https://brew.sh and re-run.",
-        ));
-    }
-    run("brew", &["install", "cue"])?;
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn install_linux() -> Result<(), InstallError> {
-    // Try distro package manager first (package name may vary; attempt 'cue')
-    if let Some(pm) = crate::tools::common::detect_linux_pm() {
-        let _ = crate::tools::common::PkgOps::update(pm, crate::tools::common::default_use_sudo());
-        let res = crate::tools::common::PkgOps::install(
-            pm,
-            "cue",
-            crate::tools::common::default_use_sudo(),
-        );
-        if res.is_ok() {
-            return res;
-        }
-    }
-    // Fallback to Homebrew on Linux if present
-    if has("brew") {
-        return run("brew", &["install", "cue"]).map(|_| ());
-    }
-    Err(InstallError::Prereq(
-        "No supported Linux package manager or Homebrew found to install cue",
-    ))
-}
-
-#[cfg(target_os = "windows")]
-fn install_windows() -> Result<(), InstallError> {
-    // No official Windows package in this project scope; require WSL or manual install.
-    Err(InstallError::Unsupported)
-}
+define_tool!(CUE, {
+    command: "cue",
+    macos: { brew: "cue" },
+    linux: { uniform: "cue" },
+    // No Windows support
+});
 
 #[cfg(test)]
 mod tests {

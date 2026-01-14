@@ -150,11 +150,19 @@ pub fn require_any<'a>(
     Err(InstallError::Prereq(remediation))
 }
 
-// crude semver probe like: "git version 2.44.0"
-pub fn cmd_satisfies(cmd: &str, min_prefix: &str) -> bool {
+/// Check if a command's version satisfies the given requirement.
+///
+/// Uses proper semantic versioning comparison instead of substring matching.
+/// Supports requirements like:
+/// - `"latest"` or `"*"`: Always passes
+/// - `"3.10"`: Matches 3.10.x
+/// - `"3.10.0"`: Exact match
+/// - `">= 3.10"`: Minimum version
+/// - `">= 3.10, < 4.0"`: Range expression
+pub fn cmd_satisfies(cmd: &str, requirement: &str) -> bool {
     if let Ok(out) = Command::new(cmd).arg("--version").output() {
-        let s = String::from_utf8_lossy(&out.stdout);
-        return s.contains(min_prefix);
+        let version_output = String::from_utf8_lossy(&out.stdout);
+        return super::version::version_satisfies(&version_output, requirement);
     }
     false
 }

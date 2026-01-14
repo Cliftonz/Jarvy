@@ -1,42 +1,15 @@
-use crate::tools::common::InstallError;
-#[cfg(target_os = "macos")]
-use crate::tools::common::{has, run};
+//! iterm2 - iTerm2 terminal emulator
+//!
+//! This tool uses the ToolSpec pattern for declarative installation.
+//! Note: macOS only via Homebrew cask.
 
-/// Ensure iTerm2 is installed. Only supported on macOS via Homebrew cask.
-/// Version hint is ignored.
-pub fn ensure(_min_hint: &str) -> Result<(), InstallError> {
-    // There isn't a canonical CLI to probe; rely on brew presence/install
-    install()
-}
+use crate::define_tool;
 
-/// Registry adapter: allows tools::add("iterm2", version) to dispatch here
-pub fn add_handler(min_hint: &str) -> Result<(), InstallError> {
-    let _ = min_hint;
-    ensure("")
-}
-
-fn install() -> Result<(), InstallError> {
-    #[cfg(target_os = "macos")]
-    {
-        return install_macos();
-    }
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
-    {
-        return Err(InstallError::Unsupported);
-    }
-    #[allow(unreachable_code)]
-    Err(InstallError::Unsupported)
-}
-
-#[cfg(target_os = "macos")]
-fn install_macos() -> Result<(), InstallError> {
-    if !has("brew") {
-        return Err(InstallError::Prereq(
-            "Homebrew not found. Install https://brew.sh and re-run.",
-        ));
-    }
-    run("brew", &["install", "--cask", "iterm2"]).map(|_| ())
-}
+define_tool!(ITERM2, {
+    command: "iterm2",
+    macos: { cask: "iterm2" },
+    // No Linux or Windows support - macOS only
+});
 
 #[cfg(test)]
 mod tests {

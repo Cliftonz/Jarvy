@@ -1,0 +1,146 @@
+{
+  "id": "T9",
+  "parent_prd": "PRD-002",
+  "title": "Clean Up Old Implementations",
+  "description": "Remove deprecated boilerplate code after all tools are migrated to ToolSpec pattern",
+  "status": "completed",
+  "completed_date": "2025-01-14",
+  "completion_notes": "Cleanup was performed as part of T8 migration - old boilerplate replaced entirely with ToolSpec pattern",
+  "priority": "medium",
+  "dependencies": ["T8"],
+  "estimated_complexity": "low",
+  "files_to_modify": [
+    "src/tools/*/*.rs",
+    "src/tools/mod.rs",
+    "src/tools/common.rs"
+  ],
+  "acceptance_criteria": [
+    "Old ensure(), add_handler(), install() boilerplate removed",
+    "Only ToolSpec definitions remain in tool files",
+    "No dead code warnings from cargo clippy",
+    "Code coverage maintained or improved",
+    "All tests pass"
+  ],
+  "subtasks": [
+    {
+      "id": "T9.1",
+      "title": "Audit remaining boilerplate",
+      "description": "Identify any remaining manual implementations that weren't migrated",
+      "status": "pending",
+      "commands": [
+        "grep -r 'fn ensure' src/tools/*/",
+        "grep -r 'fn install_macos' src/tools/*/",
+        "grep -r 'fn install_linux' src/tools/*/",
+        "grep -r 'fn install_windows' src/tools/*/"
+      ],
+      "acceptance_criteria": [
+        "List of files with remaining boilerplate identified",
+        "Reason documented for any that can't be removed"
+      ]
+    },
+    {
+      "id": "T9.2",
+      "title": "Remove old function implementations",
+      "description": "Delete deprecated ensure/install functions from each tool file",
+      "status": "pending",
+      "files": ["src/tools/*/*.rs"],
+      "patterns_to_remove": [
+        "fn ensure(_min_hint: &str) -> Result<(), InstallError> { ... }",
+        "fn add_handler(min_hint: &str) -> Result<(), InstallError> { ... }",
+        "fn install() -> Result<(), InstallError> { ... }",
+        "fn install_macos() -> Result<(), InstallError> { ... }",
+        "fn install_linux() -> Result<(), InstallError> { ... }",
+        "fn install_windows() -> Result<(), InstallError> { ... }"
+      ],
+      "acceptance_criteria": [
+        "All boilerplate functions removed from migrated tools",
+        "Only define_tool! macro invocations remain"
+      ]
+    },
+    {
+      "id": "T9.3",
+      "title": "Simplify tool file structure",
+      "description": "Reduce each tool file to minimal define_tool! invocation plus tests",
+      "status": "pending",
+      "target_structure": "//! Tool description\n\nuse crate::define_tool;\n\ndefine_tool!(TOOL_NAME, {\n    command: \"cmd\",\n    macos: { brew: \"pkg\" },\n    linux: { uniform: \"pkg\" },\n    windows: { winget: \"Pkg.Id\" },\n});\n\n#[cfg(test)]\nmod tests { ... }",
+      "acceptance_criteria": [
+        "Each tool file follows consistent structure",
+        "No unnecessary imports or dead code",
+        "Average tool file size reduced to ~25-30 lines"
+      ]
+    },
+    {
+      "id": "T9.4",
+      "title": "Clean up register_all() in mod.rs",
+      "description": "Remove manual registration lines if auto-registration is implemented",
+      "status": "pending",
+      "files": ["src/tools/mod.rs"],
+      "acceptance_criteria": [
+        "Manual register_tool() calls removed",
+        "Auto-registration loop handles all tools",
+        "Module structure simplified"
+      ]
+    },
+    {
+      "id": "T9.5",
+      "title": "Remove unused common.rs helpers",
+      "description": "Clean up helper functions that are no longer needed after abstraction",
+      "status": "pending",
+      "files": ["src/tools/common.rs"],
+      "potential_removals": [
+        "Functions only used by old boilerplate",
+        "Duplicate functionality now in ToolSpec"
+      ],
+      "note": "Be careful not to remove functions still used by custom_install hooks",
+      "acceptance_criteria": [
+        "Unused functions identified and removed",
+        "No cargo clippy dead_code warnings",
+        "Custom install hooks still have access to needed utilities"
+      ]
+    },
+    {
+      "id": "T9.6",
+      "title": "Run clippy and fix all warnings",
+      "description": "Ensure no dead code or unused import warnings remain",
+      "status": "pending",
+      "commands": [
+        "cargo clippy --all-features -- -D warnings",
+        "cargo clippy --all-targets -- -D warnings"
+      ],
+      "acceptance_criteria": [
+        "Zero clippy warnings",
+        "Zero dead_code warnings",
+        "Zero unused_imports warnings"
+      ]
+    },
+    {
+      "id": "T9.7",
+      "title": "Verify test coverage",
+      "description": "Ensure code coverage is maintained after cleanup",
+      "status": "pending",
+      "commands": [
+        "cargo tarpaulin --out Html"
+      ],
+      "acceptance_criteria": [
+        "Code coverage >= previous level",
+        "All critical paths still tested",
+        "Test report generated"
+      ]
+    }
+  ],
+  "expected_outcomes": {
+    "lines_of_code_reduction": "~3,000 lines removed",
+    "average_tool_file_size": "~25 lines (down from ~80)",
+    "maintenance_burden": "Significantly reduced"
+  },
+  "risks": [
+    {
+      "description": "Accidentally removing code still in use",
+      "mitigation": "Run full test suite after each removal batch"
+    },
+    {
+      "description": "Breaking custom_install hooks",
+      "mitigation": "Carefully audit dependencies before removing common.rs functions"
+    }
+  ]
+}

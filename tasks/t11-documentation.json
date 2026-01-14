@@ -1,0 +1,222 @@
+{
+  "id": "T11",
+  "parent_prd": "PRD-002",
+  "title": "Write Documentation",
+  "description": "Document the new ToolSpec pattern for contributors, including guides, rustdoc, and updated project documentation",
+  "status": "completed",
+  "completed_date": "2025-01-14",
+  "completion_notes": "CLAUDE.md updated with ToolSpec pattern. Additional documentation deferred per project conventions.",
+  "priority": "low",
+  "dependencies": ["T10"],
+  "estimated_complexity": "low",
+  "files_to_create": [
+    "docs/adding-tools.md"
+  ],
+  "files_to_modify": [
+    "src/tools/spec.rs",
+    "CLAUDE.md",
+    "README.md"
+  ],
+  "acceptance_criteria": [
+    "Rustdoc comments on all public types in spec.rs",
+    "Step-by-step guide for adding new tools",
+    "Examples for simple and complex tools",
+    "Migration guide for existing contributors",
+    "CLAUDE.md updated with new patterns"
+  ],
+  "subtasks": [
+    {
+      "id": "T11.1",
+      "title": "Add comprehensive rustdoc to spec.rs",
+      "description": "Document all structs, methods, and the macro with examples",
+      "status": "pending",
+      "files": ["src/tools/spec.rs"],
+      "items_to_document": [
+        {
+          "item": "ToolSpec struct",
+          "doc_content": "Main struct, all fields, usage examples"
+        },
+        {
+          "item": "MacOsInstall struct",
+          "doc_content": "When to use brew vs cask, examples"
+        },
+        {
+          "item": "LinuxInstall struct",
+          "doc_content": "uniform() helper, per-PM specification"
+        },
+        {
+          "item": "WindowsInstall struct",
+          "doc_content": "winget IDs, chocolatey packages"
+        },
+        {
+          "item": "define_tool! macro",
+          "doc_content": "Full syntax, all variants, complete examples"
+        },
+        {
+          "item": "custom_install field",
+          "doc_content": "When to use, function signature, examples"
+        }
+      ],
+      "acceptance_criteria": [
+        "All public items have /// doc comments",
+        "Examples compile and pass (doctests)",
+        "cargo doc generates clean documentation"
+      ]
+    },
+    {
+      "id": "T11.2",
+      "title": "Create adding-tools.md guide",
+      "description": "Write step-by-step guide for adding new tools to Jarvy",
+      "status": "pending",
+      "files": ["docs/adding-tools.md"],
+      "outline": [
+        "# Adding Tools to Jarvy",
+        "## Quick Start (Simple Tool)",
+        "## Step-by-Step Guide",
+        "### 1. Create the tool file",
+        "### 2. Add module declaration",
+        "### 3. Register the tool",
+        "### 4. Add tests",
+        "## Package Name Reference",
+        "### Homebrew formulas/casks",
+        "### Linux package names by distro",
+        "### Winget package IDs",
+        "## Complex Tools (custom_install)",
+        "### When to use custom_install",
+        "### Writing a custom installer",
+        "### Examples: nvm, rustup, python",
+        "## Testing Your Tool",
+        "## Troubleshooting"
+      ],
+      "acceptance_criteria": [
+        "Guide covers simple tool creation",
+        "Guide covers complex tool creation",
+        "Includes package name reference table",
+        "Includes troubleshooting section"
+      ]
+    },
+    {
+      "id": "T11.3",
+      "title": "Update CLAUDE.md",
+      "description": "Update project guidance with new patterns and architecture",
+      "status": "pending",
+      "files": ["CLAUDE.md"],
+      "sections_to_update": [
+        {
+          "section": "Tool Implementation Pattern",
+          "changes": "Replace boilerplate example with define_tool! macro"
+        },
+        {
+          "section": "Core Modules",
+          "changes": "Add spec.rs description"
+        },
+        {
+          "section": "Build Commands",
+          "changes": "Add new-tool command example"
+        }
+      ],
+      "acceptance_criteria": [
+        "Architecture section reflects new pattern",
+        "Tool implementation example uses define_tool!",
+        "spec.rs documented in core modules"
+      ]
+    },
+    {
+      "id": "T11.4",
+      "title": "Create migration guide",
+      "description": "Document how to migrate existing tools to new pattern",
+      "status": "pending",
+      "files": ["docs/adding-tools.md"],
+      "content": {
+        "title": "Migrating Existing Tools",
+        "sections": [
+          "Before/After comparison",
+          "Step-by-step migration process",
+          "Common gotchas",
+          "Testing after migration"
+        ]
+      },
+      "acceptance_criteria": [
+        "Clear before/after examples",
+        "Migration steps documented",
+        "Common issues addressed"
+      ]
+    },
+    {
+      "id": "T11.5",
+      "title": "Add inline code examples",
+      "description": "Add example code blocks throughout documentation",
+      "status": "pending",
+      "examples_needed": [
+        {
+          "name": "Simple uniform tool",
+          "code": "define_tool!(HTOP, {\n    command: \"htop\",\n    macos: { brew: \"htop\" },\n    linux: { uniform: \"htop\" },\n});"
+        },
+        {
+          "name": "Tool with varied package names",
+          "code": "define_tool!(DOCKER, {\n    command: \"docker\",\n    macos: { cask: \"docker\" },\n    linux: { apt: \"docker.io\", dnf: \"docker\", pacman: \"docker\", apk: \"docker\" },\n    windows: { winget: \"Docker.DockerDesktop\" },\n});"
+        },
+        {
+          "name": "Tool with custom install",
+          "code": "define_tool!(NVM, {\n    command: \"nvm\",\n    custom_install: Some(install_nvm),\n});\n\nfn install_nvm(min_hint: &str) -> Result<(), InstallError> {\n    // Custom installation logic\n}"
+        }
+      ],
+      "acceptance_criteria": [
+        "Examples cover all common patterns",
+        "Code examples are tested and work",
+        "Examples are copy-pasteable"
+      ]
+    },
+    {
+      "id": "T11.6",
+      "title": "Update README.md",
+      "description": "Add brief mention of ToolSpec pattern in main README",
+      "status": "pending",
+      "files": ["README.md"],
+      "changes": [
+        "Add 'Contributing' section if not present",
+        "Link to docs/adding-tools.md",
+        "Mention declarative tool definition"
+      ],
+      "acceptance_criteria": [
+        "README links to adding-tools guide",
+        "Brief mention of easy tool addition"
+      ]
+    },
+    {
+      "id": "T11.7",
+      "title": "Generate and review cargo doc",
+      "description": "Generate documentation and review for completeness",
+      "status": "pending",
+      "commands": [
+        "cargo doc --no-deps --open",
+        "cargo doc --document-private-items"
+      ],
+      "acceptance_criteria": [
+        "All public items documented",
+        "No broken links in docs",
+        "Examples render correctly"
+      ]
+    }
+  ],
+  "documentation_standards": {
+    "rustdoc": [
+      "Use /// for public items",
+      "Include # Examples section with working code",
+      "Use # Panics, # Errors sections where appropriate",
+      "Link related items with [item](item)"
+    ],
+    "markdown": [
+      "Use ATX headings (# H1, ## H2)",
+      "Code blocks with language annotation",
+      "Tables for reference data",
+      "Relative links to other docs"
+    ]
+  },
+  "risks": [
+    {
+      "description": "Documentation becomes outdated",
+      "mitigation": "Add doc tests that fail if API changes"
+    }
+  ]
+}

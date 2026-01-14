@@ -25,15 +25,35 @@ Jarvy is a cross-platform CLI tool that provisions development environments from
 - **`src/config.rs`** - Parses `jarvy.toml` using serde. Supports simple (`git = "2.40"`) and detailed (`git = { version = "2.40", version_manager = true }`) formats
 - **`src/tools/registry.rs`** - Global `OnceLock<RwLock<HashMap>>` registry mapping tool names to handler functions
 - **`src/tools/common.rs`** - Shared utilities: `Os` enum, `InstallError` type, `run()`, `has()`, `cmd_satisfies()`, package manager detection
+- **`src/tools/spec.rs`** - ToolSpec pattern: `ToolSpec` struct and `define_tool!` macro for declarative tool definitions
 
 ### Tool Implementation Pattern
 
+Tools use the declarative `define_tool!` macro for minimal boilerplate:
+
+```rust
+//! jq - JSON processor
+use crate::define_tool;
+
+define_tool!(JQ, {
+    command: "jq",
+    macos: { brew: "jq" },
+    linux: { uniform: "jq" },
+    windows: { winget: "jqlang.jq" },
+});
+```
+
 Each tool lives in `src/tools/{name}/` with two files:
-- `mod.rs` - Re-exports the handler
-- `{name}.rs` - Implementation with:
-  - `add_handler(min_hint: &str) -> Result<(), InstallError>` - Registry adapter
-  - `ensure(min_hint: &str) -> Result<(), InstallError>` - Main logic
-  - Platform-specific `install_macos()`, `install_linux()`, `install_windows()` using `#[cfg(target_os = "...")]`
+- `mod.rs` - Re-exports with `pub use {name}::*;`
+- `{name}.rs` - Tool definition using `define_tool!` macro
+
+**Macro variants:**
+- `macos: { brew: "pkg" }` - Homebrew formula
+- `macos: { cask: "pkg" }` - Homebrew cask (GUI apps)
+- `linux: { uniform: "pkg" }` - Same package name across all distros
+- `linux: { apt: "x", dnf: "y", pacman: "z", apk: "w" }` - Different names per package manager
+- `windows: { winget: "Publisher.Package" }` - Winget package ID
+- `custom_install: Some(fn_name)` - For tools needing shell scripts (nvm, rustup, brew)
 
 Tools are registered in `src/tools/mod.rs` via `register_all()`.
 

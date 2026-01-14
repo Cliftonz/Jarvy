@@ -1,0 +1,332 @@
+# PRD-004: Semantic Version Checking - Implementation Progress
+
+## Started: 2025-01-13
+## Completed: 2025-01-13
+
+## Implementation Summary
+
+Successfully implemented proper semantic version checking to replace the buggy substring-based matching.
+
+### Changes Made
+
+1. **Added Dependencies** (Cargo.toml)
+   - `semver = "1.0"` - For semantic version parsing and comparison
+   - `regex = "1.11"` - For extracting versions from tool output
+   - `once_cell = "1.20"` - For lazy static regex compilation
+
+2. **Created New Module** (src/tools/version.rs)
+   - `ExtractedVersion` struct to hold parsed version components
+   - `extract_version()` - Extracts version from various tool output formats
+   - `version_satisfies()` - Main comparison function with semver support
+   - `parse_requirement()` - Converts version strings to semver requirements
+   - 24 comprehensive unit tests
+
+3. **Updated cmd_satisfies()** (src/tools/common.rs)
+   - Now delegates to `version_satisfies()` from the new version module
+   - Supports semver operators: `>=`, `<`, `^`, `~`, `=`
+   - Supports version ranges: `">= 3.10, < 4.0"`
+   - Handles special keywords: `latest`, `*`
+
+### Key Design Decisions
+
+1. **Module Location**: Placed version.rs in `src/tools/` instead of crate root
+   - This allows access via `super::version` from common.rs
+   - Works for both library and binary compilation
+
+2. **Requirement Parsing Strategy**:
+   - Bare versions like "3.10" are NOT passed to semver directly
+   - Reason: semver interprets "3.10.5" as "^3.10.5" which is too permissive
+   - Instead, we manually convert:
+     - "20" → `>=20.0.0, <21.0.0` (major match)
+     - "3.10" → `>=3.10.0, <3.11.0` (major.minor match)
+     - "3.10.5" → `=3.10.5` (exact match)
+
+3. **Fallback Handling**: Smart substring matching for unparseable versions
+   - Uses component-boundary matching to prevent false positives
+   - "3.1" won't match "3.10.0" anymore
+
+### Bugs Fixed
+
+1. **False positive substring match**: "2.4" no longer matches "12.40.0"
+2. **Embedded number match**: "3.1" no longer matches "3.10.0" or "3.11.0"
+3. **Exact version mismatch**: "3.10.5" now correctly rejects "3.10.6"
+
+### Version Formats Supported
+
+| Tool | Output Format | Extracted |
+|------|---------------|-----------|
+| git | `git version 2.44.0` | 2.44.0 |
+| node | `v20.10.0` | 20.10.0 |
+| python | `Python 3.12.1` | 3.12.1 |
+| docker | `Docker version 24.0.7, build afdd53b` | 24.0.7 |
+| rustc | `rustc 1.75.0 (82e1608df 2023-12-21)` | 1.75.0 |
+| go | `go version go1.21.5 darwin/arm64` | 1.21.5 |
+
+### Test Results
+
+- 24/24 version-specific tests passing
+- All existing tests continue to pass
+- Doc tests passing
+
+### Learnings
+
+1. **Rust module system**: Binary and library have separate module trees
+   - `mod tools;` in main.rs creates a binary-local module
+   - `pub mod tools;` in lib.rs exports from library
+   - Use `super::` for relative imports within same tree
+
+2. **Semver crate behavior**: Bare version numbers default to caret (^)
+   - `VersionReq::parse("3.10.5")` returns `^3.10.5`, not exact match
+   - Must explicitly use `=3.10.5` for exact matching
+
+3. **Regex for version extraction**: Single regex handles most formats
+   - Pattern: `v?(\d+)\.(\d+)(?:\.(\d+))?(?:-([a-zA-Z0-9.-]+))?`
+   - Handles optional v prefix, optional patch, optional prerelease
+
+## Files Modified
+
+- `Cargo.toml` - Added 3 new dependencies
+- `src/tools/mod.rs` - Added `pub mod version;`
+- `src/tools/version.rs` - New file (387 lines)
+- `src/tools/common.rs` - Updated `cmd_satisfies()` function
+- `src/lib.rs` - No changes needed (version accessed via tools)
+
+---
+
+# PRD-002: Tool Specification Abstraction - Implementation Progress
+
+## Started: 2025-01-14
+## Status: Phase 1 Complete (Proof of Concept)
+
+## Implementation Summary
+
+Successfully implemented the ToolSpec abstraction pattern to eliminate boilerplate across tool implementations. Migrated 5 proof-of-concept tools from ~400 lines to ~100 lines.
+
+### Changes Made
+
+1. **Added Dependencies** (Cargo.toml)
+   - `phf = { version = "0.11", features = ["macros"] }` - For compile-time hash maps (future package registry)
+
+2. **Created New Module** (src/tools/spec.rs - 376 lines)
+   - `ToolSpec` struct - Declarative tool definition with platform-specific install options
+   - `MacOsInstall` struct - Homebrew formula/cask options
+   - `LinuxInstall` struct - apt/dnf/yum/zypper/pacman/apk package mappings
+   - `WindowsInstall` struct - winget/chocolatey package mappings
+   - `CustomInstallFn` type - Function pointer for complex tools needing custom logic
+   - `define_tool!` macro - Ergonomic syntax for tool definitions
+   - 6 unit tests for struct helpers
+
+3. **Migrated 5 Tools** (git, jq, wget, tree, ripgrep)
+   - **Before**: Each tool ~80 lines of boilerplate
+   - **After**: Each tool ~25 lines using `define_tool!` macro
+
+### Code Reduction Examples
+
+**Before (jq.rs - 83 lines)**:
+```rust
+pub fn ensure(_min_hint: &str) -> Result<(), InstallError> {
+    if has("jq") { return Ok(()); }
+    install()
+}
+pub fn add_handler(min_hint: &str) -> Result<(), InstallError> { ... }
+fn install() -> Result<(), InstallError> {
+    #[cfg(target_os = "macos")] { return install_macos(); }
+    #[cfg(target_os = "linux")] { return install_linux(); }
+    #[cfg(target_os = "windows")] { return install_windows(); }
+}
+fn install_macos() -> Result<(), InstallError> { ... }
+fn install_linux() -> Result<(), InstallError> { ... }
+fn install_windows() -> Result<(), InstallError> { ... }
+```
+
+**After (jq.rs - 24 lines)**:
+```rust
+use crate::define_tool;
+
+define_tool!(JQ, {
+    command: "jq",
+    macos: { brew: "jq" },
+    linux: { uniform: "jq" },
+    windows: { winget: "jqlang.jq" },
+});
+```
+
+### Key Design Decisions
+
+1. **Macro vs Struct Only**: Chose hybrid approach
+   - Structs provide type safety and IDE autocomplete
+   - Macro provides ergonomic syntax for common cases
+   - Macro expands to full struct + ensure() + add_handler() functions
+
+2. **Platform Install Abstraction**:
+   - `LinuxInstall::uniform(name)` - When all package managers use same name
+   - Individual fields for tools with different names per PM
+   - `Option<...>` for platforms that don't support the tool
+
+3. **Custom Install Hook**: `custom_install: Option<fn(&str) -> Result<(), InstallError>>`
+   - For complex tools like nvm, rustup that need special logic
+   - Takes precedence over standard package manager installs
+
+4. **Closure Limitation**: Can't return closure from `into_handler()`
+   - Closures capturing `self` can't be coerced to `fn` pointers
+   - Solution: Macro generates `ensure()` and `add_handler()` directly
+
+### Macro Syntax Variants Supported
+
+```rust
+// Homebrew formula
+macos: { brew: "git" }
+
+// Homebrew cask (for GUI apps)
+macos: { cask: "visual-studio-code" }
+
+// Uniform Linux package name
+linux: { uniform: "git" }
+
+// Full Linux specification
+linux: { apt: "git", dnf: "git", pacman: "git", apk: "git" }
+
+// Windows winget
+windows: { winget: "Git.Git" }
+
+// No Windows support (built-in like tree.exe)
+// Simply omit the windows: block
+```
+
+### Test Results
+
+- 75/75 library tests passing
+- All 5 migrated tools work correctly
+- 6 new spec module tests passing
+
+### Learnings
+
+1. **Rust Macros**: Declarative macros (`macro_rules!`) work well for this pattern
+   - Use `$($key:ident: $val:expr),*` for optional repeated fields
+   - Helper rules (@macos, @linux, etc.) make complex macros manageable
+   - `stringify!($name)` converts identifier to string literal
+
+2. **Static Lifetime**: `ToolSpec` uses `&'static str` throughout
+   - Allows static definition: `pub static GIT: ToolSpec = ...`
+   - Zero runtime allocation
+   - Works with `const fn` constructors
+
+3. **Conditional Compilation**: `#[cfg(target_os)]` in impl blocks
+   - Can have different methods for different platforms
+   - Use `#[cfg(target_os = "linux")]` on imports too
+
+4. **Function Pointers vs Closures**: Key limitation
+   - `fn(&str) -> Result<(), E>` is a function pointer type
+   - Closures capturing variables have different, non-coercible types
+   - Solution: Generate concrete functions via macro
+
+### Files Created/Modified
+
+- `Cargo.toml` - Added phf dependency
+- `src/tools/mod.rs` - Added `pub mod spec;`
+- `src/tools/spec.rs` - New file (376 lines)
+- `src/tools/git/git.rs` - Migrated to ToolSpec (80 → 79 lines, but simpler)
+- `src/tools/jq/jq.rs` - Migrated to ToolSpec (83 → 24 lines)
+- `src/tools/wget/wget.rs` - Migrated to ToolSpec (83 → 24 lines)
+- `src/tools/tree/tree.rs` - Migrated to ToolSpec (82 → 25 lines)
+- `src/tools/ripgrep/ripgrep.rs` - Migrated to ToolSpec (88 → 25 lines)
+
+### Remaining Work (Future Tasks)
+
+1. **T7**: Implement auto-registration with inventory/linkme crate
+2. **T8**: Migrate remaining 37 tools
+3. **T9**: Clean up old boilerplate after migration
+4. **T10**: Update cargo-jarvy new-tool scaffolding
+5. **T11**: Write documentation
+
+---
+
+## T8 Progress Update: 2025-01-14
+
+### Tools Migrated to ToolSpec Pattern (36 total)
+
+**Batch 1 (Proof of Concept)**:
+- git, jq, wget, tree, ripgrep (5 tools)
+
+**Batch 2**:
+- htop, tmux, make, yq, xz, zsh (6 tools)
+
+**Batch 3**:
+- docker, terraform, packer, opentofu, k6, ngrok (6 tools)
+
+**Batch 4**:
+- nvim, vscode, cue, tilt, up, talosctl (6 tools)
+
+**Batch 5**:
+- iterm2, gleam, elixir, air, powershell, atlas (6 tools)
+
+**Batch 6**:
+- ruby, php, dotnet, awscli, go, python, node (7 tools)
+
+### Tools NOT Migrated (3 remaining - require custom installers)
+
+1. **nvm** - Uses curl script on POSIX, winget on Windows
+2. **rust** - Uses rustup shell script installer
+3. **brew** - Uses Homebrew install script
+
+These tools have special installation logic that cannot be represented
+with the standard package manager patterns. They remain using manual
+implementation.
+
+### Key Learnings from Migration
+
+1. **Tap Support**: Homebrew taps work with the macro (e.g., `upbound/tap/up`)
+2. **Different Linux Package Names**: Use expanded form:
+   ```rust
+   linux: { apt: "docker.io", dnf: "docker", pacman: "docker", apk: "docker" }
+   ```
+3. **Cask vs Formula**: The macro handles both via `macos: { cask: "..." }` or `macos: { brew: "..." }`
+4. **Platform Omission**: Simply omit the platform block for unsupported platforms
+
+### Statistics
+
+- **Total Tools**: 39
+- **Migrated**: 36 (92%)
+- **Custom Install**: 3 (8%)
+- **Average Lines Saved**: ~55 lines per tool
+- **Total Lines Reduced**: ~2000 lines
+
+---
+
+## T9 Completed: 2025-01-14
+
+Cleanup was performed as part of T8 migration. Old boilerplate was replaced entirely
+with the new ToolSpec pattern. Clippy passes with no warnings.
+
+---
+
+## T10 Completed: 2025-01-14
+
+Updated cargo-jarvy new-tool scaffolding:
+- Changed template path from `provisioner/` to `src/tools/`
+- Updated _template.rs to use `define_tool!` macro pattern
+- Generator now creates proper subdirectory structure (src/tools/{name}/{name}.rs)
+- Updated output messages to reflect new pattern
+
+---
+
+## T11 Completed: 2025-01-14
+
+Updated CLAUDE.md with:
+- New ToolSpec pattern documentation
+- Added spec.rs to Core Modules section
+- Updated Tool Implementation Pattern with define_tool! examples
+- Documented all macro variants
+
+---
+
+## Overall PRD-002 Status: COMPLETE
+
+All tasks T8-T11 have been completed:
+- ✅ T8: Migrated 36/39 tools to ToolSpec pattern (3 remain with custom installers)
+- ✅ T9: Cleanup completed as part of migration
+- ✅ T10: cargo-jarvy new-tool scaffolding updated
+- ✅ T11: Documentation updated in CLAUDE.md
+
+Note: T7 (auto-registration with inventory crate) was marked as deferred/pending
+as it was a "nice-to-have" optimization rather than core functionality.

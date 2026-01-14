@@ -1,0 +1,210 @@
+{
+  "id": "T8",
+  "parent_prd": "PRD-002",
+  "title": "Migrate Remaining 37 Tools to ToolSpec",
+  "description": "Convert all remaining tool implementations from boilerplate pattern to ToolSpec/define_tool! pattern",
+  "status": "completed",
+  "completed_date": "2025-01-14",
+  "priority": "high",
+  "dependencies": ["T6", "T5"],
+  "estimated_complexity": "high",
+  "files_to_modify": [
+    "src/tools/*/*.rs"
+  ],
+  "acceptance_criteria": [
+    "All 42 tools use ToolSpec pattern",
+    "Complex tools (nvm, rustup, python, node, go) use custom_install hook",
+    "All existing tests pass",
+    "No regression in installation functionality",
+    "Code reduction of ~60-80% per tool"
+  ],
+  "subtasks": [
+    {
+      "id": "T8.1",
+      "title": "Categorize tools by complexity",
+      "description": "Identify which tools need custom_install vs standard ToolSpec",
+      "status": "pending",
+      "categories": {
+        "simple_uniform": {
+          "description": "Tools where package name is same across all package managers",
+          "tools": ["htop", "tmux", "make", "xz", "zsh", "curl"],
+          "pattern": "linux: { uniform: \"name\" }"
+        },
+        "simple_varied": {
+          "description": "Tools with different names per package manager",
+          "tools": ["docker", "terraform", "packer", "yq", "k6", "ngrok"],
+          "pattern": "linux: { apt: \"x\", dnf: \"y\", ... }"
+        },
+        "macos_only": {
+          "description": "Tools only available/relevant on macOS",
+          "tools": ["brew", "iterm2"],
+          "pattern": "linux: None, windows: None"
+        },
+        "complex_custom": {
+          "description": "Tools requiring custom installation logic",
+          "tools": ["nvm", "rust", "python", "node", "go", "awscli", "dotnet"],
+          "pattern": "custom_install: Some(custom_fn)"
+        }
+      },
+      "acceptance_criteria": [
+        "All 37 remaining tools categorized",
+        "Custom install requirements documented for complex tools"
+      ]
+    },
+    {
+      "id": "T8.2",
+      "title": "Migrate simple tools - Batch 1 (10 tools)",
+      "description": "Convert first batch of simple tools to ToolSpec pattern",
+      "status": "pending",
+      "tools": [
+        {"name": "htop", "category": "simple_uniform", "linux_pkg": "htop"},
+        {"name": "tmux", "category": "simple_uniform", "linux_pkg": "tmux"},
+        {"name": "make", "category": "simple_uniform", "linux_pkg": "make"},
+        {"name": "yq", "category": "simple_uniform", "linux_pkg": "yq"},
+        {"name": "xz", "category": "simple_uniform", "linux_pkg": "xz-utils"},
+        {"name": "zsh", "category": "simple_uniform", "linux_pkg": "zsh"},
+        {"name": "nvim", "category": "simple_varied", "note": "neovim on some PMs"},
+        {"name": "k6", "category": "simple_varied", "note": "needs tap on brew"},
+        {"name": "ngrok", "category": "simple_varied", "note": "cask on macOS"},
+        {"name": "tilt", "category": "simple_varied", "note": "needs custom tap"}
+      ],
+      "acceptance_criteria": [
+        "All 10 tools migrated",
+        "Tests pass for each tool",
+        "Installation behavior unchanged"
+      ]
+    },
+    {
+      "id": "T8.3",
+      "title": "Migrate simple tools - Batch 2 (10 tools)",
+      "description": "Convert second batch of simple tools to ToolSpec pattern",
+      "status": "pending",
+      "tools": [
+        {"name": "docker", "category": "simple_varied", "note": "docker.io on apt"},
+        {"name": "terraform", "category": "simple_varied", "note": "hashicorp tap"},
+        {"name": "packer", "category": "simple_varied", "note": "hashicorp tap"},
+        {"name": "opentofu", "category": "simple_varied", "note": "opentofu tap"},
+        {"name": "vscode", "category": "cask", "note": "visual-studio-code cask"},
+        {"name": "atlas", "category": "simple_varied", "note": "ariga tap"},
+        {"name": "cue", "category": "simple_uniform", "linux_pkg": "cue"},
+        {"name": "up", "category": "simple_varied", "note": "upbound tap"},
+        {"name": "talosctl", "category": "simple_varied", "note": "siderolabs tap"},
+        {"name": "air", "category": "simple_varied", "note": "go install fallback"}
+      ],
+      "acceptance_criteria": [
+        "All 10 tools migrated",
+        "Tests pass for each tool",
+        "Installation behavior unchanged"
+      ]
+    },
+    {
+      "id": "T8.4",
+      "title": "Migrate simple tools - Batch 3 (remaining simple)",
+      "description": "Convert remaining simple tools to ToolSpec pattern",
+      "status": "pending",
+      "tools": [
+        {"name": "brew", "category": "macos_only", "note": "self-installing"},
+        {"name": "iterm2", "category": "macos_only", "note": "cask only"},
+        {"name": "php", "category": "simple_varied"},
+        {"name": "ruby", "category": "simple_varied"},
+        {"name": "elixir", "category": "simple_varied"},
+        {"name": "gleam", "category": "simple_varied"},
+        {"name": "powershell", "category": "windows_special"}
+      ],
+      "acceptance_criteria": [
+        "All remaining simple tools migrated",
+        "Tests pass for each tool",
+        "Installation behavior unchanged"
+      ]
+    },
+    {
+      "id": "T8.5",
+      "title": "Migrate complex tools with custom_install",
+      "description": "Convert tools requiring custom installation logic",
+      "status": "pending",
+      "tools": [
+        {
+          "name": "nvm",
+          "reason": "Shell script installation, PATH modification",
+          "custom_logic": "curl installer, shell profile update"
+        },
+        {
+          "name": "rust",
+          "reason": "rustup installer with component selection",
+          "custom_logic": "rustup-init script, toolchain selection"
+        },
+        {
+          "name": "python",
+          "reason": "Version manager support (pyenv), multiple install methods",
+          "custom_logic": "pyenv or system python, version selection"
+        },
+        {
+          "name": "node",
+          "reason": "Version manager support (nvm, fnm), multiple install methods",
+          "custom_logic": "nvm or direct install, version selection"
+        },
+        {
+          "name": "go",
+          "reason": "Version-specific downloads, GOPATH setup",
+          "custom_logic": "Official tarball or package manager"
+        },
+        {
+          "name": "awscli",
+          "reason": "Bundled installer on some platforms",
+          "custom_logic": "pip install or bundled installer"
+        },
+        {
+          "name": "dotnet",
+          "reason": "Microsoft installer scripts",
+          "custom_logic": "dotnet-install.sh script"
+        }
+      ],
+      "acceptance_criteria": [
+        "All complex tools migrated with custom_install",
+        "Custom logic preserved from original implementations",
+        "Tests pass for each tool",
+        "Installation behavior unchanged"
+      ]
+    },
+    {
+      "id": "T8.6",
+      "title": "Run full test suite and integration tests",
+      "description": "Verify all tools work correctly after migration",
+      "status": "pending",
+      "commands": [
+        "cargo test --all",
+        "cargo test --test tools_install",
+        "cargo test --test tools_matrix"
+      ],
+      "acceptance_criteria": [
+        "All unit tests pass",
+        "All integration tests pass",
+        "No regressions in tool installation"
+      ]
+    }
+  ],
+  "tool_inventory": {
+    "already_migrated": [
+      "git", "jq", "wget", "tree", "ripgrep",
+      "htop", "tmux", "make", "yq", "xz", "zsh",
+      "docker", "terraform", "packer", "opentofu", "k6", "ngrok",
+      "nvim", "vscode", "cue", "tilt", "up", "talosctl",
+      "iterm2", "gleam", "elixir", "air", "powershell", "atlas",
+      "ruby", "php", "dotnet", "awscli", "go", "python", "node"
+    ],
+    "not_migrated": ["nvm", "rust", "brew"],
+    "not_migrated_reason": "Require custom shell script installers",
+    "remaining_count": 0,
+    "total": 39
+  },
+  "risks": [
+    {
+      "description": "Complex tools may have edge cases not captured in ToolSpec",
+      "mitigation": "Preserve original logic in custom_install functions"
+    },
+    {
+      "description": "Package names may vary between distro versions",
+      "mitigation": "Test on multiple Linux distributions in CI"
+    }
+  ]
+}

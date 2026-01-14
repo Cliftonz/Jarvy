@@ -1,0 +1,127 @@
+{
+  "id": "T10",
+  "parent_prd": "PRD-002",
+  "title": "Update cargo-jarvy new-tool Scaffolding",
+  "description": "Update the new-tool generator command to emit ToolSpec-based code instead of boilerplate",
+  "status": "completed",
+  "completed_date": "2025-01-14",
+  "priority": "medium",
+  "dependencies": ["T8"],
+  "estimated_complexity": "low",
+  "files_to_modify": [
+    "crates/cargo-jarvy/src/main.rs",
+    "crates/cargo-jarvy/src/templates/"
+  ],
+  "acceptance_criteria": [
+    "cargo jarvy new-tool generates define_tool! macro usage",
+    "Generated code follows new ToolSpec pattern",
+    "Generated tool compiles and works correctly",
+    "Help text updated with new pattern examples"
+  ],
+  "subtasks": [
+    {
+      "id": "T10.1",
+      "title": "Audit current scaffolding implementation",
+      "description": "Understand how new-tool currently generates code",
+      "status": "pending",
+      "files": ["crates/cargo-jarvy/src/main.rs"],
+      "questions_to_answer": [
+        "How is the template stored (inline string, file, etc.)?",
+        "What variables are substituted?",
+        "Does it generate mod.rs updates too?"
+      ],
+      "acceptance_criteria": [
+        "Current implementation documented",
+        "Template location identified",
+        "Variable substitution understood"
+      ]
+    },
+    {
+      "id": "T10.2",
+      "title": "Design new template",
+      "description": "Create the new tool file template using define_tool! macro",
+      "status": "pending",
+      "new_template": "//! {{tool_name}} - {{description}}\n//!\n//! This tool uses the ToolSpec pattern for declarative installation.\n\nuse crate::define_tool;\n\ndefine_tool!({{TOOL_NAME_UPPER}}, {\n    command: \"{{command}}\",\n    macos: { brew: \"{{brew_pkg}}\" },\n    linux: { uniform: \"{{linux_pkg}}\" },\n    windows: { winget: \"{{winget_id}}\" },\n});\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn ensure_{{tool_name}}_no_panic() {\n        let res = ensure(\"\");\n        assert!(res.is_ok() || res.is_err());\n    }\n}",
+      "acceptance_criteria": [
+        "Template uses define_tool! macro",
+        "Placeholders for all required fields",
+        "Includes basic test"
+      ]
+    },
+    {
+      "id": "T10.3",
+      "title": "Update template in generator",
+      "description": "Replace old template with new ToolSpec-based template",
+      "status": "pending",
+      "files": ["crates/cargo-jarvy/src/main.rs"],
+      "acceptance_criteria": [
+        "Generator uses new template",
+        "All placeholders properly substituted",
+        "Generated file has correct formatting"
+      ]
+    },
+    {
+      "id": "T10.4",
+      "title": "Add interactive prompts for package names",
+      "description": "Prompt user for platform-specific package names if different from tool name",
+      "status": "pending",
+      "prompts_needed": [
+        "Tool name (e.g., 'mytool')",
+        "Command to check (default: tool name)",
+        "Homebrew formula/cask (default: tool name)",
+        "Linux package name (default: tool name)",
+        "Winget package ID (if known)"
+      ],
+      "acceptance_criteria": [
+        "User prompted for necessary information",
+        "Sensible defaults provided",
+        "Can skip optional fields"
+      ]
+    },
+    {
+      "id": "T10.5",
+      "title": "Update mod.rs generation",
+      "description": "If scaffolding updates mod.rs, ensure it works with new pattern",
+      "status": "pending",
+      "note": "May not be needed if auto-registration (T7) is implemented",
+      "acceptance_criteria": [
+        "mod.rs updated correctly (or not needed)",
+        "New tool accessible via registry"
+      ]
+    },
+    {
+      "id": "T10.6",
+      "title": "Test new-tool command",
+      "description": "Verify generated tool compiles and works correctly",
+      "status": "pending",
+      "test_steps": [
+        "cargo run -p cargo-jarvy -- new-tool test-tool",
+        "cargo check",
+        "cargo test test_tool",
+        "Verify tool appears in registry"
+      ],
+      "acceptance_criteria": [
+        "Generated tool compiles without errors",
+        "Generated tests pass",
+        "Tool can be used via jarvy setup"
+      ]
+    },
+    {
+      "id": "T10.7",
+      "title": "Update help text and examples",
+      "description": "Update CLI help to show new pattern",
+      "status": "pending",
+      "files": ["crates/cargo-jarvy/src/main.rs"],
+      "acceptance_criteria": [
+        "Help text reflects new pattern",
+        "Examples show define_tool! usage"
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "description": "Breaking existing new-tool workflow",
+      "mitigation": "Test thoroughly before merging"
+    }
+  ]
+}

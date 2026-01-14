@@ -1,0 +1,485 @@
+{
+  "id": "PRD-004",
+  "title": "Semantic Version Checking",
+  "version": "1.0.0",
+  "status": "proposed",
+  "priority": "high",
+  "tier": 1,
+  "created": "2025-01-13",
+  "overview": "Replace the current substring-based version matching with proper semantic versioning support, enabling version ranges and accurate version comparison.",
+  "problem_statement": {
+    "summary": "Current version checking in cmd_satisfies() uses simple substring matching which causes false positives and negatives.",
+    "current_implementation": {
+      "file": "src/tools/common.rs",
+      "lines": "154-160",
+      "code": "pub fn cmd_satisfies(cmd: &str, min_prefix: &str) -> bool {\n    if let Ok(out) = Command::new(cmd).arg(\"--version\").output() {\n        let s = String::from_utf8_lossy(&out.stdout);\n        return s.contains(min_prefix);  // BUG: Substring match!\n    }\n    false\n}"
+    },
+    "issues": [
+      {
+        "type": "false_positive",
+        "description": "\"2.4\" matches \"12.40\", \"2.401\", \"v2.4.0-beta\""
+      },
+      {
+        "type": "false_negative",
+        "description": "\"2.40\" doesn't match \"2.40.1\" if user expects it to"
+      },
+      {
+        "type": "missing_feature",
+        "description": "No range support - can't specify \">= 3.10, < 4.0\""
+      }
+    ],
+    "evidence": [
+      "cmd_satisfies(\"git\", \"2.4\") returns TRUE if git version is \"1.24\" (contains \"2.4\")",
+      "User specifies python = \"3.10\" expecting 3.10+, but 3.9 with substring \"3.1\" might pass",
+      "No tests exist for version matching logic"
+    ]
+  },
+  "requirements": {
+    "functional": [
+      {
+        "id": "FR-001",
+        "name": "Exact version matching",
+        "description": "\"3.10.0\" matches only 3.10.0"
+      },
+      {
+        "id": "FR-002",
+        "name": "Prefix matching",
+        "description": "\"3.10\" matches 3.10.x"
+      },
+      {
+        "id": "FR-003",
+        "name": "Range expressions",
+        "description": "Support \">= 3.10\", \"< 4.0\", \">= 3.10, < 4.0\""
+      },
+      {
+        "id": "FR-004",
+        "name": "Wildcards",
+        "description": "Support \"3.x\", \"3.10.x\", \"*\" (any version)"
+      },
+      {
+        "id": "FR-005",
+        "name": "Latest keyword",
+        "description": "\"latest\" always passes (skip check)"
+      },
+      {
+        "id": "FR-006",
+        "name": "Prerelease handling",
+        "description": "\"3.10.0-beta\" recognized but not matched by \"3.10\""
+      }
+    ],
+    "non_functional": [
+      {
+        "id": "NFR-001",
+        "name": "Universal parsing",
+        "description": "Parse version output from any tool format"
+      },
+      {
+        "id": "NFR-002",
+        "name": "Component handling",
+        "description": "Handle missing version components (e.g., \"3\" → \"3.0.0\")"
+      },
+      {
+        "id": "NFR-003",
+        "name": "Graceful fallback",
+        "description": "Support non-semver versions gracefully (fall back to prefix match)"
+      },
+      {
+        "id": "NFR-004",
+        "name": "Performance",
+        "description": "Zero performance regression on version checks"
+      }
+    ]
+  },
+  "version_formats": [
+    {
+      "tool": "git",
+      "output": "git version 2.44.0",
+      "extracted": "2.44.0"
+    },
+    {
+      "tool": "node",
+      "output": "v20.10.0",
+      "extracted": "20.10.0"
+    },
+    {
+      "tool": "python",
+      "output": "Python 3.12.1",
+      "extracted": "3.12.1"
+    },
+    {
+      "tool": "docker",
+      "output": "Docker version 24.0.7, build afdd53b",
+      "extracted": "24.0.7"
+    },
+    {
+      "tool": "rustc",
+      "output": "rustc 1.75.0 (82e1608df 2023-12-21)",
+      "extracted": "1.75.0"
+    },
+    {
+      "tool": "go",
+      "output": "go version go1.21.5 darwin/arm64",
+      "extracted": "1.21.5"
+    }
+  ],
+  "technical_approach": {
+    "version_extraction": {
+      "regex_pattern": "v?(\\d+)\\.(\\d+)(?:\\.(\\d+))?(?:-([a-zA-Z0-9.-]+))?",
+      "implementation": {
+        "language": "rust",
+        "code": "use regex::Regex;\n\nlazy_static! {\n    static ref VERSION_REGEX: Regex = Regex::new(\n        r\"v?(\\d+)\\.(\\d+)(?:\\.(\\d+))?(?:-([a-zA-Z0-9.-]+))?\"\n    ).unwrap();\n}\n\npub fn extract_version(output: &str) -> Option<Version> {\n    VERSION_REGEX.captures(output).map(|caps| {\n        Version {\n            major: caps[1].parse().unwrap(),\n            minor: caps[2].parse().unwrap(),\n            patch: caps.get(3).map(|m| m.as_str().parse().unwrap()).unwrap_or(0),\n            prerelease: caps.get(4).map(|m| m.as_str().to_string()),\n        }\n    })\n}"
+      }
+    },
+    "version_comparison": {
+      "implementation": {
+        "language": "rust",
+        "code": "use semver::{Version, VersionReq};\n\npub fn version_satisfies(installed: &str, requirement: &str) -> bool {\n    // Handle special cases\n    if requirement == \"latest\" || requirement == \"*\" {\n        return true;\n    }\n\n    // Try to parse as semver requirement\n    if let Ok(req) = VersionReq::parse(requirement) {\n        if let Some(ver) = extract_version(installed) {\n            return req.matches(&ver);\n        }\n    }\n\n    // Fall back to prefix matching for non-semver\n    installed.contains(requirement)\n}"
+      }
+    },
+    "syntax_reference": [
+      {
+        "syntax": "3.10",
+        "meaning": "3.10.x (any patch)",
+        "example_matches": ["3.10.0", "3.10.5"]
+      },
+      {
+        "syntax": "3.10.0",
+        "meaning": "Exactly 3.10.0",
+        "example_matches": ["3.10.0"]
+      },
+      {
+        "syntax": ">= 3.10",
+        "meaning": "3.10 or higher",
+        "example_matches": ["3.10", "3.11", "4.0"]
+      },
+      {
+        "syntax": "< 4.0",
+        "meaning": "Less than 4.0",
+        "example_matches": ["3.x"]
+      },
+      {
+        "syntax": ">= 3.10, < 4.0",
+        "meaning": "Range",
+        "example_matches": ["3.10", "3.11", "3.99"]
+      },
+      {
+        "syntax": "~3.10",
+        "meaning": "Compatible with 3.10",
+        "example_matches": ["3.10.x"]
+      },
+      {
+        "syntax": "^3.10",
+        "meaning": "Compatible with 3.x",
+        "example_matches": ["3.10+"]
+      },
+      {
+        "syntax": "latest",
+        "meaning": "Skip version check",
+        "example_matches": ["*"]
+      },
+      {
+        "syntax": "*",
+        "meaning": "Any version",
+        "example_matches": ["*"]
+      }
+    ]
+  },
+  "config_examples": {
+    "format": "toml",
+    "examples": [
+      {
+        "description": "Prefix matching (current behavior, still supported)",
+        "config": "git = \"2.40\""
+      },
+      {
+        "description": "Exact version",
+        "config": "node = \"20.10.0\""
+      },
+      {
+        "description": "Range expression",
+        "config": "python = \">= 3.10, < 4.0\""
+      },
+      {
+        "description": "Any version",
+        "config": "docker = \"*\""
+      },
+      {
+        "description": "Skip check",
+        "config": "terraform = \"latest\""
+      },
+      {
+        "description": "Complex example with version manager",
+        "config": "[tools.rust]\nversion = \"^1.70\"\nversion_manager = true"
+      }
+    ]
+  },
+  "implementation": {
+    "steps": [
+      {
+        "order": 1,
+        "description": "Add semver crate to dependencies",
+        "file": "Cargo.toml"
+      },
+      {
+        "order": 2,
+        "description": "Create src/version.rs with extraction and comparison logic",
+        "file": "src/version.rs",
+        "action": "create"
+      },
+      {
+        "order": 3,
+        "description": "Add regex patterns for common version output formats",
+        "file": "src/version.rs"
+      },
+      {
+        "order": 4,
+        "description": "Refactor cmd_satisfies() to use new logic",
+        "file": "src/tools/common.rs"
+      },
+      {
+        "order": 5,
+        "description": "Add fallback to prefix matching for unrecognized formats",
+        "file": "src/version.rs"
+      },
+      {
+        "order": 6,
+        "description": "Write comprehensive unit tests for version matching",
+        "file": "tests/version_matching.rs",
+        "action": "create"
+      },
+      {
+        "order": 7,
+        "description": "Update config documentation with version syntax",
+        "file": "docs/guides/configuration.md"
+      },
+      {
+        "order": 8,
+        "description": "Add CLI command to test version matching: jarvy version-check git \"2.40\"",
+        "file": "src/main.rs"
+      }
+    ],
+    "files_to_modify": [
+      {
+        "path": "Cargo.toml",
+        "action": "modify",
+        "description": "Add semver dependency"
+      },
+      {
+        "path": "src/version.rs",
+        "action": "create",
+        "description": "New version handling module"
+      },
+      {
+        "path": "src/tools/common.rs",
+        "action": "modify",
+        "description": "Refactor cmd_satisfies()"
+      },
+      {
+        "path": "src/config.rs",
+        "action": "modify",
+        "description": "Update version field parsing"
+      },
+      {
+        "path": "tests/version_matching.rs",
+        "action": "create",
+        "description": "New test file"
+      }
+    ]
+  },
+  "test_cases": [
+    {
+      "name": "test_version_extraction",
+      "type": "unit",
+      "assertions": [
+        {
+          "input": "git version 2.44.0",
+          "expected": {"major": 2, "minor": 44, "patch": 0}
+        },
+        {
+          "input": "v20.10.0",
+          "expected": {"major": 20, "minor": 10, "patch": 0}
+        },
+        {
+          "input": "Python 3.12.1",
+          "expected": {"major": 3, "minor": 12, "patch": 1}
+        },
+        {
+          "input": "go1.21.5",
+          "expected": {"major": 1, "minor": 21, "patch": 5}
+        }
+      ]
+    },
+    {
+      "name": "test_version_satisfies_prefix",
+      "type": "unit",
+      "assertions": [
+        {
+          "installed": "2.44.0",
+          "requirement": "2.44",
+          "expected": true
+        },
+        {
+          "installed": "2.43.0",
+          "requirement": "2.44",
+          "expected": false
+        }
+      ]
+    },
+    {
+      "name": "test_version_satisfies_range",
+      "type": "unit",
+      "assertions": [
+        {
+          "installed": "3.10.5",
+          "requirement": ">= 3.10, < 4.0",
+          "expected": true
+        },
+        {
+          "installed": "4.0.0",
+          "requirement": ">= 3.10, < 4.0",
+          "expected": false
+        }
+      ]
+    },
+    {
+      "name": "test_version_satisfies_wildcards",
+      "type": "unit",
+      "assertions": [
+        {
+          "installed": "1.0.0",
+          "requirement": "*",
+          "expected": true
+        },
+        {
+          "installed": "99.0.0",
+          "requirement": "latest",
+          "expected": true
+        }
+      ]
+    },
+    {
+      "name": "test_version_satisfies_bug_fix",
+      "type": "unit",
+      "description": "Verify the substring bug is fixed",
+      "assertions": [
+        {
+          "installed": "12.40.0",
+          "requirement": "2.4",
+          "expected": false,
+          "comment": "This was the bug - substring '2.4' in '12.40' caused false positive"
+        }
+      ]
+    }
+  ],
+  "success_metrics": [
+    {
+      "metric": "False positive rate",
+      "current": "Unknown (high)",
+      "target": "0%"
+    },
+    {
+      "metric": "Version syntax support",
+      "current": "Prefix only",
+      "target": "Full semver"
+    },
+    {
+      "metric": "Test coverage",
+      "current": "0%",
+      "target": "95%"
+    }
+  ],
+  "risks": [
+    {
+      "id": "RISK-001",
+      "category": "compatibility",
+      "description": "Breaking change - some users may rely on substring behavior",
+      "severity": "medium",
+      "mitigations": [
+        "Log warning when falling back to prefix matching",
+        "Add --strict-versions flag initially"
+      ]
+    },
+    {
+      "id": "RISK-002",
+      "category": "technical",
+      "description": "Unparseable version output - some tools have weird formats",
+      "severity": "low",
+      "mitigations": [
+        "Maintain per-tool version regex overrides"
+      ]
+    },
+    {
+      "id": "RISK-003",
+      "category": "performance",
+      "description": "Regex parsing on every check",
+      "severity": "low",
+      "mitigations": [
+        "Cache parsed versions in memory"
+      ]
+    }
+  ],
+  "dependencies": {
+    "crates": [
+      {
+        "name": "semver",
+        "version": "^1.0",
+        "purpose": "Semantic version parsing and comparison",
+        "status": "well-maintained, standard"
+      },
+      {
+        "name": "regex",
+        "version": "^1.0",
+        "purpose": "Version extraction from tool output",
+        "status": "likely already in tree"
+      },
+      {
+        "name": "lazy_static",
+        "version": "^1.0",
+        "purpose": "Compiled regex caching",
+        "alternative": "once_cell"
+      }
+    ]
+  },
+  "effort_estimate": {
+    "total_days": 3.5,
+    "breakdown": [
+      {
+        "task": "Version extraction",
+        "days": 1.0
+      },
+      {
+        "task": "Requirement parsing",
+        "days": 0.5
+      },
+      {
+        "task": "Integration",
+        "days": 0.5
+      },
+      {
+        "task": "Testing",
+        "days": 1.0
+      },
+      {
+        "task": "Documentation",
+        "days": 0.5
+      }
+    ]
+  },
+  "related_prds": [
+    {
+      "id": "PRD-002",
+      "relationship": "benefits_from",
+      "description": "Tool spec abstraction will use version checking"
+    },
+    {
+      "id": "PRD-005",
+      "relationship": "depends_on",
+      "description": "Error handling improvements for version mismatch errors"
+    },
+    {
+      "id": "PRD-006",
+      "relationship": "tested_by",
+      "description": "Testing infrastructure will validate version matching"
+    }
+  ]
+}
