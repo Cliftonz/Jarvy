@@ -34,7 +34,7 @@ fn main() {
 }
 
 /// Represents a tool's installation options for a platform.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Default, serde::Serialize)]
 struct PlatformInstall {
     #[serde(skip_serializing_if = "Option::is_none")]
     brew: Option<String>,
@@ -60,23 +60,6 @@ struct PlatformInstall {
     uniform: Option<String>,
 }
 
-impl Default for PlatformInstall {
-    fn default() -> Self {
-        Self {
-            brew: None,
-            cask: None,
-            apt: None,
-            dnf: None,
-            yum: None,
-            zypper: None,
-            pacman: None,
-            apk: None,
-            winget: None,
-            choco: None,
-            uniform: None,
-        }
-    }
-}
 
 /// A tool entry in the build-time index.
 #[derive(Debug, serde::Serialize)]

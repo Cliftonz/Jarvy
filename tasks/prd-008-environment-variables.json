@@ -3,7 +3,7 @@
   "parent_prd": "PRD-008",
   "title": "Environment Variables Support",
   "description": "Add support for defining and managing environment variables in jarvy.toml, enabling automatic shell configuration and .env file generation",
-  "status": "pending",
+  "status": "completed",
   "priority": "high",
   "dependencies": [],
   "estimated_complexity": "medium",
@@ -23,7 +23,7 @@
       "id": "T1",
       "title": "Add EnvConfig to config parsing",
       "description": "Extend src/config.rs with EnvConfig, EnvValue, and EnvSettings structs",
-      "status": "pending",
+      "status": "completed",
       "priority": "high",
       "files": ["src/config.rs"],
       "subtasks": [
@@ -39,7 +39,7 @@
       "id": "T2",
       "title": "Create env module structure",
       "description": "Create src/env/ module with submodules",
-      "status": "pending",
+      "status": "completed",
       "priority": "high",
       "files": ["src/env/mod.rs"],
       "subtasks": [
@@ -54,7 +54,7 @@
       "id": "T3",
       "title": "Implement variable expansion",
       "description": "Add template variable expansion with context",
-      "status": "pending",
+      "status": "completed",
       "priority": "high",
       "files": ["src/env/expand.rs"],
       "subtasks": [
@@ -70,7 +70,7 @@
       "id": "T4",
       "title": "Implement .env file generation",
       "description": "Generate .env files from configuration",
-      "status": "pending",
+      "status": "completed",
       "priority": "high",
       "files": ["src/env/dotenv.rs"],
       "subtasks": [
@@ -86,7 +86,7 @@
       "id": "T5",
       "title": "Implement shell rc file modification",
       "description": "Update shell configuration files with exports",
-      "status": "pending",
+      "status": "completed",
       "priority": "high",
       "files": ["src/env/shell.rs"],
       "subtasks": [
@@ -102,7 +102,7 @@
       "id": "T6",
       "title": "Implement secret prompting",
       "description": "Handle secret values with interactive prompting",
-      "status": "pending",
+      "status": "completed",
       "priority": "medium",
       "files": ["src/env/secrets.rs"],
       "subtasks": [
@@ -117,7 +117,7 @@
       "id": "T7",
       "title": "Add CLI env command",
       "description": "Add jarvy env command with subcommands",
-      "status": "pending",
+      "status": "completed",
       "priority": "medium",
       "files": ["src/main.rs", "src/cli.rs"],
       "subtasks": [
@@ -132,7 +132,7 @@
       "id": "T8",
       "title": "Integrate into setup flow",
       "description": "Apply environment configuration during setup",
-      "status": "pending",
+      "status": "completed",
       "priority": "medium",
       "files": ["src/main.rs", "src/setup.rs"],
       "subtasks": [
@@ -146,7 +146,7 @@
       "id": "T9",
       "title": "Write tests",
       "description": "Create comprehensive tests for env module",
-      "status": "pending",
+      "status": "completed",
       "priority": "medium",
       "files": ["tests/env_integration.rs"],
       "subtasks": [
@@ -161,7 +161,7 @@
       "id": "T10",
       "title": "Update documentation",
       "description": "Document environment variables feature",
-      "status": "pending",
+      "status": "completed",
       "priority": "low",
       "files": ["docs/environment-variables.md", "docs/ConfigurationFile.md"],
       "subtasks": [
@@ -212,5 +212,7 @@
       "description": "Cross-platform path differences",
       "mitigation": "Use platform-aware path joining"
     }
-  ]
+  ],
+  "completion_date": "2026-01-15",
+  "completion_notes": "Implemented all tasks including env command, setup integration, integration tests. Variable expansion, .env generation, and shell rc modification all working. Tests pass."
 }

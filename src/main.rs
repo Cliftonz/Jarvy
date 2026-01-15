@@ -1,5 +1,10 @@
 use crate::analytics::init_logging;
-use crate::config::{Config, create_default_config};
+use crate::config::{Config, create_default_config, EnvValue};
+use crate::env::{
+    DotenvConfig, EnvContext, SecretsConfig, ShellConfig, ShellType,
+    collect_secrets, detect_shell, expand_value, generate_dotenv, parse_shell, preview_dotenv,
+    preview_shell_rc, update_shell_rc,
+};
 use crate::hooks::{Hook, HookConfig, HookEnv};
 use crate::init::initialize;
 use crate::report::{Status, ToolReport, collect_reports};
@@ -7,11 +12,13 @@ use crate::setup::setup;
 use clap::{Parser, Subcommand, ValueEnum};
 use inquire::{InquireError, Select};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::fs;
 
 mod analytics;
 mod bootstrap;
 mod config;
+mod env;
 mod error_codes;
 mod hooks;
 mod init;
@@ -86,6 +93,30 @@ enum Commands {
         /// Optional file to write output to; prints to stdout if omitted
         #[clap(short, long)]
         output: Option<String>,
+    },
+    /// Manage environment variables from jarvy.toml
+    Env {
+        /// Path to the configuration file
+        #[clap(short, long, default_value = "./jarvy.toml")]
+        file: String,
+        /// Generate .env file only
+        #[clap(long)]
+        dotenv: bool,
+        /// Update shell rc file only
+        #[clap(long)]
+        shell: bool,
+        /// Show what would happen without making changes
+        #[clap(long)]
+        dry_run: bool,
+        /// Output for shell eval (export statements)
+        #[clap(long)]
+        export: bool,
+        /// Shell type to use (bash, zsh, fish). Auto-detected if not specified.
+        #[clap(long)]
+        shell_type: Option<String>,
+        /// Force overwrite of existing .env file (even if not created by Jarvy)
+        #[clap(long)]
+        force: bool,
     },
     /// Catch-all for unknown subcommands and their args
     #[clap(external_subcommand)]
@@ -163,6 +194,7 @@ fn main() {
             Some(Commands::Configure { .. }) => "configure",
             Some(Commands::Get { .. }) => "get",
             Some(Commands::Tools { .. }) => "tools",
+            Some(Commands::Env { .. }) => "env",
             Some(Commands::External(..)) => "external",
             None => "interactive",
         };
@@ -385,6 +417,87 @@ fn main() {
                 }
             }
 
+            // Environment variable setup
+            let env_config = config.get_env();
+            let env_settings = &env_config.config;
+
+            if !env_config.vars.is_empty() || !env_config.secrets.is_empty() {
+                // Build environment context
+                let ctx = EnvContext::new();
+
+                // Collect secrets if any (skip in CI mode or if dry run)
+                let secrets_config = SecretsConfig {
+                    ci_mode: std::env::var("CI").is_ok()
+                        || std::env::var("JARVY_CI").is_ok()
+                        || std::env::var("JARVY_TEST_MODE").is_ok()
+                        || *dry_run,
+                    fail_on_missing: false,
+                };
+
+                let secrets = if !*dry_run && !env_config.secrets.is_empty() {
+                    match collect_secrets(&env_config.secrets, &ctx, &secrets_config) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("Warning: Could not collect secrets: {}", e);
+                            HashMap::new()
+                        }
+                    }
+                } else {
+                    HashMap::new()
+                };
+
+                // Merge vars and secrets
+                let mut all_vars: HashMap<String, String> = env_config.vars.iter()
+                    .map(|(k, v)| (k.clone(), v.value().to_string()))
+                    .collect();
+                all_vars.extend(secrets);
+
+                // Generate .env file if configured
+                if env_settings.generate_dotenv {
+                    let dotenv_path = std::path::Path::new(".env");
+                    let dotenv_config = DotenvConfig {
+                        backup: true,
+                        force: false,
+                        add_to_gitignore: env_settings.add_to_gitignore,
+                    };
+
+                    if *dry_run {
+                        println!("\n=== Environment Setup (dry-run) ===");
+                        println!("[DRY-RUN] Would generate .env file at {}", dotenv_path.display());
+                        let preview = preview_dotenv(&all_vars, &ctx);
+                        println!("{}", preview);
+                    } else {
+                        match generate_dotenv(dotenv_path, &all_vars, &ctx, &dotenv_config) {
+                            Ok(_) => println!("\nGenerated .env file at {}", dotenv_path.display()),
+                            Err(e) => eprintln!("Warning: Could not generate .env file: {}", e),
+                        }
+                    }
+                }
+
+                // Update shell rc file if configured
+                if env_settings.update_rc {
+                    let shell = detect_shell();
+                    let shell_config = ShellConfig {
+                        backup: true,
+                        validate: false,
+                    };
+
+                    if *dry_run {
+                        if !env_settings.generate_dotenv {
+                            println!("\n=== Environment Setup (dry-run) ===");
+                        }
+                        println!("[DRY-RUN] Would update shell rc for {}", shell);
+                        let preview = preview_shell_rc(shell, &all_vars, &ctx);
+                        println!("{}", preview);
+                    } else {
+                        match update_shell_rc(shell, &all_vars, &ctx, &shell_config) {
+                            Ok(path) => println!("Updated shell rc at {}", path.display()),
+                            Err(e) => eprintln!("Warning: Could not update shell rc: {}", e),
+                        }
+                    }
+                }
+            }
+
             // Execute post_setup hook if configured
             if !no_hooks {
                 if let Some(ref script) = hooks_config.post_setup {
@@ -542,6 +655,138 @@ fn main() {
                 }
             } else {
                 println!("{}", content);
+            }
+        }
+        Some(Commands::Env {
+            file,
+            dotenv,
+            shell,
+            dry_run,
+            export,
+            shell_type,
+            force,
+        }) => {
+            let config = Config::new(file);
+            let env_config = config.get_env();
+
+            // Determine shell type
+            let target_shell = if let Some(shell_str) = shell_type {
+                match parse_shell(shell_str) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                        std::process::exit(crate::error_codes::CONFIG_ERROR);
+                    }
+                }
+            } else if let Some(ref shell_str) = env_config.config.shell {
+                parse_shell(shell_str).unwrap_or_else(|_| detect_shell())
+            } else {
+                detect_shell()
+            };
+
+            // Create context for variable expansion
+            let ctx = EnvContext::new();
+
+            // Collect all regular vars
+            let vars: HashMap<String, String> = env_config
+                .vars
+                .iter()
+                .map(|(k, v)| (k.clone(), v.value().to_string()))
+                .collect();
+
+            // Handle --export flag (output for shell eval)
+            if *export {
+                let preview = preview_shell_rc(target_shell, &vars, &ctx);
+                println!("{}", preview);
+                return;
+            }
+
+            // Collect secrets (in CI mode, won't prompt)
+            let secrets_config = SecretsConfig::default();
+            let secrets = match collect_secrets(&env_config.secrets, &ctx, &secrets_config) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("Error collecting secrets: {}", e);
+                    std::process::exit(crate::error_codes::CONFIG_ERROR);
+                }
+            };
+
+            // Merge vars and secrets
+            let secrets_count = secrets.len();
+            let mut all_vars = vars.clone();
+            all_vars.extend(secrets);
+
+            // Determine what to do
+            let do_dotenv = *dotenv || (!*shell && env_config.config.generate_dotenv);
+            let do_shell = *shell || (!*dotenv && env_config.config.update_rc);
+
+            if !config.has_env() {
+                println!("No environment variables configured in {}", file);
+                return;
+            }
+
+            // Generate .env file
+            if do_dotenv {
+                let dotenv_path = &env_config.config.dotenv_path;
+
+                if *dry_run {
+                    println!("=== .env file preview (would be written to {}) ===", dotenv_path.display());
+                    let content = preview_dotenv(&all_vars, &ctx);
+                    println!("{}", content);
+                } else {
+                    let dotenv_config = DotenvConfig {
+                        backup: true,
+                        force: *force,
+                        add_to_gitignore: env_config.config.add_to_gitignore,
+                    };
+
+                    match generate_dotenv(dotenv_path, &all_vars, &ctx, &dotenv_config) {
+                        Ok(()) => {
+                            println!("Generated .env file at: {}", dotenv_path.display());
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to generate .env file: {}", e);
+                            if !*force {
+                                eprintln!("Tip: Use --force to overwrite existing non-Jarvy .env files");
+                            }
+                            std::process::exit(crate::error_codes::CONFIG_ERROR);
+                        }
+                    }
+                }
+            }
+
+            // Update shell rc file
+            if do_shell {
+                if *dry_run {
+                    println!("\n=== Shell rc preview ({}) ===", target_shell);
+                    let preview = preview_shell_rc(target_shell, &vars, &ctx);
+                    println!("{}", preview);
+                } else {
+                    let shell_config = ShellConfig {
+                        backup: env_config.config.backup_rc,
+                        validate: false,
+                    };
+
+                    match update_shell_rc(target_shell, &vars, &ctx, &shell_config) {
+                        Ok(path) => {
+                            println!("Updated shell rc file: {}", path.display());
+                            println!("Tip: Run 'source {}' or restart your shell to apply changes", path.display());
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to update shell rc file: {}", e);
+                            std::process::exit(crate::error_codes::CONFIG_ERROR);
+                        }
+                    }
+                }
+            }
+
+            // Summary
+            if !*dry_run {
+                println!("\nEnvironment configuration applied:");
+                println!("  - Variables: {}", vars.len());
+                if secrets_count > 0 {
+                    println!("  - Secrets: {}", secrets_count);
+                }
             }
         }
         None => {

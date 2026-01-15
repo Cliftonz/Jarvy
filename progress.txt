@@ -831,3 +831,185 @@ All tests pass:
 4. **Winget Coverage**: Most developer tools now have Winget packages for Windows
 
 ---
+
+# PRD-008: Environment Variables Support - Implementation Progress
+
+## Started: 2026-01-15
+## Completed: 2026-01-15
+
+## Implementation Summary
+
+Successfully implemented environment variables feature allowing users to declare environment variables in jarvy.toml, generate .env files, and optionally update shell rc files.
+
+### Changes Made
+
+1. **Added Dependencies** (Cargo.toml)
+   - `rpassword = "7"` - Hidden password input for secrets
+   - `dialoguer = "0.11"` - Interactive prompts
+   - `dirs` - Already present for cross-platform directory detection
+
+2. **Created New Module** (src/env/ - 4 submodules)
+   - `src/env/mod.rs` - Module re-exports and main types
+   - `src/env/expand.rs` - Variable expansion ($HOME, $PWD, ${VAR} syntax)
+   - `src/env/dotenv.rs` - .env file generation with backups
+   - `src/env/shell.rs` - Shell rc file modification (bash/zsh/fish)
+   - `src/env/secrets.rs` - Secret prompting with hidden input
+
+3. **Updated Config Parsing** (src/config.rs)
+   - Added `EnvConfig` struct - Main env configuration
+   - Added `EnvValue` enum - Simple and complex env values
+   - Added `EnvSettings` struct - generate_dotenv, update_rc, shell, dotenv_path
+   - Added `get_env()` method on Config
+
+4. **Added CLI Command** (src/main.rs)
+   - `jarvy env` command for environment management
+   - `--dotenv` flag - Generate only .env file
+   - `--shell` flag - Generate only shell exports
+   - `--dry-run` flag - Preview without writing files
+   - `--export` flag - Output shell-ready export statements
+   - `--shell-type` flag - Specify target shell (bash/zsh/fish)
+
+5. **Integrated into Setup Flow** (src/main.rs)
+   - Env vars applied after tool installation
+   - .env generated if configured
+   - Shell rc updated if configured
+   - Summary shows env configuration status
+
+6. **Integration Tests** (tests/env_integration.rs - 9 tests)
+   - test_env_command_help
+   - test_env_dry_run_dotenv
+   - test_env_variable_expansion
+   - test_env_export_mode
+   - test_env_shell_mode_bash
+   - test_env_shell_mode_fish
+   - test_setup_includes_env
+   - test_env_empty_config
+   - test_env_values_with_spaces_quoted
+
+### Environment Configuration Format
+
+```toml
+[provisioner]
+node = "20"
+
+[env.vars]
+PROJECT_NAME = "my-project"
+NODE_ENV = "development"
+DATABASE_URL = "postgres://localhost/mydb"
+HOME_PATH = "$HOME"
+
+[env.secrets]
+API_KEY = { description = "Your API key" }
+DB_PASSWORD = { description = "Database password", required = true }
+
+[env.config]
+generate_dotenv = true
+update_rc = false
+shell = "bash"
+dotenv_path = ".env"
+```
+
+### Variable Expansion Support
+
+| Syntax | Description |
+|--------|-------------|
+| `$HOME` | User home directory |
+| `$PWD` | Current working directory |
+| `$USER` | Current username |
+| `${VAR}` | Existing environment variable |
+| `$JARVY_{TOOL}_PATH` | Path to installed tool |
+
+### Shell Support
+
+| Shell | Export Syntax | RC File |
+|-------|---------------|---------|
+| bash | `export VAR=value` | `~/.bashrc` |
+| zsh | `export VAR=value` | `~/.zshrc` |
+| fish | `set -gx VAR value` | `~/.config/fish/config.fish` |
+
+### .env Generation Features
+
+- Header comment with Jarvy markers
+- Timestamp for tracking
+- Automatic backup of existing files (`.env.backup`)
+- Values with spaces automatically quoted
+- Optional .gitignore update
+
+### Key Design Decisions
+
+1. **Jarvy Markers**: Shell rc uses `>>> jarvy managed start >>>` and `<<< jarvy managed end <<<`
+   - Allows clean replacement on re-run
+   - Prevents duplicate entries
+
+2. **Backup Strategy**: Existing .env files backed up before overwrite
+   - Uses `.env.backup` naming
+   - Only Jarvy-generated files overwritten without warning
+
+3. **Secret Handling**: Secrets use hidden input
+   - Skip prompting in CI mode (`CI`, `JARVY_CI`, `JARVY_TEST_MODE`)
+   - Support for loading secrets from files
+
+4. **Variable Expansion Context**: `EnvContext` provides expansion data
+   - home_dir, current_dir, username from system
+   - tool_paths populated after installation
+
+### Bug Fixes During Implementation
+
+1. **Backup Path Issue**: `with_extension("env.backup")` on `.env` created `.env.env.backup`
+   - Fixed by using `join(format!("{}.backup", filename))`
+
+2. **Clippy Errors**: module_inception and derivable Default
+   - Fixed in aria2/kubescape mod.rs and build.rs
+
+### Test Results
+
+- 216+ unit tests passing
+- 9 integration tests passing
+- All existing tests continue to pass
+
+### Acceptance Criteria Verification
+
+- ✅ Declare environment variables in jarvy.toml [env] section
+- ✅ Generate .env files from configuration
+- ✅ Optionally update shell rc files (.bashrc, .zshrc, fish config)
+- ✅ Support per-tool environment variables (via JARVY_TOOL_PATH)
+- ✅ Handle secrets with prompting (hidden input support)
+- ✅ Template variable expansion ($HOME, $PWD, tool paths)
+- ✅ Backup shell rc files before modification
+- ✅ Never overwrite existing .env without confirmation
+- ✅ Cross-platform path handling
+
+### Files Created
+
+- `src/env/mod.rs` - Module hub and type re-exports
+- `src/env/expand.rs` - Variable expansion logic
+- `src/env/dotenv.rs` - .env file generation
+- `src/env/shell.rs` - Shell rc modification
+- `src/env/secrets.rs` - Secret prompting
+- `tests/env_integration.rs` - Integration tests
+
+### Files Modified
+
+- `Cargo.toml` - Added rpassword, dialoguer dependencies
+- `src/main.rs` - Added env command and setup integration
+- `src/config.rs` - Added env config structs
+- `src/lib.rs` - Added env module export
+- `build.rs` - Fixed Default impl
+- `src/tools/aria2/mod.rs` - Fixed clippy warning
+- `src/tools/kubescape/mod.rs` - Fixed clippy warning
+
+### Learnings
+
+1. **Path::with_extension() Quirk**: On dotfiles like `.env`, `with_extension("backup")`
+   replaces everything after the first dot, creating unexpected results
+
+2. **Rust 2024 Edition**: `std::env::set_var` and `remove_var` now require `unsafe`
+   blocks in tests due to potential race conditions
+
+3. **Serde for TOML**: `#[serde(flatten)]` works well for capturing dynamic keys
+   into a HashMap while preserving known fields
+
+4. **Integration Testing**: `assert_cmd` with `predicates` provides clean test assertions
+   for CLI tools
+
+---

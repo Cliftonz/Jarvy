@@ -2,12 +2,151 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
+use std::path::PathBuf;
 use std::{fs, process};
 
 use crate::tools::{Os, current_os};
 
 /// Default timeout for hooks in seconds (5 minutes)
 pub const DEFAULT_HOOK_TIMEOUT: u64 = 300;
+
+// ============================================================================
+// Environment Variable Configuration
+// ============================================================================
+
+/// Environment variable value - can be simple string or complex with options
+#[derive(Deserialize, Debug, Clone)]
+#[serde(untagged)]
+pub enum EnvValue {
+    /// Complex value with additional options
+    Complex {
+        /// The value of the environment variable (supports template expansion)
+        value: String,
+        /// Description for documentation
+        #[serde(default)]
+        description: Option<String>,
+        /// Whether to append to existing PATH-like variables
+        #[serde(default)]
+        append: bool,
+        /// Whether this is per-tool (prefixed with tool name context)
+        #[serde(default)]
+        per_tool: bool,
+    },
+    /// Simple string value (supports template expansion)
+    Simple(String),
+}
+
+impl EnvValue {
+    /// Get the raw value string
+    pub fn value(&self) -> &str {
+        match self {
+            EnvValue::Complex { value, .. } => value,
+            EnvValue::Simple(s) => s,
+        }
+    }
+
+    /// Check if this should append to existing values
+    pub fn should_append(&self) -> bool {
+        match self {
+            EnvValue::Complex { append, .. } => *append,
+            EnvValue::Simple(_) => false,
+        }
+    }
+}
+
+/// Secret variable configuration
+#[derive(Deserialize, Debug, Clone)]
+#[serde(untagged)]
+pub enum SecretValue {
+    /// Load secret from a file
+    FromFile {
+        /// Path to file containing the secret
+        from_file: String,
+    },
+    /// Prompt for secret (with optional default env var to check)
+    Prompt {
+        /// Environment variable to check before prompting
+        #[serde(default)]
+        env: Option<String>,
+        /// Whether this secret is required
+        #[serde(default = "default_true")]
+        required: bool,
+        /// Description shown when prompting
+        #[serde(default)]
+        description: Option<String>,
+    },
+    /// Simple prompt marker (just the variable name)
+    Simple(String),
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Settings for environment variable generation
+#[derive(Deserialize, Debug, Clone)]
+pub struct EnvSettings {
+    /// Target shell for rc file updates (bash, zsh, fish)
+    #[serde(default)]
+    pub shell: Option<String>,
+    /// Whether to update shell rc files
+    #[serde(default)]
+    pub update_rc: bool,
+    /// Whether to generate .env file
+    #[serde(default = "default_true")]
+    pub generate_dotenv: bool,
+    /// Path for .env file (default: ./.env)
+    #[serde(default = "default_dotenv_path")]
+    pub dotenv_path: PathBuf,
+    /// Whether to add .env to .gitignore
+    #[serde(default)]
+    pub add_to_gitignore: bool,
+    /// Backup rc files before modification
+    #[serde(default = "default_true")]
+    pub backup_rc: bool,
+}
+
+fn default_dotenv_path() -> PathBuf {
+    PathBuf::from(".env")
+}
+
+impl Default for EnvSettings {
+    fn default() -> Self {
+        Self {
+            shell: None,
+            update_rc: false,
+            generate_dotenv: true,
+            dotenv_path: default_dotenv_path(),
+            add_to_gitignore: false,
+            backup_rc: true,
+        }
+    }
+}
+
+/// Environment configuration section in jarvy.toml
+#[derive(Deserialize, Debug, Clone, Default)]
+pub struct EnvConfig {
+    /// Regular environment variables
+    #[serde(default)]
+    pub vars: HashMap<String, EnvValue>,
+    /// Secret variables (prompted or loaded from file)
+    #[serde(default)]
+    pub secrets: HashMap<String, SecretValue>,
+    /// Settings for env generation
+    #[serde(default)]
+    pub config: EnvSettings,
+    /// Per-tool environment variables
+    #[serde(flatten)]
+    pub tool_env: HashMap<String, ToolEnvConfig>,
+}
+
+/// Per-tool environment variables
+#[derive(Deserialize, Debug, Clone, Default)]
+pub struct ToolEnvConfig {
+    /// Environment variables specific to this tool
+    #[serde(default)]
+    pub vars: HashMap<String, EnvValue>,
+}
 
 /// Configuration for a single hook
 #[derive(Deserialize, Debug, Clone, Default)]
@@ -82,6 +221,9 @@ pub struct Config {
     /// Hooks configuration section
     #[serde(default)]
     pub hooks: HooksConfig,
+    /// Environment variables configuration
+    #[serde(default)]
+    pub env: EnvConfig,
 }
 
 #[derive(Deserialize, Debug, Default)]
@@ -194,6 +336,23 @@ impl Config {
             || self.hooks.post_setup.is_some()
             || self.hooks.tool_hooks.values().any(|h| h.post_install.is_some())
     }
+
+    /// Get the environment configuration
+    pub fn get_env(&self) -> &EnvConfig {
+        &self.env
+    }
+
+    /// Get environment variables for a specific tool
+    pub fn get_tool_env(&self, tool_name: &str) -> Option<&ToolEnvConfig> {
+        self.env.tool_env.get(tool_name)
+    }
+
+    /// Check if any environment variables are configured
+    pub fn has_env(&self) -> bool {
+        !self.env.vars.is_empty()
+            || !self.env.secrets.is_empty()
+            || self.env.tool_env.values().any(|t| !t.vars.is_empty())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -230,6 +389,22 @@ docker = "latest"
 #
 # [hooks.node]
 # post_install = "npm install -g yarn"
+
+# Environment variables (optional)
+# [env.vars]
+# MY_VAR = "simple_value"
+# PROJECT_ROOT = "$PWD"
+# NODE_PATH = { value = "$HOME/.node/bin", append = true }
+#
+# [env.secrets]
+# API_KEY = { env = "MY_API_KEY", required = true }
+# DB_PASSWORD = { from_file = "~/.secrets/db_pass" }
+#
+# [env.config]
+# generate_dotenv = true
+# dotenv_path = ".env"
+# update_rc = false
+# add_to_gitignore = true
 "#;
     let mut file = File::create("jarvy.toml").expect("Could not create file");
     file.write_all(default_config.as_bytes())
@@ -313,5 +488,97 @@ pre_setup = "echo 'hi'"
         }
         assert_eq!(settings.timeout, DEFAULT_HOOK_TIMEOUT);
         assert!(!settings.continue_on_error);
+    }
+
+    #[test]
+    fn test_env_config_parsing_simple() {
+        let toml_str = r#"
+[provisioner]
+git = "latest"
+
+[env.vars]
+MY_VAR = "simple_value"
+PROJECT_ROOT = "$PWD"
+"#;
+        let config: Config = toml::from_str(toml_str).expect("Failed to parse config");
+
+        assert_eq!(config.env.vars.len(), 2);
+        assert!(config.has_env());
+
+        let my_var = config.env.vars.get("MY_VAR").expect("MY_VAR should exist");
+        assert_eq!(my_var.value(), "simple_value");
+        assert!(!my_var.should_append());
+    }
+
+    #[test]
+    fn test_env_config_parsing_complex() {
+        let toml_str = r#"
+[provisioner]
+git = "latest"
+
+[env.vars]
+NODE_PATH = { value = "$HOME/.node/bin", append = true, description = "Node binaries" }
+SIMPLE = "just_a_value"
+
+[env.config]
+generate_dotenv = true
+dotenv_path = ".env.local"
+update_rc = true
+add_to_gitignore = true
+"#;
+        let config: Config = toml::from_str(toml_str).expect("Failed to parse config");
+
+        let node_path = config.env.vars.get("NODE_PATH").expect("NODE_PATH should exist");
+        assert_eq!(node_path.value(), "$HOME/.node/bin");
+        assert!(node_path.should_append());
+
+        assert!(config.env.config.generate_dotenv);
+        assert_eq!(config.env.config.dotenv_path, PathBuf::from(".env.local"));
+        assert!(config.env.config.update_rc);
+        assert!(config.env.config.add_to_gitignore);
+    }
+
+    #[test]
+    fn test_env_config_secrets() {
+        let toml_str = r#"
+[provisioner]
+git = "latest"
+
+[env.secrets]
+API_KEY = { env = "MY_API_KEY", required = true }
+DB_PASSWORD = { from_file = "~/.secrets/db_pass" }
+OPTIONAL_KEY = { required = false, description = "Optional API key" }
+"#;
+        let config: Config = toml::from_str(toml_str).expect("Failed to parse config");
+
+        assert_eq!(config.env.secrets.len(), 3);
+        assert!(config.has_env());
+    }
+
+    #[test]
+    fn test_env_config_defaults() {
+        let toml_str = r#"
+[provisioner]
+git = "latest"
+"#;
+        let config: Config = toml::from_str(toml_str).expect("Failed to parse config");
+
+        assert!(config.env.vars.is_empty());
+        assert!(config.env.secrets.is_empty());
+        assert!(config.env.config.generate_dotenv);
+        assert_eq!(config.env.config.dotenv_path, PathBuf::from(".env"));
+        assert!(!config.env.config.update_rc);
+        assert!(!config.has_env());
+    }
+
+    #[test]
+    fn test_env_settings_default() {
+        let settings = EnvSettings::default();
+        assert!(settings.shell.is_none());
+        assert!(!settings.update_rc);
+        assert!(settings.generate_dotenv);
+        assert_eq!(settings.dotenv_path, PathBuf::from(".env"));
+        assert!(!settings.add_to_gitignore);
+        assert!(settings.backup_rc);
     }
 }
