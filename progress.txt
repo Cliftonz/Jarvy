@@ -1240,3 +1240,98 @@ Dry-run testing of the example config confirms:
 - PRD-009: Tool-Specific Post-Install Hooks (default hooks built into tools)
 
 ---
+
+# PRD-010: CI/CD Detection and Integration - Implementation Progress
+
+## Started: 2026-01-15
+## Completed: 2026-01-15
+
+## Implementation Summary
+
+Successfully implemented comprehensive CI/CD detection and integration feature that automatically detects CI environments, adjusts behavior for non-interactive execution, and provides provider-specific output formatting.
+
+### Changes Made
+
+1. **Created CI Module** (src/ci/ - 3 submodules)
+   - `src/ci/mod.rs` - Main module with CiProvider enum, CiEnvironment struct, detection logic
+   - `src/ci/output.rs` - Provider-specific output formatting (groups, warnings, errors)
+   - `src/ci/config.rs` - CI workflow template generation for 5 providers
+
+2. **CiProvider Enum** (11 providers supported)
+   - GitHubActions, GitLabCi, CircleCi, TravisCi, AzureDevOps
+   - Jenkins, Bitbucket, Buildkite, TeamCity, AppVeyor, Generic
+
+3. **Detection Logic**
+   - `detect()` - Main detection function checking env vars in priority order
+   - `detect_provider()` - Internal provider detection without force flags
+   - `is_ci()` - Simple boolean check
+   - `is_non_interactive()` - CI or test mode check
+
+4. **CiEnvironment Struct**
+   - Captures build metadata: build_id, repository, branch, commit_sha
+   - Supports `forced` flag for CLI override
+   - Provider-specific env var parsing for each CI system
+
+5. **CiOutput Helper**
+   - `group_start()` / `group_end()` - Collapsible log groups
+   - `warning()` / `error()` - Provider-specific error formatting
+   - `warning_with_location()` / `error_with_location()` - File location annotations
+   - `set_output()` - GitHub Actions / Azure DevOps output variables
+   - `mask_value()` - Secret masking
+   - `debug()` / `notice()` - Debug and notice messages
+   - `GroupGuard` - RAII guard for auto-closing groups
+
+6. **CI Config Generation** (5 providers)
+   - GitHub Actions workflow template (.github/workflows/jarvy.yml)
+   - GitLab CI template (.gitlab-ci.yml)
+   - CircleCI template (.circleci/config.yml)
+   - Azure DevOps pipeline template (azure-pipelines.yml)
+   - Bitbucket Pipelines template (bitbucket-pipelines.yml)
+
+7. **CLI Commands** (src/main.rs)
+   - `jarvy ci-info` - Display current CI environment
+   - `jarvy ci-config <provider>` - Generate CI workflow files
+   - `--ci` flag on setup - Force CI mode
+   - `--no-ci` flag on setup - Force interactive mode
+
+8. **Integration Tests** (tests/ci_integration.rs - 19 tests)
+   - All provider detection tests
+   - Config generation tests
+   - CLI flag tests
+   - Environment variable override tests
+
+### Key Design Decisions
+
+1. **Detection Order**: Specific providers checked before generic CI=true
+2. **Force Flags**: CLI flags take precedence over env var detection
+3. **Output Formatting**: Provider-specific syntax for CI features
+4. **Config Templates**: Full workflow files with caching and matrix support
+
+### Rust 2024 Edition Considerations
+
+Required `unsafe` blocks for environment variable modification in tests due to Rust 2024 edition safety requirements for `set_var` and `remove_var`.
+
+### Test Results
+
+- 19/19 CI integration tests passing
+- All existing tests continue to pass
+
+### Acceptance Criteria Verification
+
+- ✅ Auto-detect 11 CI providers
+- ✅ Skip interactive prompts in CI mode
+- ✅ Provider-specific output formatting
+- ✅ --ci and --no-ci flags for override
+- ✅ CI config generation for 5 major providers
+- ✅ Same jarvy.toml works locally and in CI
+
+### Learnings
+
+1. **Rust 2024 Edition Safety**: `std::env::set_var` and `std::env::remove_var` are now
+   unsafe due to potential race conditions in multi-threaded code
+
+2. **Config File Format**: Jarvy uses `[provisioner]` not `[tools]` for tool definitions
+
+3. **Case-Insensitive Checks**: Azure DevOps and AppVeyor use `True` with capital T
+
+---
