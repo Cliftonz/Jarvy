@@ -1376,3 +1376,90 @@ have jarvy start them.
    avoid renumbering later
 
 ---
+
+# PRD-003.1: Tool-Specific Post-Install Hooks - Verification Summary
+
+## Verified: 2026-01-15
+
+## Verification Summary
+
+Successfully verified that PRD-003.1 (Tool-Specific Post-Install Hooks) is fully implemented
+and all acceptance criteria are satisfied.
+
+### Implementation Verified
+
+1. **ToolSpec Pattern Extended** (src/tools/spec.rs)
+   - `DefaultHook` struct with description, script, and optional platform field
+   - `default_hook` field added to `ToolSpec` struct
+   - `define_tool!` macro extended with `default_hook: { description: "...", script: "..." }`
+   - Helper functions: `get_tool_spec()`, `get_tool_default_hook()`, `list_tools_with_default_hooks()`
+
+2. **9 Tools Have Default Hooks**
+   | Tool | Hook Type | Description |
+   |------|-----------|-------------|
+   | starship | shell_integration | Add shell init to .bashrc/.zshrc |
+   | zoxide | shell_integration | Add zoxide init to .bashrc/.zshrc |
+   | direnv | shell_integration | Add direnv hook to .bashrc/.zshrc |
+   | fzf | shell_integration | Configure keybindings and completions |
+   | go | path_setup | Configure GOPATH and add go/bin to PATH |
+   | dotnet | path_setup | Configure DOTNET_ROOT and PATH |
+   | git | config_generation | Set sensible defaults (defaultBranch, autocrlf, rebase) |
+   | kubectl | config_generation | Enable shell completion and 'k' alias |
+   | terraform | config_generation | Install shell autocomplete |
+
+3. **Setup Flow Integration** (src/main.rs)
+   - Default hooks run when no user-defined `[hooks.{tool}]` exists
+   - Respects `--no-hooks` flag (disables both user and default hooks)
+   - Shows default hooks in `--dry-run` mode with description
+   - Default hook failures are warnings (advisory, not blocking)
+
+4. **CLI Flag** (src/main.rs)
+   - `jarvy tools --default-hooks` lists all tools with default hooks
+   - Supports JSON, YAML, TOML, and pretty output formats
+
+### Test Results
+
+All tests pass:
+- 16/16 hooks_integration.rs tests passed
+- 14/14 cli_tools.rs tests passed
+- Key tests for default hooks:
+  - `test_default_hook_fallback_dry_run`
+  - `test_user_hook_takes_precedence_over_default`
+  - `test_no_hooks_flag_disables_default_hooks`
+  - `test_default_hook_shows_description_in_dry_run`
+  - `test_multiple_tools_with_default_hooks_dry_run`
+  - `test_mixed_user_and_default_hooks_dry_run`
+  - `tools_default_hooks_pretty_format`
+  - `tools_default_hooks_json_format`
+  - `tools_default_hooks_yaml_format`
+  - `tools_default_hooks_contains_expected_tools`
+
+### Acceptance Criteria Verification
+
+- ✅ Tools with shell integration have hooks to update shell rc
+- ✅ Tools needing PATH updates have hooks to configure PATH
+- ✅ Tools requiring config files have hooks to generate defaults
+- ✅ Hooks are optional and can be disabled per-tool (`--no-hooks` flag)
+- ✅ Hooks integrate with existing PRD-003 hooks system (user hooks take precedence)
+- ✅ Hooks integrate with PRD-008 env vars for PATH management (shell rc modifications)
+
+### Follow-up Task File
+
+Existing follow-up task: `tasks/additional-post-install-hooks.json` (HOOKS-002)
+- 10 additional hooks planned for: node, python, rust, helm, awscli, gh, docker, k9s, lazygit, bat
+
+### Learnings
+
+1. **Macro Extension Pattern**: Adding optional fields to `define_tool!` requires careful helper
+   pattern matching (`@default_hook`) to handle both presence and absence cleanly
+
+2. **Idempotent Shell Scripts**: The `grep -q` pattern works reliably for checking existing
+   content before appending - used consistently across all default hooks
+
+3. **User Hook Precedence**: Clear separation between user-defined hooks (from `[hooks.{tool}]`)
+   and default hooks ensures predictable behavior - users always have full control
+
+4. **Test Coverage**: Integration tests using dry-run mode provide comprehensive verification
+   without actually modifying the system
+
+---
