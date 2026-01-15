@@ -1,0 +1,82 @@
+{
+  "id": "PRD-010",
+  "parent_prd": "PRD-009",
+  "title": "Additional Tool Default Hooks",
+  "description": "Add default post-install hooks for additional tools that would benefit from automatic configuration after installation",
+  "status": "pending",
+  "priority": "low",
+  "dependencies": ["PRD-009"],
+  "estimated_complexity": "low",
+  "acceptance_criteria": [
+    "Each tool has an idempotent default hook",
+    "Hooks follow the established pattern (grep before append)",
+    "All hooks have clear descriptions",
+    "Integration tests verify hook behavior"
+  ],
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Add hooks for additional shell tools",
+      "description": "Add default hooks for tools that need shell initialization",
+      "status": "pending",
+      "priority": "medium",
+      "files": ["src/tools/bat/bat.rs", "src/tools/eza/eza.rs", "src/tools/fd/fd.rs"],
+      "subtasks": [
+        "bat: Configure bat as MANPAGER and PAGER",
+        "eza: Add common aliases (ls, ll, la)",
+        "fd: Add fdfind alias on Debian/Ubuntu"
+      ]
+    },
+    {
+      "id": "T2",
+      "title": "Add hooks for development tools",
+      "description": "Add default hooks for common development configurations",
+      "status": "pending",
+      "priority": "low",
+      "files": ["src/tools/gh/gh.rs", "src/tools/delta/delta.rs"],
+      "subtasks": [
+        "gh: Prompt for auth login if not authenticated",
+        "delta: Configure as git diff/merge tool"
+      ]
+    },
+    {
+      "id": "T3",
+      "title": "Add hooks for Kubernetes tools",
+      "description": "Add default hooks for Kubernetes tooling",
+      "status": "pending",
+      "priority": "low",
+      "files": ["src/tools/helm/helm.rs", "src/tools/k9s/k9s.rs"],
+      "subtasks": [
+        "helm: Add stable repository if not exists",
+        "k9s: Create default config directory"
+      ]
+    }
+  ],
+  "tools_for_consideration": [
+    {
+      "tool": "bat",
+      "hook_type": "shell_integration",
+      "description": "Set BAT_PAGER, configure as MANPAGER",
+      "script_preview": "export BAT_PAGER='less -RF'\nexport MANPAGER='sh -c \"col -bx | bat -l man -p\"'"
+    },
+    {
+      "tool": "eza",
+      "hook_type": "shell_alias",
+      "description": "Add common ls aliases",
+      "script_preview": "alias ls='eza'\nalias ll='eza -l'\nalias la='eza -la'"
+    },
+    {
+      "tool": "delta",
+      "hook_type": "config_generation",
+      "description": "Configure delta as git pager",
+      "script_preview": "git config --global core.pager delta\ngit config --global interactive.diffFilter 'delta --color-only'"
+    },
+    {
+      "tool": "helm",
+      "hook_type": "config_generation",
+      "description": "Add bitnami and stable repositories",
+      "script_preview": "helm repo add bitnami https://charts.bitnami.com/bitnami || true"
+    }
+  ],
+  "notes": "This task is lower priority as the core tools with the most impact (git, kubectl, terraform, shell tools) were handled in PRD-009. These additional hooks are nice-to-have improvements."
+}
