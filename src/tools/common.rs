@@ -180,7 +180,7 @@ pub fn plan_sudo_attempts(use_sudo: Option<bool>, sudo_available: bool) -> Vec<b
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PackageManager {
     Apt,
     Dnf,
@@ -189,7 +189,9 @@ pub enum PackageManager {
     Pacman,
     Apk,
     Brew,
+    BrewCask, // Homebrew casks (GUI apps)
     Winget,
+    Choco,
 }
 
 #[cfg(target_os = "linux")]
@@ -257,12 +259,307 @@ mod sudo_plan_tests {
     }
 }
 
+#[cfg(test)]
+mod batch_install_tests {
+    use super::*;
+
+    #[test]
+    fn empty_list_returns_empty_result() {
+        let result = PkgOps::batch_install(PackageManager::Brew, &[], None);
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert!(result.succeeded.is_empty());
+        assert!(result.failed.is_empty());
+    }
+
+    #[test]
+    fn batch_install_result_default() {
+        let result = BatchInstallResult {
+            succeeded: vec!["foo".to_string()],
+            failed: vec![("bar".to_string(), "error".to_string())],
+        };
+        assert_eq!(result.succeeded.len(), 1);
+        assert_eq!(result.failed.len(), 1);
+        assert_eq!(result.succeeded[0], "foo");
+        assert_eq!(result.failed[0].0, "bar");
+    }
+
+    #[test]
+    fn package_manager_has_required_traits() {
+        // Test that PackageManager can be used as HashMap key
+        let mut map = std::collections::HashMap::new();
+        map.insert(PackageManager::Brew, vec!["jq", "ripgrep"]);
+        map.insert(PackageManager::Apt, vec!["git", "curl"]);
+        assert_eq!(map.len(), 2);
+        assert!(map.contains_key(&PackageManager::Brew));
+        assert!(map.contains_key(&PackageManager::Apt));
+    }
+
+    #[test]
+    fn package_manager_equality() {
+        assert_eq!(PackageManager::Brew, PackageManager::Brew);
+        assert_ne!(PackageManager::Brew, PackageManager::Apt);
+        assert_eq!(PackageManager::BrewCask, PackageManager::BrewCask);
+        assert_ne!(PackageManager::Winget, PackageManager::Choco);
+    }
+}
+
 #[allow(dead_code)]
 pub struct PkgOps {
     name: &'static str,
 }
 
+/// Result of a batch installation operation.
+#[derive(Debug)]
+pub struct BatchInstallResult {
+    /// Packages that were successfully installed
+    pub succeeded: Vec<String>,
+    /// Packages that failed to install (package name, error message)
+    pub failed: Vec<(String, String)>,
+}
+
 impl PkgOps {
+    /// Install multiple packages in a single batch operation.
+    ///
+    /// This is more efficient than installing packages one-by-one because:
+    /// - Single dependency resolution pass
+    /// - Single lock acquisition
+    /// - Package manager can optimize internally
+    ///
+    /// Returns a BatchInstallResult indicating which packages succeeded/failed.
+    /// On batch failure, individual packages are retried.
+    pub fn batch_install(
+        pm: PackageManager,
+        packages: &[&str],
+        use_sudo: Option<bool>,
+    ) -> Result<BatchInstallResult, InstallError> {
+        if packages.is_empty() {
+            return Ok(BatchInstallResult {
+                succeeded: vec![],
+                failed: vec![],
+            });
+        }
+
+        // Single package: use regular install
+        if packages.len() == 1 {
+            match Self::install(pm, packages[0], use_sudo) {
+                Ok(()) => {
+                    return Ok(BatchInstallResult {
+                        succeeded: vec![packages[0].to_string()],
+                        failed: vec![],
+                    });
+                }
+                Err(e) => {
+                    return Ok(BatchInstallResult {
+                        succeeded: vec![],
+                        failed: vec![(packages[0].to_string(), format!("{}", e))],
+                    });
+                }
+            }
+        }
+
+        // Try batch install first
+        let batch_result = Self::try_batch_install(pm, packages, use_sudo);
+
+        match batch_result {
+            Ok(()) => {
+                // All packages installed successfully
+                Ok(BatchInstallResult {
+                    succeeded: packages.iter().map(|s| s.to_string()).collect(),
+                    failed: vec![],
+                })
+            }
+            Err(_) => {
+                // Batch failed, retry individually to find which packages failed
+                let mut succeeded = Vec::new();
+                let mut failed = Vec::new();
+
+                for pkg in packages {
+                    match Self::install(pm, pkg, use_sudo) {
+                        Ok(()) => succeeded.push(pkg.to_string()),
+                        Err(e) => failed.push((pkg.to_string(), format!("{}", e))),
+                    }
+                }
+
+                Ok(BatchInstallResult { succeeded, failed })
+            }
+        }
+    }
+
+    /// Attempt to install multiple packages in a single command.
+    /// Returns Ok if all packages installed, Err if the command failed.
+    fn try_batch_install(
+        pm: PackageManager,
+        packages: &[&str],
+        use_sudo: Option<bool>,
+    ) -> Result<(), InstallError> {
+        match pm {
+            PackageManager::Apt => {
+                let apt = require_any(&["apt-get", "apt"], "apt is required to install packages")?;
+                let mut args = vec!["install", "-y"];
+                args.extend(packages);
+                Self::run_with_sudo_strategy(use_sudo, apt, &args)
+            }
+            PackageManager::Dnf => {
+                require("dnf", "dnf is required to install packages")?;
+                let mut args = vec!["install", "-y"];
+                args.extend(packages);
+                Self::run_with_sudo_strategy(use_sudo, "dnf", &args)
+            }
+            PackageManager::Yum => {
+                require("yum", "yum is required to install packages")?;
+                let mut args = vec!["install", "-y"];
+                args.extend(packages);
+                Self::run_with_sudo_strategy(use_sudo, "yum", &args)
+            }
+            PackageManager::Zypper => {
+                require("zypper", "zypper is required to install packages")?;
+                let mut args = vec!["--non-interactive", "install", "--no-confirm"];
+                args.extend(packages);
+                Self::run_with_sudo_strategy(use_sudo, "zypper", &args)
+            }
+            PackageManager::Pacman => {
+                require("pacman", "pacman is required to install packages")?;
+                let mut args = vec!["--noconfirm", "-S"];
+                args.extend(packages);
+                Self::run_with_sudo_strategy(use_sudo, "pacman", &args)
+            }
+            PackageManager::Apk => {
+                require("apk", "apk is required to install packages")?;
+                let mut args = vec!["add"];
+                args.extend(packages);
+                Self::run_with_sudo_strategy(use_sudo, "apk", &args)
+            }
+            PackageManager::Brew => {
+                require("brew", "Homebrew is required to install packages")?;
+                let mut args = vec!["install"];
+                args.extend(packages);
+                run("brew", &args)?;
+                Ok(())
+            }
+            PackageManager::Winget => {
+                // winget doesn't support true batch install, but we can chain commands
+                // For now, install sequentially since winget is internally sequential anyway
+                require("winget", "Winget is required to install packages")?;
+                for pkg in packages {
+                    run("winget", &["install", "-e", "--id", pkg])?;
+                }
+                Ok(())
+            }
+            PackageManager::BrewCask => {
+                require("brew", "Homebrew is required to install casks")?;
+                let mut args = vec!["install", "--cask"];
+                args.extend(packages);
+                run("brew", &args)?;
+                Ok(())
+            }
+            PackageManager::Choco => {
+                require("choco", "Chocolatey is required to install packages")?;
+                let mut args = vec!["install", "-y"];
+                args.extend(packages);
+                run("choco", &args)?;
+                Ok(())
+            }
+        }
+    }
+
+    /// Helper to run a command with sudo fallback strategy.
+    fn run_with_sudo_strategy(
+        use_sudo: Option<bool>,
+        cmd: &str,
+        args: &[&str],
+    ) -> Result<(), InstallError> {
+        match use_sudo {
+            Some(flag) => {
+                if flag {
+                    require("sudo", "sudo is required to install packages")?;
+                }
+                run_maybe_sudo(flag, cmd, args)?;
+                Ok(())
+            }
+            None => {
+                if let Err(e) = run_maybe_sudo(false, cmd, args) {
+                    if has("sudo") {
+                        run_maybe_sudo(true, cmd, args)?;
+                        Ok(())
+                    } else {
+                        Err(e)
+                    }
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    /// Install packages using Homebrew cask (for GUI apps) in batch.
+    pub fn batch_install_cask(packages: &[&str]) -> Result<BatchInstallResult, InstallError> {
+        if packages.is_empty() {
+            return Ok(BatchInstallResult {
+                succeeded: vec![],
+                failed: vec![],
+            });
+        }
+
+        require("brew", "Homebrew is required to install casks")?;
+
+        let mut args = vec!["install", "--cask"];
+        args.extend(packages);
+
+        match run("brew", &args) {
+            Ok(_) => Ok(BatchInstallResult {
+                succeeded: packages.iter().map(|s| s.to_string()).collect(),
+                failed: vec![],
+            }),
+            Err(_) => {
+                // Retry individually
+                let mut succeeded = Vec::new();
+                let mut failed = Vec::new();
+                for pkg in packages {
+                    match run("brew", &["install", "--cask", pkg]) {
+                        Ok(_) => succeeded.push(pkg.to_string()),
+                        Err(e) => failed.push((pkg.to_string(), format!("{}", e))),
+                    }
+                }
+                Ok(BatchInstallResult { succeeded, failed })
+            }
+        }
+    }
+
+    /// Install packages using Chocolatey in batch.
+    pub fn batch_install_choco(packages: &[&str]) -> Result<BatchInstallResult, InstallError> {
+        if packages.is_empty() {
+            return Ok(BatchInstallResult {
+                succeeded: vec![],
+                failed: vec![],
+            });
+        }
+
+        require("choco", "Chocolatey is required to install packages")?;
+
+        let mut args = vec!["install", "-y"];
+        args.extend(packages);
+
+        match run("choco", &args) {
+            Ok(_) => Ok(BatchInstallResult {
+                succeeded: packages.iter().map(|s| s.to_string()).collect(),
+                failed: vec![],
+            }),
+            Err(_) => {
+                // Retry individually
+                let mut succeeded = Vec::new();
+                let mut failed = Vec::new();
+                for pkg in packages {
+                    match run("choco", &["install", "-y", pkg]) {
+                        Ok(_) => succeeded.push(pkg.to_string()),
+                        Err(e) => failed.push((pkg.to_string(), format!("{}", e))),
+                    }
+                }
+                Ok(BatchInstallResult { succeeded, failed })
+            }
+        }
+    }
+
     pub fn update(pm: PackageManager, use_sudo: Option<bool>) -> Result<(), InstallError> {
         match pm {
             PackageManager::Apt => {
@@ -483,9 +780,17 @@ impl PkgOps {
                 require("brew", "Homebrew is required to install packages")?;
                 run("brew", &["install", pkg])?;
             }
+            PackageManager::BrewCask => {
+                require("brew", "Homebrew is required to install casks")?;
+                run("brew", &["install", "--cask", pkg])?;
+            }
             PackageManager::Winget => {
                 require("winget", "Winget is required to install packages")?;
                 run("winget", &["install", "-e", "--id", pkg])?;
+            }
+            PackageManager::Choco => {
+                require("choco", "Chocolatey is required to install packages")?;
+                run("choco", &["install", "-y", pkg])?;
             }
         };
         Ok(())

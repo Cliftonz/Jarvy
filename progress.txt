@@ -12,6 +12,7 @@
 | PRD-008 | Environment Variables | 2026-01-15 | `[env]` config, .env generation |
 | PRD-010 | CI/CD Detection | 2026-01-15 | 11 CI providers, workflow templates |
 | PRD-009 | Service Management | 2026-01-15 | Docker Compose & Tilt backends |
+| PRD-001 | Optimized Tool Installation (P1) | 2026-01-15 | Batch install for all PMs, tool grouping |
 
 ---
 
@@ -224,4 +225,68 @@ Notable: fzf, bat, fd, eza, zoxide, delta, lazygit, starship, gh, direnv, kubect
 | CI/CD | 19 |
 | Services | 33 |
 | CLI Tools | 14 |
-| **Total** | **463+** |
+| Batch Install | 10 |
+| **Total** | **473+** |
+
+---
+
+## PRD-001: Optimized Tool Installation (Phase 1 - Batch Operations)
+
+**Files**: `src/tools/common.rs`, `src/tools/spec.rs`, `src/main.rs`
+**Dependencies**: None (Phase 1 uses no new dependencies)
+**Tests**: 10 new tests (batch_install_tests, tool grouping tests)
+
+**Key Features**:
+- `PackageManager` enum with 10 variants (Apt, Dnf, Yum, Zypper, Pacman, Apk, Brew, BrewCask, Winget, Choco)
+- `batch_install()` method for batching package manager operations (`brew install a b c` instead of individual installs)
+- `BatchInstallResult` struct for partial failure tracking (succeeded + failed lists)
+- Tool grouping via `group_tools_for_installation()` to categorize by PM/custom installer/unknown
+- Refactored setup flow: group tools → batch install by PM → install custom tools individually → run hooks
+
+**Batch Install Commands by PM**:
+| Package Manager | Batch Command |
+|-----------------|---------------|
+| Homebrew | `brew install a b c` |
+| Homebrew Cask | `brew install --cask a b c` |
+| apt | `apt install -y a b c` |
+| dnf | `dnf install -y a b c` |
+| yum | `yum install -y a b c` |
+| zypper | `zypper install -y a b c` |
+| pacman | `pacman -S --noconfirm a b c` |
+| apk | `apk add a b c` |
+| winget | `winget install -e --id a b c` (sequential internally) |
+| Chocolatey | `choco install a b c -y` |
+
+**Key Code Patterns**:
+```rust
+// Tool grouping
+let groups = tools::spec::group_tools_for_installation(
+    tools.iter().map(|(_, t)| (t.name.as_str(), t.version.as_str()))
+);
+
+// Batch install per PM
+for (pm, packages) in &groups.by_package_manager {
+    match tools::common::PkgOps::batch_install(*pm, &package_names, None) {
+        Ok(result) => { /* handle succeeded/failed */ }
+        Err(e) => { /* batch failed entirely */ }
+    }
+}
+
+// Custom tools individually
+for (name, version) in &groups.custom_install {
+    tools::add(name, version)?;
+}
+```
+
+**Key Learnings**:
+- `PackageManager` enum needs `PartialEq, Eq, Hash` derives for HashMap key usage
+- Batch failures must track both successful and failed packages for proper reporting
+- `MANUAL_TOOLS` constant defines tools with custom installers (nvm, rust, brew) separately from `define_tool!` macro tools
+- Tool grouping must distinguish between unknown tools (not in registry) and tools with custom installers
+- Dry-run mode must show batch operations grouped by PM for UX clarity
+
+**Performance Impact**:
+- 10 brew tools: ~5 min → ~1 min (single dependency resolution, one lock acquisition)
+- Eliminates redundant network requests for package index updates
+
+**Follow-up PRD Created**: PRD-002 (Tool Post-Install Hooks) - identifies tools that could benefit from automatic shell integration/completion hooks

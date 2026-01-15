@@ -688,6 +688,200 @@ pub fn list_tools_with_default_hooks() -> Vec<(&'static str, &'static DefaultHoo
         .collect()
 }
 
+// ============================================================================
+// Tool Grouping for Batch Installation
+// ============================================================================
+
+/// Information about how to install a tool via a package manager.
+#[derive(Debug, Clone)]
+pub struct ToolInstallInfo {
+    /// The tool name (as specified in jarvy.toml)
+    pub name: String,
+    /// The version hint from configuration
+    pub version: String,
+    /// The package manager to use
+    pub package_manager: PackageManager,
+    /// The package name for this package manager
+    pub package_name: String,
+}
+
+/// Categorization of tools for installation.
+#[derive(Debug, Default)]
+pub struct ToolGroups {
+    /// Tools grouped by package manager (package_manager -> list of (tool_name, package_name, version))
+    pub by_package_manager: std::collections::HashMap<PackageManager, Vec<(String, String, String)>>,
+    /// Tools with custom installers that must run individually
+    pub custom_install: Vec<(String, String)>,
+    /// Tools not in the registry (unknown)
+    pub unknown: Vec<(String, String)>,
+}
+
+impl ToolGroups {
+    /// Check if there are any tools to install via package managers.
+    pub fn has_package_manager_tools(&self) -> bool {
+        !self.by_package_manager.is_empty()
+    }
+
+    /// Get the total count of all tools.
+    pub fn total_count(&self) -> usize {
+        let pm_count: usize = self.by_package_manager.values().map(|v| v.len()).sum();
+        pm_count + self.custom_install.len() + self.unknown.len()
+    }
+}
+
+/// Get the package manager and package name for a tool on the current platform.
+///
+/// Returns None if:
+/// - The tool is not in the registry
+/// - The tool has no installation defined for the current platform
+/// - The tool uses a custom installer
+pub fn get_tool_install_info(tool_name: &str, version: &str) -> Option<ToolInstallInfo> {
+    let spec = get_tool_spec(tool_name)?;
+
+    // Skip tools with custom installers
+    if spec.custom_install.is_some() {
+        return None;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(macos) = spec.macos {
+            // Prefer cask for GUI apps
+            if let Some(cask_name) = macos.cask {
+                return Some(ToolInstallInfo {
+                    name: tool_name.to_string(),
+                    version: version.to_string(),
+                    package_manager: PackageManager::BrewCask,
+                    package_name: cask_name.to_string(),
+                });
+            }
+            if let Some(brew_name) = macos.brew {
+                return Some(ToolInstallInfo {
+                    name: tool_name.to_string(),
+                    version: version.to_string(),
+                    package_manager: PackageManager::Brew,
+                    package_name: brew_name.to_string(),
+                });
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(linux) = spec.linux {
+            // Detect the system package manager
+            if let Some(pm) = super::common::detect_linux_pm() {
+                if let Some(pkg_name) = linux.get(pm) {
+                    return Some(ToolInstallInfo {
+                        name: tool_name.to_string(),
+                        version: version.to_string(),
+                        package_manager: pm,
+                        package_name: pkg_name.to_string(),
+                    });
+                }
+            }
+            // Fallback to Linuxbrew
+            if let Some(brew_name) = linux.brew {
+                if super::common::has("brew") {
+                    return Some(ToolInstallInfo {
+                        name: tool_name.to_string(),
+                        version: version.to_string(),
+                        package_manager: PackageManager::Brew,
+                        package_name: brew_name.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(windows) = spec.windows {
+            // Prefer winget
+            if let Some(winget_id) = windows.winget {
+                if super::common::has("winget") {
+                    return Some(ToolInstallInfo {
+                        name: tool_name.to_string(),
+                        version: version.to_string(),
+                        package_manager: PackageManager::Winget,
+                        package_name: winget_id.to_string(),
+                    });
+                }
+            }
+            // Fallback to Chocolatey
+            if let Some(choco_name) = windows.choco {
+                if super::common::has("choco") {
+                    return Some(ToolInstallInfo {
+                        name: tool_name.to_string(),
+                        version: version.to_string(),
+                        package_manager: PackageManager::Choco,
+                        package_name: choco_name.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Check if a tool has a custom installer.
+pub fn has_custom_installer(tool_name: &str) -> bool {
+    get_tool_spec(tool_name)
+        .map(|spec| spec.custom_install.is_some())
+        .unwrap_or(false)
+        || MANUAL_TOOLS.iter().any(|(name, _)| *name == tool_name.to_lowercase())
+}
+
+/// Group a list of tools by their installation method.
+///
+/// This separates tools into:
+/// - Tools installable via package manager (grouped by PM)
+/// - Tools with custom installers
+/// - Unknown tools (not in registry)
+///
+/// # Arguments
+/// * `tools` - Iterator of (tool_name, version) tuples
+pub fn group_tools_for_installation<'a, I>(tools: I) -> ToolGroups
+where
+    I: Iterator<Item = (&'a str, &'a str)>,
+{
+    let mut groups = ToolGroups::default();
+
+    for (name, version) in tools {
+        let name_lower = name.to_lowercase();
+
+        // Check if it's a known tool
+        let is_known = get_tool_spec(&name_lower).is_some()
+            || MANUAL_TOOLS.iter().any(|(n, _)| *n == name_lower);
+
+        if !is_known {
+            groups.unknown.push((name.to_string(), version.to_string()));
+            continue;
+        }
+
+        // Check for custom installer
+        if has_custom_installer(&name_lower) {
+            groups.custom_install.push((name.to_string(), version.to_string()));
+            continue;
+        }
+
+        // Try to get package manager info
+        if let Some(info) = get_tool_install_info(&name_lower, version) {
+            groups
+                .by_package_manager
+                .entry(info.package_manager)
+                .or_default()
+                .push((info.name, info.package_name, info.version));
+        } else {
+            // No PM info available (e.g., platform not supported), treat as custom
+            groups.custom_install.push((name.to_string(), version.to_string()));
+        }
+    }
+
+    groups
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1032,5 +1226,60 @@ mod tests {
         assert!(json.is_ok());
         let json_str = json.unwrap();
         assert!(json_str.contains("\"platform\":\"macos\""));
+    }
+
+    #[test]
+    fn test_tool_groups_default() {
+        let groups = ToolGroups::default();
+        assert!(groups.by_package_manager.is_empty());
+        assert!(groups.custom_install.is_empty());
+        assert!(groups.unknown.is_empty());
+    }
+
+    #[test]
+    fn test_tool_install_info_struct() {
+        use crate::tools::common::PackageManager;
+        let info = ToolInstallInfo {
+            name: "jq".to_string(),
+            version: "latest".to_string(),
+            package_manager: PackageManager::Brew,
+            package_name: "jq".to_string(),
+        };
+        assert_eq!(info.name, "jq");
+        assert_eq!(info.version, "latest");
+        assert_eq!(info.package_manager, PackageManager::Brew);
+        assert_eq!(info.package_name, "jq");
+    }
+
+    #[test]
+    fn test_group_tools_empty() {
+        let tools: Vec<(&str, &str)> = vec![];
+        let groups = group_tools_for_installation(tools.into_iter());
+        assert!(groups.by_package_manager.is_empty());
+        assert!(groups.custom_install.is_empty());
+        assert!(groups.unknown.is_empty());
+    }
+
+    #[test]
+    fn test_group_tools_with_unknown() {
+        let tools = vec![("nonexistent_tool_xyz", "1.0")];
+        let groups = group_tools_for_installation(tools.into_iter());
+        // Unknown tools should be in the unknown list
+        assert_eq!(groups.unknown.len(), 1);
+        assert_eq!(groups.unknown[0].0, "nonexistent_tool_xyz");
+    }
+
+    #[test]
+    fn test_has_custom_installer_known_tools() {
+        // brew has a custom installer (in MANUAL_TOOLS)
+        assert!(has_custom_installer("brew"));
+        // rust has a custom installer (in MANUAL_TOOLS)
+        assert!(has_custom_installer("rust"));
+        // nvm has a custom installer (in MANUAL_TOOLS)
+        assert!(has_custom_installer("nvm"));
+        // jq does not have a custom installer
+        assert!(!has_custom_installer("jq"));
+        // git does not have a custom installer
+        assert!(!has_custom_installer("git"));
     }
 }

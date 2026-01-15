@@ -394,127 +394,179 @@ fn main() {
 
             let tools = config.get_tool_configs();
 
-            for (id, tool) in tools {
-                // If the tool is not in the registry, log and guide the user
-                if tools::get_tool(&tool.name).is_none() {
-                    let msg = format!(
-                        "We do not currently have support for {} package but we have logged it and will be adding it soon.",
-                        tool.name
-                    );
-                    if posthog::telemetry_enabled() {
-                        let mut props = serde_json::Map::new();
-                        props.insert(
-                            "tool".to_string(),
-                            serde_json::Value::String(tool.name.clone()),
-                        );
-                        props.insert(
-                            "version_hint".to_string(),
-                            serde_json::Value::String(tool.version.clone()),
-                        );
-                        props.insert(
-                            "source".to_string(),
-                            serde_json::Value::String("config".to_string()),
-                        );
-                        posthog::capture_error("unknown_tool_in_config", &msg, props);
-                        eprintln!("{}", msg);
-                    } else {
-                        eprintln!("{}", msg);
-                        eprintln!(
-                            "Telemetry is disabled. Please consider creating a feature request here: https://github.com/bearbinary/Jarvy/issues/new"
-                        );
-                    }
-                    continue;
-                }
+            // Partition tools into known vs unknown
+            let (known_tools, unknown_tools): (Vec<_>, Vec<_>) = tools
+                .into_iter()
+                .partition(|(_, t)| tools::get_tool(&t.name).is_some());
 
-                if *dry_run {
-                    println!(
-                        "[DRY-RUN] Would install {}: {} version {} using package manager: {}",
-                        id, tool.name, tool.version, tool.version_manager
+            // Log unknown tools
+            for (_, tool) in &unknown_tools {
+                let msg = format!(
+                    "We do not currently have support for {} package but we have logged it and will be adding it soon.",
+                    tool.name
+                );
+                if posthog::telemetry_enabled() {
+                    let mut props = serde_json::Map::new();
+                    props.insert(
+                        "tool".to_string(),
+                        serde_json::Value::String(tool.name.clone()),
                     );
+                    props.insert(
+                        "version_hint".to_string(),
+                        serde_json::Value::String(tool.version.clone()),
+                    );
+                    props.insert(
+                        "source".to_string(),
+                        serde_json::Value::String("config".to_string()),
+                    );
+                    posthog::capture_error("unknown_tool_in_config", &msg, props);
+                    eprintln!("{}", msg);
                 } else {
+                    eprintln!("{}", msg);
+                    eprintln!(
+                        "Telemetry is disabled. Please consider creating a feature request here: https://github.com/bearbinary/Jarvy/issues/new"
+                    );
+                }
+            }
+
+            // Group tools by package manager for batch installation
+            let tool_groups = tools::spec::group_tools_for_installation(
+                known_tools.iter().map(|(_, t)| (t.name.as_str(), t.version.as_str())),
+            );
+
+            // Track successfully installed tools for hook execution
+            let mut successfully_installed: Vec<(String, String)> = Vec::new();
+
+            if *dry_run {
+                // Dry-run: show what would be installed
+                for (pm, packages) in &tool_groups.by_package_manager {
+                    let package_names: Vec<&str> = packages.iter().map(|(_, pkg, _)| pkg.as_str()).collect();
                     println!(
-                        "Installing {}: {} version {} using package manager: {}",
-                        id, tool.name, tool.version, tool.version_manager
+                        "[DRY-RUN] Would batch install via {:?}: {}",
+                        pm,
+                        package_names.join(", ")
+                    );
+                }
+                for (name, version) in &tool_groups.custom_install {
+                    println!(
+                        "[DRY-RUN] Would install {} version {} using custom installer",
+                        name, version
+                    );
+                }
+            } else {
+                // Batch install by package manager
+                for (pm, packages) in &tool_groups.by_package_manager {
+                    if packages.is_empty() {
+                        continue;
+                    }
+
+                    let package_names: Vec<&str> = packages.iter().map(|(_, pkg, _)| pkg.as_str()).collect();
+                    println!(
+                        "Batch installing {} packages via {:?}: {}",
+                        packages.len(),
+                        pm,
+                        package_names.join(", ")
                     );
 
-                    match tools::add(&tool.name, &tool.version) {
-                        Ok(()) => {
-                            println!("Successfully installed {} ({})", tool.name, tool.version);
-
-                            // Execute per-tool post_install hook if configured
-                            if !no_hooks {
-                                let user_hook = config
-                                    .get_tool_hooks(&tool.name)
-                                    .and_then(|h| h.post_install.as_ref());
-
-                                if let Some(script) = user_hook {
-                                    // User-provided hook takes precedence
-                                    let env = HookEnv::for_tool(&tool.name, &tool.version);
-                                    let hook = Hook::with_config(
-                                        script,
-                                        &format!("{} post_install", tool.name),
-                                        hook_settings.clone(),
-                                    )
-                                    .with_env(env);
-                                    match hook.execute() {
-                                        Ok(_) => {}
-                                        Err(e) => {
-                                            if !hook_settings.continue_on_error {
-                                                eprintln!(
-                                                    "Post-install hook for {} failed: {}",
-                                                    tool.name, e
-                                                );
-                                                std::process::exit(crate::error_codes::HOOK_FAILED);
-                                            }
-                                            eprintln!(
-                                                "Warning: Post-install hook for {} failed: {}",
-                                                tool.name, e
-                                            );
-                                        }
-                                    }
-                                } else if let Some(default_hook) =
-                                    tools::spec::get_tool_default_hook(&tool.name)
+                    match tools::common::PkgOps::batch_install(*pm, &package_names, None) {
+                        Ok(result) => {
+                            // Track successful installs
+                            for pkg_name in &result.succeeded {
+                                // Find the tool name for this package
+                                if let Some((tool_name, _, version)) = packages
+                                    .iter()
+                                    .find(|(_, pkg, _)| pkg == pkg_name)
                                 {
-                                    // Fall back to tool's built-in default hook
-                                    println!(
-                                        "Running default hook for {}: {}",
-                                        tool.name, default_hook.description
+                                    println!("Successfully installed {} ({})", tool_name, version);
+                                    successfully_installed.push((tool_name.clone(), version.clone()));
+                                }
+                            }
+                            // Log failures
+                            for (pkg_name, error) in &result.failed {
+                                if let Some((tool_name, _, version)) = packages
+                                    .iter()
+                                    .find(|(_, pkg, _)| pkg == pkg_name)
+                                {
+                                    let msg = format!(
+                                        "Failed to install {} ({}): {}",
+                                        tool_name, version, error
                                     );
-                                    let env = HookEnv::for_tool(&tool.name, &tool.version);
-                                    let hook = Hook::with_config(
-                                        default_hook.script,
-                                        &format!("{} default_hook", tool.name),
-                                        hook_settings.clone(),
-                                    )
-                                    .with_env(env);
-                                    match hook.execute() {
-                                        Ok(_) => {}
-                                        Err(e) => {
-                                            // Default hooks are advisory; always continue on error
-                                            eprintln!(
-                                                "Warning: Default hook for {} failed: {}",
-                                                tool.name, e
-                                            );
-                                        }
+                                    eprintln!("{}", msg);
+                                    if posthog::telemetry_enabled() {
+                                        let mut props = serde_json::Map::new();
+                                        props.insert(
+                                            "tool".to_string(),
+                                            serde_json::Value::String(tool_name.clone()),
+                                        );
+                                        props.insert(
+                                            "version_hint".to_string(),
+                                            serde_json::Value::String(version.clone()),
+                                        );
+                                        props.insert(
+                                            "error".to_string(),
+                                            serde_json::Value::String(error.clone()),
+                                        );
+                                        posthog::capture_error("tool_install_failed", &msg, props);
                                     }
                                 }
                             }
                         }
                         Err(e) => {
+                            // Batch install failed entirely - log all as failed
+                            for (tool_name, _, version) in packages {
+                                let msg = format!(
+                                    "Failed to install {} ({}): {:?}",
+                                    tool_name, version, e
+                                );
+                                eprintln!("{}", msg);
+                                if posthog::telemetry_enabled() {
+                                    let mut props = serde_json::Map::new();
+                                    props.insert(
+                                        "tool".to_string(),
+                                        serde_json::Value::String(tool_name.clone()),
+                                    );
+                                    props.insert(
+                                        "version_hint".to_string(),
+                                        serde_json::Value::String(version.clone()),
+                                    );
+                                    props.insert(
+                                        "error".to_string(),
+                                        serde_json::Value::String(format!("{:?}", e)),
+                                    );
+                                    posthog::capture_error("tool_install_failed", &msg, props);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Install custom tools individually (these require special handling)
+                for (name, version) in &tool_groups.custom_install {
+                    println!(
+                        "Installing {} version {} using custom installer",
+                        name, version
+                    );
+
+                    match tools::add(name, version) {
+                        Ok(()) => {
+                            println!("Successfully installed {} ({})", name, version);
+                            successfully_installed.push((name.clone(), version.clone()));
+                        }
+                        Err(e) => {
                             let msg = format!(
                                 "Failed to install {} ({}): {:?}",
-                                tool.name, tool.version, e
+                                name, version, e
                             );
                             eprintln!("{}", msg);
                             if posthog::telemetry_enabled() {
                                 let mut props = serde_json::Map::new();
                                 props.insert(
                                     "tool".to_string(),
-                                    serde_json::Value::String(tool.name.clone()),
+                                    serde_json::Value::String(name.clone()),
                                 );
                                 props.insert(
                                     "version_hint".to_string(),
-                                    serde_json::Value::String(tool.version.clone()),
+                                    serde_json::Value::String(version.clone()),
                                 );
                                 props.insert(
                                     "error".to_string(),
@@ -526,8 +578,71 @@ fn main() {
                     }
                 }
 
-                // Show dry-run for per-tool hooks (user-provided or default)
-                if *dry_run && !no_hooks {
+                // Execute hooks for successfully installed tools
+                if !no_hooks {
+                    for (tool_name, version) in &successfully_installed {
+                        let user_hook = config
+                            .get_tool_hooks(tool_name)
+                            .and_then(|h| h.post_install.as_ref());
+
+                        if let Some(script) = user_hook {
+                            // User-provided hook takes precedence
+                            let env = HookEnv::for_tool(tool_name, version);
+                            let hook = Hook::with_config(
+                                script,
+                                &format!("{} post_install", tool_name),
+                                hook_settings.clone(),
+                            )
+                            .with_env(env);
+                            match hook.execute() {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    if !hook_settings.continue_on_error {
+                                        eprintln!(
+                                            "Post-install hook for {} failed: {}",
+                                            tool_name, e
+                                        );
+                                        std::process::exit(crate::error_codes::HOOK_FAILED);
+                                    }
+                                    eprintln!(
+                                        "Warning: Post-install hook for {} failed: {}",
+                                        tool_name, e
+                                    );
+                                }
+                            }
+                        } else if let Some(default_hook) =
+                            tools::spec::get_tool_default_hook(tool_name)
+                        {
+                            // Fall back to tool's built-in default hook
+                            println!(
+                                "Running default hook for {}: {}",
+                                tool_name, default_hook.description
+                            );
+                            let env = HookEnv::for_tool(tool_name, version);
+                            let hook = Hook::with_config(
+                                default_hook.script,
+                                &format!("{} default_hook", tool_name),
+                                hook_settings.clone(),
+                            )
+                            .with_env(env);
+                            match hook.execute() {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    // Default hooks are advisory; always continue on error
+                                    eprintln!(
+                                        "Warning: Default hook for {} failed: {}",
+                                        tool_name, e
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Show dry-run for per-tool hooks
+            if *dry_run && !no_hooks {
+                for (_, tool) in &known_tools {
                     let user_hook = config
                         .get_tool_hooks(&tool.name)
                         .and_then(|h| h.post_install.as_ref());

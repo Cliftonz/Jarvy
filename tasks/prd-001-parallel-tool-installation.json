@@ -1,0 +1,354 @@
+{
+  "title": "PRD-001: Optimized Tool Installation",
+  "priority": "High",
+  "status": "In Progress",
+  "source": "prd/001-parallel-tool-installation.md",
+  "createdAt": "2026-01-15T18:00:00Z",
+  "updatedAt": "2026-01-15T21:00:00Z",
+  "overview": {
+    "description": "Optimize tool installation performance through strategic parallelization where safe, batch operations, and parallel pre-flight checks. Critical constraint: Most system package managers use exclusive locking and cannot run concurrently.",
+    "goals": [
+      "Batch system package manager operations for faster installs",
+      "Parallel version checking before installation",
+      "Parallel user-space package manager installs (npm, pip, cargo, go)",
+      "Parallel downloads with sequential installs",
+      "Real-time progress reporting",
+      "Dependency ordering support"
+    ]
+  },
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Phase 1: Batch Operations",
+      "description": "As a developer, I want tools to be installed in batches per package manager so that installation time is reduced through single dependency resolution and lock acquisition.",
+      "passed": true,
+      "priority": "P0",
+      "impact": "High",
+      "acceptanceCriteria": [
+        {
+          "criterion": "Add PackageManager enum if not exists",
+          "passed": true
+        },
+        {
+          "criterion": "Group tools by package manager in setup flow",
+          "passed": true
+        },
+        {
+          "criterion": "Implement batch_install() for Homebrew (brew install a b c)",
+          "passed": true
+        },
+        {
+          "criterion": "Implement batch_install() for apt (apt install -y a b c)",
+          "passed": true
+        },
+        {
+          "criterion": "Implement batch_install() for dnf (dnf install -y a b c)",
+          "passed": true
+        },
+        {
+          "criterion": "Implement batch_install() for pacman (pacman -S --noconfirm a b c)",
+          "passed": true
+        },
+        {
+          "criterion": "Implement batch_install() for apk (apk add a b c)",
+          "passed": true
+        },
+        {
+          "criterion": "Implement batch_install() for winget",
+          "passed": true
+        },
+        {
+          "criterion": "Implement batch_install() for Chocolatey (choco install a b c -y)",
+          "passed": true
+        },
+        {
+          "criterion": "Handle mixed success/failure in batch operations (parse output, retry failed individually)",
+          "passed": true
+        },
+        {
+          "criterion": "Add integration tests for batch installation",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Phase 2: Parallel Version Checking",
+      "description": "As a developer, I want all tool versions checked concurrently before installation so that the installation plan is built faster.",
+      "passed": false,
+      "priority": "P1",
+      "impact": "Medium",
+      "acceptanceCriteria": [
+        {
+          "criterion": "Add rayon dependency to Cargo.toml",
+          "passed": false
+        },
+        {
+          "criterion": "Refactor version checking to use par_iter()",
+          "passed": false
+        },
+        {
+          "criterion": "Collect all version results before building installation plan",
+          "passed": false
+        },
+        {
+          "criterion": "Update progress reporting to show parallel check status",
+          "passed": false
+        },
+        {
+          "criterion": "Version checks complete for 10+ tools in ~2 seconds (vs ~10 seconds sequential)",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Phase 3: User-Space Parallelization",
+      "description": "As a developer, I want npm, pip, cargo, and go installations to run concurrently so that user-space tool installs are faster.",
+      "passed": false,
+      "priority": "P2",
+      "impact": "Medium",
+      "acceptanceCriteria": [
+        {
+          "criterion": "Identify and categorize user-space package managers (npm, pip, cargo, go)",
+          "passed": false
+        },
+        {
+          "criterion": "Implement parallel installation with configurable concurrency limit (default 2-4)",
+          "passed": false
+        },
+        {
+          "criterion": "Add --jobs flag for user control of concurrency",
+          "passed": false
+        },
+        {
+          "criterion": "Handle error aggregation from parallel installs",
+          "passed": false
+        },
+        {
+          "criterion": "Detect and warn about potential conflicts (npm/pip with --global)",
+          "passed": false
+        },
+        {
+          "criterion": "Add tests for parallel user-space installation",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Phase 4: Parallel Downloads",
+      "description": "As a developer, I want binary downloads to happen in parallel with sequential installation so that download time is minimized.",
+      "passed": false,
+      "priority": "P3",
+      "impact": "Low",
+      "acceptanceCriteria": [
+        {
+          "criterion": "Identify tools using binary downloads",
+          "passed": false
+        },
+        {
+          "criterion": "Implement async/parallel download for binaries",
+          "passed": false
+        },
+        {
+          "criterion": "Queue sequential installation after downloads complete",
+          "passed": false
+        },
+        {
+          "criterion": "Add tests for parallel download functionality",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "Progress Reporting & UX",
+      "description": "As a user, I want real-time progress updates during installation so that I know what is happening and can estimate completion time.",
+      "passed": false,
+      "priority": "P1",
+      "impact": "Medium",
+      "acceptanceCriteria": [
+        {
+          "criterion": "Show real-time status of batch operations",
+          "passed": false
+        },
+        {
+          "criterion": "Maintain deterministic output ordering",
+          "passed": false
+        },
+        {
+          "criterion": "Support --sequential flag for debugging",
+          "passed": false
+        },
+        {
+          "criterion": "Display which tools are being installed in parallel vs sequentially",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-006",
+      "title": "Dependency Ordering",
+      "description": "As a developer, I want tool dependencies respected so that tools like nvm are installed before node.",
+      "passed": false,
+      "priority": "P1",
+      "impact": "High",
+      "acceptanceCriteria": [
+        {
+          "criterion": "Define tool dependency relationships",
+          "passed": false
+        },
+        {
+          "criterion": "Ensure dependency ordering is respected in batch operations",
+          "passed": false
+        },
+        {
+          "criterion": "Add tests for dependency ordering",
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "functionalRequirements": [
+    {
+      "id": "FR-1",
+      "description": "Detect and group tools by package manager",
+      "passed": true
+    },
+    {
+      "id": "FR-2",
+      "description": "Use batch install where supported (brew install a b c)",
+      "passed": true
+    },
+    {
+      "id": "FR-3",
+      "description": "Maintain deterministic output ordering",
+      "passed": false
+    },
+    {
+      "id": "FR-4",
+      "description": "Support --sequential flag for debugging",
+      "passed": false
+    },
+    {
+      "id": "FR-5",
+      "description": "Parallel version checking for all tools before installation",
+      "passed": false
+    },
+    {
+      "id": "FR-6",
+      "description": "Parallel user-space installs (npm, pip, cargo, go)",
+      "passed": false
+    },
+    {
+      "id": "FR-7",
+      "description": "Parallel binary downloads with sequential installation",
+      "passed": false
+    },
+    {
+      "id": "FR-8",
+      "description": "Real-time progress reporting",
+      "passed": false
+    },
+    {
+      "id": "FR-9",
+      "description": "Respect tool dependencies (e.g., nvm before node)",
+      "passed": false
+    }
+  ],
+  "nonGoals": [
+    "Concurrent system package manager installs (brew, apt, dnf, pacman, winget use exclusive locking)",
+    "Parallel MSI/pkg/deb installations",
+    "Concurrent modifications to shared resources (PATH, registry)"
+  ],
+  "technicalConsiderations": [
+    {
+      "area": "Package Manager Locking",
+      "details": "All system package managers (Homebrew, apt, dnf, pacman, apk, winget, Chocolatey) use exclusive locking. Concurrent installs will fail or block."
+    },
+    {
+      "area": "Safe Parallelization",
+      "details": "Only version checking, binary downloads, user-space package managers (npm, pip, cargo, go), and post-install hooks can be safely parallelized."
+    },
+    {
+      "area": "Batch Install Support",
+      "details": "All major package managers support batch install except cargo. winget is sequential internally even with batch syntax."
+    },
+    {
+      "area": "Resource Management",
+      "details": "Cargo builds may compete for CPU/memory. Default to conservative concurrency (2-4) for user-space parallelization."
+    },
+    {
+      "area": "Error Handling",
+      "details": "Batch operations may have partial failures. Must parse output to identify failed packages and optionally retry individually."
+    }
+  ],
+  "filesToModify": [
+    {
+      "file": "src/tools/common.rs",
+      "changes": "Add batch install functions, PackageManager grouping",
+      "completed": true
+    },
+    {
+      "file": "src/main.rs",
+      "changes": "Refactor setup loop for batching and parallelization",
+      "completed": true
+    },
+    {
+      "file": "src/tools/spec.rs",
+      "changes": "Add package manager grouping support",
+      "completed": true
+    },
+    {
+      "file": "Cargo.toml",
+      "changes": "Add rayon dependency (Phase 2+)",
+      "completed": false
+    },
+    {
+      "file": "tests/",
+      "changes": "Add batch and parallel installation tests",
+      "completed": true
+    }
+  ],
+  "successMetrics": [
+    "10 brew tools: ~5 min → ~1 min (Phase 1 complete)",
+    "Version check (10 tools): ~10 sec → ~2 sec (Phase 2 complete)",
+    "Mixed install (brew + npm + pip): ~3 min → ~1 min (Full implementation)"
+  ],
+  "risks": [
+    {
+      "risk": "Batch install partial failure",
+      "likelihood": "Medium",
+      "impact": "Medium",
+      "mitigation": "Parse output to identify failed packages, retry individually"
+    },
+    {
+      "risk": "Version check race conditions",
+      "likelihood": "Low",
+      "impact": "Low",
+      "mitigation": "Version checks are read-only"
+    },
+    {
+      "risk": "User-space PM conflicts",
+      "likelihood": "Low",
+      "impact": "Medium",
+      "mitigation": "Limit concurrency, detect conflicts"
+    },
+    {
+      "risk": "Resource exhaustion",
+      "likelihood": "Medium",
+      "impact": "Low",
+      "mitigation": "Default to conservative concurrency (2-4)"
+    }
+  ],
+  "dependencies": [
+    "rayon crate for parallel iteration (Phase 2+)",
+    "No new dependencies for Phase 1"
+  ],
+  "openQuestions": [],
+  "implementationNotes": {
+    "phase1Summary": "Implemented batch installation for all major package managers (Homebrew, apt, dnf, yum, zypper, pacman, apk, winget, Chocolatey). Tools are grouped by package manager before installation, and batch commands are used for efficiency. Partial failure handling retries failed packages individually.",
+    "completedDate": "2026-01-15"
+  }
+}

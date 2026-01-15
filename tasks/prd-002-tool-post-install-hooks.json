@@ -1,0 +1,222 @@
+{
+  "title": "PRD-002: Tool Post-Install Hooks",
+  "priority": "Medium",
+  "status": "Not Started",
+  "source": "Generated from PRD-001 implementation",
+  "createdAt": "2026-01-15T21:00:00Z",
+  "updatedAt": "2026-01-15T21:00:00Z",
+  "overview": {
+    "description": "Add default post-install hooks to tools that would benefit from automatic shell integration, PATH configuration, or completion setup. These hooks should be idempotent, advisory (non-fatal on failure), and overridable by user-defined hooks.",
+    "goals": [
+      "Identify tools that need shell integration",
+      "Add completion script installation for CLI tools",
+      "Add PATH configuration for tools installed outside standard paths",
+      "Ensure hooks are idempotent (safe to run multiple times)"
+    ]
+  },
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Shell Completion Hooks",
+      "description": "As a developer, I want CLI tools to automatically install shell completions so that tab completion works out of the box.",
+      "passed": false,
+      "priority": "P1",
+      "impact": "High",
+      "candidateTools": [
+        "kubectl (if not already done)",
+        "helm (if not already done)",
+        "just",
+        "flux",
+        "argocd",
+        "eksctl",
+        "glab",
+        "httpie"
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "Add completion hook for just (just --completions bash/zsh)",
+          "passed": false
+        },
+        {
+          "criterion": "Add completion hook for flux (flux completion bash/zsh)",
+          "passed": false
+        },
+        {
+          "criterion": "Add completion hook for argocd (argocd completion bash/zsh)",
+          "passed": false
+        },
+        {
+          "criterion": "Add completion hook for eksctl (eksctl completion bash/zsh)",
+          "passed": false
+        },
+        {
+          "criterion": "Add completion hook for glab (glab completion -s bash/zsh)",
+          "passed": false
+        },
+        {
+          "criterion": "Verify hooks are idempotent",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "PATH Configuration Hooks",
+      "description": "As a developer, I want tools that install outside standard PATH to automatically configure shell PATH so that commands work immediately.",
+      "passed": false,
+      "priority": "P1",
+      "impact": "High",
+      "candidateTools": [
+        "gleam",
+        "elixir",
+        "hugo"
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "Identify tools that install outside standard PATH",
+          "passed": false
+        },
+        {
+          "criterion": "Add PATH export to shell config files (.bashrc, .zshrc)",
+          "passed": false
+        },
+        {
+          "criterion": "Ensure PATH additions are idempotent (check before adding)",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Shell Integration Hooks",
+      "description": "As a developer, I want tools with shell integration features to automatically configure them so that they work after installation.",
+      "passed": false,
+      "priority": "P2",
+      "impact": "Medium",
+      "candidateTools": [
+        "fd (often aliased or paired with fzf)",
+        "eza (often aliased to ls)",
+        "bat (often aliased to cat)",
+        "delta (git pager config)",
+        "btop/htop (no shell integration needed)",
+        "jq (no shell integration needed)"
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "Add delta hook to configure as git pager",
+          "passed": false
+        },
+        {
+          "criterion": "Verify bat already has hook (yes - bat-extras setup)",
+          "passed": false
+        },
+        {
+          "criterion": "Document tools that don't need hooks",
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "existingHooks": {
+    "description": "Tools that already have default hooks implemented",
+    "tools": [
+      "terraform",
+      "docker",
+      "go",
+      "gh",
+      "python",
+      "starship",
+      "lazygit",
+      "zoxide",
+      "awscli",
+      "dotnet",
+      "k9s",
+      "bat",
+      "direnv",
+      "node",
+      "kubectl",
+      "helm",
+      "fzf",
+      "git"
+    ]
+  },
+  "toolsWithoutHooks": {
+    "description": "Tools that currently do not have default hooks",
+    "noHookNeeded": [
+      "jq - Pure CLI tool, no shell integration",
+      "curl - Pure CLI tool, no shell integration",
+      "htop - Terminal UI, no shell integration",
+      "btop - Terminal UI, no shell integration",
+      "age - Encryption tool, no shell integration",
+      "aria2 - Download manager, no shell integration",
+      "hadolint - Linter, no shell integration",
+      "actionlint - Linter, no shell integration",
+      "cue - Config language, no shell integration"
+    ],
+    "mayNeedHook": [
+      "just - Completions would be helpful",
+      "flux - Completions would be helpful",
+      "argocd - Completions would be helpful",
+      "eksctl - Completions would be helpful",
+      "glab - Completions would be helpful",
+      "delta - Git pager configuration",
+      "gleam - PATH configuration if needed",
+      "elixir - PATH configuration if needed"
+    ]
+  },
+  "hookPattern": {
+    "description": "Standard hook implementation pattern",
+    "template": "default_hook: {\n    description: \"Description of what the hook does\",\n    script: r#\"\n# Add to .zshrc if not present\nif [ -f \"$HOME/.zshrc\" ] && ! grep -q 'pattern' \"$HOME/.zshrc\"; then\n    echo 'command' >> \"$HOME/.zshrc\"\nfi\n\"#\n}"
+  },
+  "functionalRequirements": [
+    {
+      "id": "FR-1",
+      "description": "All hooks must be idempotent (safe to run multiple times)",
+      "passed": false
+    },
+    {
+      "id": "FR-2",
+      "description": "Hooks must check if configuration already exists before modifying files",
+      "passed": false
+    },
+    {
+      "id": "FR-3",
+      "description": "Hooks are advisory - failures should warn but not fail installation",
+      "passed": false
+    },
+    {
+      "id": "FR-4",
+      "description": "User-defined hooks in jarvy.toml override default hooks",
+      "passed": false
+    }
+  ],
+  "technicalConsiderations": [
+    {
+      "area": "Shell Detection",
+      "details": "Hooks should detect user's shell and configure appropriately (.bashrc vs .zshrc vs .config/fish)"
+    },
+    {
+      "area": "Idempotency",
+      "details": "Use grep to check if configuration already exists before appending"
+    },
+    {
+      "area": "Cross-Platform",
+      "details": "Some hooks may need platform-specific variants (macOS vs Linux paths)"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Shell config corruption",
+      "likelihood": "Low",
+      "impact": "Medium",
+      "mitigation": "Always check before appending, use safe grep patterns"
+    },
+    {
+      "risk": "Non-idempotent hooks",
+      "likelihood": "Medium",
+      "impact": "Low",
+      "mitigation": "Test hooks multiple times, verify no duplicate entries"
+    }
+  ],
+  "openQuestions": []
+}
