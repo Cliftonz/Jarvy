@@ -28,6 +28,7 @@ mod outputs;
 mod posthog;
 mod provisioner;
 mod report;
+mod services;
 mod setup;
 mod tools;
 
@@ -142,9 +143,37 @@ enum Commands {
     },
     /// Show detected CI environment information
     CiInfo {},
+    /// Manage project services (docker-compose, tilt)
+    Services {
+        #[clap(subcommand)]
+        action: ServicesAction,
+        /// Path to the configuration file
+        #[clap(short, long, default_value = "./jarvy.toml")]
+        file: String,
+    },
     /// Catch-all for unknown subcommands and their args
     #[clap(external_subcommand)]
     External(Vec<String>),
+}
+
+#[derive(Subcommand)]
+enum ServicesAction {
+    /// Start project services
+    Start {
+        /// Run services in the foreground (attached)
+        #[clap(long)]
+        foreground: bool,
+    },
+    /// Stop project services
+    Stop {},
+    /// Show service status
+    Status {},
+    /// Restart project services
+    Restart {
+        /// Run services in the foreground (attached)
+        #[clap(long)]
+        foreground: bool,
+    },
 }
 
 fn parse_ci_provider(s: &str) -> Result<ci::CiProvider, String> {
@@ -240,6 +269,7 @@ fn main() {
             Some(Commands::Env { .. }) => "env",
             Some(Commands::CiConfig { .. }) => "ci-config",
             Some(Commands::CiInfo { .. }) => "ci-info",
+            Some(Commands::Services { .. }) => "services",
             Some(Commands::External(..)) => "external",
             None => "interactive",
         };
@@ -630,6 +660,48 @@ fn main() {
                                 eprintln!("Warning: Post-setup hook failed: {}", e);
                             }
                         }
+                    }
+                }
+            }
+
+            // Auto-start services if configured
+            let services_config = &config.services;
+            let is_ci = ci_env.is_some();
+            if services_config.should_auto_start(is_ci) {
+                let working_dir = std::path::Path::new(file)
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."));
+
+                // Detect service backend
+                let backend_result = services::detect_backend_with_config(
+                    working_dir,
+                    services_config.compose_file.as_deref(),
+                    services_config.tilt_file.as_deref(),
+                );
+
+                if let Some((backend, config_path)) = backend_result {
+                    let backend_impl = services::get_backend(backend);
+
+                    if backend_impl.is_installed() {
+                        if *dry_run {
+                            println!("\n[DRY-RUN] Would auto-start {} services", backend);
+                        } else {
+                            println!("\nAuto-starting {} services...", backend);
+                            match backend_impl.start(&config_path, true) {
+                                Ok(result) => {
+                                    println!("{}", result.message);
+                                }
+                                Err(e) => {
+                                    // Services auto-start is advisory - don't fail the setup
+                                    eprintln!("Warning: Failed to auto-start services: {}", e);
+                                }
+                            }
+                        }
+                    } else {
+                        eprintln!(
+                            "Note: {} config found but {} is not installed. Skipping services auto-start.",
+                            backend, backend
+                        );
                     }
                 }
             }
@@ -1037,6 +1109,107 @@ fn main() {
                     println!("  - Generic (CI=true)");
                     println!();
                     println!("Use --ci flag to force CI mode, or set JARVY_CI=1");
+                }
+            }
+        }
+        Some(Commands::Services { action, file }) => {
+            let config = Config::new(file);
+            let services_config = config.services.clone();
+
+            // Check if services are enabled
+            if !services_config.enabled {
+                eprintln!("Services are not enabled in the configuration.");
+                eprintln!("Add [services] enabled = true to your jarvy.toml");
+                return;
+            }
+
+            // Detect CI environment (available for future auto-start integration)
+            let _is_ci = ci::detect().is_some();
+
+            // Get the working directory
+            let working_dir = std::path::Path::new(file)
+                .parent()
+                .unwrap_or(std::path::Path::new("."));
+
+            // Detect service backend (or use config overrides)
+            let backend_result = services::detect_backend_with_config(
+                working_dir,
+                services_config.compose_file.as_deref(),
+                services_config.tilt_file.as_deref(),
+            );
+
+            let (backend, config_path) = match backend_result {
+                Some((b, p)) => (b, p),
+                None => {
+                    eprintln!("No service configuration found.");
+                    eprintln!("Supported: docker-compose.yml, compose.yml, Tiltfile");
+                    return;
+                }
+            };
+
+            let backend_impl = services::get_backend(backend);
+
+            // Check if backend is installed
+            if !backend_impl.is_installed() {
+                eprintln!("{} is not installed.", backend);
+                eprintln!("Install it with: jarvy setup");
+                return;
+            }
+
+            match action {
+                ServicesAction::Start { foreground } => {
+                    println!("Starting {} services...", backend);
+                    let detach = !foreground;
+                    match backend_impl.start(&config_path, detach) {
+                        Ok(result) => {
+                            println!("{}", result.message);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to start services: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ServicesAction::Stop {} => {
+                    println!("Stopping {} services...", backend);
+                    match backend_impl.stop(&config_path) {
+                        Ok(result) => {
+                            println!("{}", result.message);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to stop services: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ServicesAction::Status {} => {
+                    match backend_impl.status(&config_path) {
+                        Ok(status) => {
+                            println!("Service Backend: {}", status.backend);
+                            println!("Installed: {}", if status.installed { "Yes" } else { "No" });
+                            println!("Running: {}", if status.running { "Yes" } else { "No" });
+                            if !status.details.is_empty() {
+                                println!("\nDetails:\n{}", status.details);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to get service status: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ServicesAction::Restart { foreground } => {
+                    println!("Restarting {} services...", backend);
+                    let detach = !foreground;
+                    match backend_impl.restart(&config_path, detach) {
+                        Ok(result) => {
+                            println!("{}", result.message);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to restart services: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
             }
         }

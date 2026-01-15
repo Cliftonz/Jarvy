@@ -1,0 +1,151 @@
+{
+  "id": "HOOKS-003",
+  "parent_prd": "PRD-003",
+  "title": "Additional Tool Post-Install Hooks",
+  "description": "Add default post-install hooks for additional tools that would benefit from shell integration, completions, or configuration setup",
+  "status": "pending",
+  "priority": "low",
+  "dependencies": ["PRD-003", "HOOKS-002"],
+  "estimated_complexity": "low",
+  "acceptance_criteria": [
+    "Each tool hook is idempotent (grep before append)",
+    "Hooks are advisory (failures are warnings, not errors)",
+    "User-defined hooks take precedence over default hooks",
+    "All hooks work cross-platform where applicable",
+    "jarvy tools --default-hooks shows all new hooks"
+  ],
+  "context": {
+    "existing_hooks": 18,
+    "hook_types": [
+      "shell_integration - Add init/eval to shell rc",
+      "shell_completion - Add completion scripts",
+      "config_generation - Create default config files",
+      "shell_alias - Add convenience aliases",
+      "path_setup - Configure PATH",
+      "advisory_note - Print post-install tips"
+    ]
+  },
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "delta - Git pager integration",
+      "description": "Configure git to use delta as the default pager",
+      "status": "pending",
+      "priority": "medium",
+      "files": ["src/tools/delta/delta.rs"],
+      "hook_type": "config_generation",
+      "hook_script": "git config --global core.pager delta && git config --global interactive.diffFilter 'delta --color-only'",
+      "notes": "delta provides beautiful git diffs but requires git config to use it"
+    },
+    {
+      "id": "T2",
+      "title": "eza - Shell aliases",
+      "description": "Add aliases to replace ls with eza",
+      "status": "pending",
+      "priority": "low",
+      "files": ["src/tools/eza/eza.rs"],
+      "hook_type": "shell_alias",
+      "hook_script": "Add alias ls='eza', alias ll='eza -l', alias la='eza -la' to shell rc",
+      "notes": "eza is a modern ls replacement with better colors and git integration"
+    },
+    {
+      "id": "T3",
+      "title": "ripgrep - Shell completion",
+      "description": "Add ripgrep shell completions",
+      "status": "pending",
+      "priority": "low",
+      "files": ["src/tools/ripgrep/ripgrep.rs"],
+      "hook_type": "shell_completion",
+      "hook_script": "rg --generate=complete-bash/zsh/fish",
+      "notes": "ripgrep can generate its own completions"
+    },
+    {
+      "id": "T4",
+      "title": "tmux - Plugin manager setup",
+      "description": "Optionally install TPM (Tmux Plugin Manager)",
+      "status": "pending",
+      "priority": "low",
+      "files": ["src/tools/tmux/tmux.rs"],
+      "hook_type": "advisory_note",
+      "hook_script": "Print note about TPM installation for plugin management",
+      "notes": "TPM is optional but commonly used"
+    },
+    {
+      "id": "T5",
+      "title": "kubectx - Shell completion",
+      "description": "Add kubectx and kubens shell completions",
+      "status": "pending",
+      "priority": "low",
+      "files": ["src/tools/kubectx/kubectx.rs"],
+      "hook_type": "shell_completion",
+      "hook_script": "Source kubectx/kubens completions from installation directory",
+      "notes": "Completions help with context and namespace switching"
+    },
+    {
+      "id": "T6",
+      "title": "minikube - Shell completion",
+      "description": "Add minikube shell completions",
+      "status": "pending",
+      "priority": "low",
+      "files": ["src/tools/minikube/minikube.rs"],
+      "hook_type": "shell_completion",
+      "hook_script": "minikube completion bash/zsh/fish",
+      "notes": "minikube can generate its own completions"
+    },
+    {
+      "id": "T7",
+      "title": "kind - Shell completion",
+      "description": "Add kind shell completions",
+      "status": "pending",
+      "priority": "low",
+      "files": ["src/tools/kind/kind.rs"],
+      "hook_type": "shell_completion",
+      "hook_script": "kind completion bash/zsh/fish",
+      "notes": "kind can generate its own completions"
+    },
+    {
+      "id": "T8",
+      "title": "argocd - Shell completion and login note",
+      "description": "Add argocd shell completions and login advisory",
+      "status": "pending",
+      "priority": "low",
+      "files": ["src/tools/argocd/argocd.rs"],
+      "hook_type": "shell_completion",
+      "hook_script": "argocd completion bash/zsh/fish",
+      "notes": "Also include advisory about 'argocd login' setup"
+    },
+    {
+      "id": "T9",
+      "title": "nvim - Config directory setup",
+      "description": "Create basic nvim config directory structure",
+      "status": "pending",
+      "priority": "low",
+      "files": ["src/tools/nvim/nvim.rs"],
+      "hook_type": "advisory_note",
+      "hook_script": "Print note about ~/.config/nvim setup and popular configs (LazyVim, NvChad)",
+      "notes": "Don't auto-configure nvim, just provide guidance"
+    },
+    {
+      "id": "T10",
+      "title": "fd - Shell alias",
+      "description": "Add fd alias for find replacement",
+      "status": "pending",
+      "priority": "low",
+      "files": ["src/tools/fd/fd.rs"],
+      "hook_type": "shell_alias",
+      "hook_script": "Add alias find='fd' to shell rc (optional)",
+      "notes": "fd is a simpler, faster alternative to find"
+    }
+  ],
+  "implementation_notes": {
+    "pattern": "Follow existing hook pattern in define_tool! macro",
+    "idempotency": "Always check before modifying shell rc files",
+    "cross_platform": "Use shell-detection from hooks.rs for appropriate rc file",
+    "priority": "These are nice-to-have, not critical for tool functionality"
+  },
+  "related_tasks": [
+    "PRD-003 - Hooks infrastructure",
+    "PRD-003.1 - Tool-specific default hooks",
+    "HOOKS-002 - Additional default hooks"
+  ]
+}

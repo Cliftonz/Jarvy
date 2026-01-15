@@ -3,7 +3,7 @@
   "parent_prd": "PRD-009",
   "title": "Service Management Integration",
   "description": "Allow jarvy to start project services (docker-compose, tilt) that developers define in their projects, providing a unified way to start local development environments",
-  "status": "pending",
+  "status": "completed",
   "priority": "medium",
   "dependencies": ["PRD-010"],
   "estimated_complexity": "medium",
@@ -42,7 +42,7 @@
       "id": "T1",
       "title": "Create services module",
       "description": "Create src/services/mod.rs for service management",
-      "status": "pending",
+      "status": "completed",
       "priority": "high",
       "files": ["src/services/mod.rs"],
       "subtasks": [
@@ -56,7 +56,7 @@
       "id": "T2",
       "title": "Add services config parsing",
       "description": "Parse [services] section in jarvy.toml",
-      "status": "pending",
+      "status": "completed",
       "priority": "high",
       "files": ["src/config.rs"],
       "subtasks": [
@@ -72,7 +72,7 @@
       "id": "T3",
       "title": "Add jarvy services command",
       "description": "Add subcommand for service management",
-      "status": "pending",
+      "status": "completed",
       "priority": "high",
       "files": ["src/main.rs"],
       "subtasks": [
@@ -88,7 +88,7 @@
       "id": "T4",
       "title": "Integrate with setup flow",
       "description": "Optionally start services after jarvy setup",
-      "status": "pending",
+      "status": "completed",
       "priority": "medium",
       "files": ["src/main.rs"],
       "subtasks": [
@@ -102,7 +102,7 @@
       "id": "T5",
       "title": "Docker Compose backend",
       "description": "Implement docker-compose service backend",
-      "status": "pending",
+      "status": "completed",
       "priority": "high",
       "files": ["src/services/docker_compose.rs"],
       "subtasks": [
@@ -118,7 +118,7 @@
       "id": "T6",
       "title": "Tilt backend",
       "description": "Implement tilt service backend",
-      "status": "pending",
+      "status": "completed",
       "priority": "medium",
       "files": ["src/services/tilt.rs"],
       "subtasks": [
@@ -133,7 +133,7 @@
       "id": "T7",
       "title": "Write tests",
       "description": "Create tests for service management",
-      "status": "pending",
+      "status": "completed",
       "priority": "medium",
       "files": ["tests/services_integration.rs"],
       "subtasks": [
@@ -148,7 +148,7 @@
       "id": "T8",
       "title": "Update documentation",
       "description": "Document service management feature",
-      "status": "pending",
+      "status": "completed",
       "priority": "low",
       "files": ["CLAUDE.md"],
       "subtasks": [
@@ -184,5 +184,19 @@
   ],
   "related_tasks": [
     "PRD-010 - CI/CD Detection (for CI mode handling)"
-  ]
+  ],
+  "completion_notes": {
+    "completed_date": "2026-01-15",
+    "files_created": [
+      "src/services/mod.rs",
+      "src/services/docker_compose.rs",
+      "src/services/tilt.rs",
+      "tests/services_integration.rs"
+    ],
+    "files_modified": [
+      "src/main.rs",
+      "src/config.rs"
+    ],
+    "total_tests": "25 unit tests + 8 integration tests"
+  }
 }

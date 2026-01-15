@@ -196,6 +196,47 @@ impl Default for HookSettings {
 }
 
 /// Configuration for all hooks in jarvy.toml
+// ============================================================================
+// Services Configuration
+// ============================================================================
+
+/// Services configuration section in jarvy.toml
+#[derive(Deserialize, Debug, Clone, Default)]
+pub struct ServicesConfig {
+    /// Whether services feature is enabled
+    #[serde(default)]
+    pub enabled: bool,
+    /// Whether to auto-start services during jarvy setup
+    #[serde(default)]
+    pub auto_start: bool,
+    /// Override path to docker-compose.yml (relative to project root)
+    #[serde(default)]
+    pub compose_file: Option<PathBuf>,
+    /// Override path to Tiltfile (relative to project root)
+    #[serde(default)]
+    pub tilt_file: Option<PathBuf>,
+    /// Whether to auto-start services in CI mode (default: false)
+    #[serde(default)]
+    pub start_in_ci: bool,
+}
+
+impl ServicesConfig {
+    /// Returns true if services should be started during setup
+    pub fn should_auto_start(&self, is_ci: bool) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        if is_ci && !self.start_in_ci {
+            return false;
+        }
+        self.auto_start
+    }
+}
+
+// ============================================================================
+// Hooks Configuration
+// ============================================================================
+
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct HooksConfig {
     /// Script to run before any tool installation
@@ -224,6 +265,9 @@ pub struct Config {
     /// Environment variables configuration
     #[serde(default)]
     pub env: EnvConfig,
+    /// Services configuration (docker-compose, tilt)
+    #[serde(default)]
+    pub services: ServicesConfig,
 }
 
 #[derive(Deserialize, Debug, Default)]
@@ -580,5 +624,84 @@ git = "latest"
         assert_eq!(settings.dotenv_path, PathBuf::from(".env"));
         assert!(!settings.add_to_gitignore);
         assert!(settings.backup_rc);
+    }
+
+    #[test]
+    fn test_services_config_defaults() {
+        let toml_str = r#"
+[provisioner]
+git = "latest"
+"#;
+        let config: Config = toml::from_str(toml_str).expect("Failed to parse config");
+
+        assert!(!config.services.enabled);
+        assert!(!config.services.auto_start);
+        assert!(config.services.compose_file.is_none());
+        assert!(config.services.tilt_file.is_none());
+        assert!(!config.services.start_in_ci);
+    }
+
+    #[test]
+    fn test_services_config_parsing() {
+        let toml_str = r#"
+[provisioner]
+git = "latest"
+
+[services]
+enabled = true
+auto_start = true
+compose_file = "docker/docker-compose.yml"
+start_in_ci = false
+"#;
+        let config: Config = toml::from_str(toml_str).expect("Failed to parse config");
+
+        assert!(config.services.enabled);
+        assert!(config.services.auto_start);
+        assert_eq!(
+            config.services.compose_file,
+            Some(PathBuf::from("docker/docker-compose.yml"))
+        );
+        assert!(!config.services.start_in_ci);
+    }
+
+    #[test]
+    fn test_services_should_auto_start() {
+        // Test disabled services
+        let disabled = ServicesConfig {
+            enabled: false,
+            auto_start: true,
+            ..Default::default()
+        };
+        assert!(!disabled.should_auto_start(false));
+        assert!(!disabled.should_auto_start(true));
+
+        // Test enabled with auto_start off
+        let no_auto = ServicesConfig {
+            enabled: true,
+            auto_start: false,
+            ..Default::default()
+        };
+        assert!(!no_auto.should_auto_start(false));
+        assert!(!no_auto.should_auto_start(true));
+
+        // Test enabled with auto_start on, CI off
+        let auto_no_ci = ServicesConfig {
+            enabled: true,
+            auto_start: true,
+            start_in_ci: false,
+            ..Default::default()
+        };
+        assert!(auto_no_ci.should_auto_start(false)); // not in CI
+        assert!(!auto_no_ci.should_auto_start(true)); // in CI, start_in_ci is false
+
+        // Test enabled with auto_start and start_in_ci on
+        let auto_with_ci = ServicesConfig {
+            enabled: true,
+            auto_start: true,
+            start_in_ci: true,
+            ..Default::default()
+        };
+        assert!(auto_with_ci.should_auto_start(false));
+        assert!(auto_with_ci.should_auto_start(true));
     }
 }
