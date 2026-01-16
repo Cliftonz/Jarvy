@@ -34,6 +34,7 @@ This folder contains PRDs for improving Jarvy based on a comprehensive codebase 
 | # | PRD | Impact | Effort | Description |
 |---|-----|--------|--------|-------------|
 | 9 | [Service Management](009-service-management.md) | Full stacks | 7-8 days | Docker containers, databases |
+| 12 | [Release Distribution](012-release-distribution.md) | Adoption | 11 days | Package managers, binaries, install scripts |
 
 ## Recommended Implementation Order
 
@@ -55,6 +56,10 @@ Phase 3: Feature Expansion (3-4 weeks)
 
 Phase 4: Advanced (4+ weeks)
 └── PRD-009: Service Management        ← Full environment provisioning
+
+Phase 5: Distribution (2+ weeks)
+├── PRD-011: Comprehensive Docs        ← User and developer guides
+└── PRD-012: Release Distribution      ← Package managers, binaries
 ```
 
 ## Quick Reference
@@ -73,6 +78,7 @@ Phase 4: Advanced (4+ weeks)
 | Can't set environment variables | [008](008-environment-variables-support.md) |
 | Can't start databases/services | [009](009-service-management.md) |
 | Doesn't work in CI/CD | [010](010-ci-detection-integration.md) |
+| Must build from source | [012](012-release-distribution.md) |
 
 ### Dependencies Between PRDs
 
@@ -88,6 +94,10 @@ PRD-003 (Hooks) ←────────────────────�
 PRD-009 (Services) depends on hooks architecture
 
 PRD-010 (CI) ←─────────────────────────────── PRD-005 (Errors)
+
+PRD-012 (Distribution) ←────────────────────── PRD-011 (Docs) for README
+       ↓
+Enables wide adoption via brew/apt/winget/cargo
 ```
 
 ## Analysis Sources

@@ -1,0 +1,441 @@
+{
+  "title": "PRD-012: Release Process and Multi-Platform Distribution",
+  "priority": "High",
+  "status": "Not Started",
+  "source": "prd/012-release-distribution.md",
+  "createdAt": "2026-01-15T23:30:00Z",
+  "updatedAt": "2026-01-15T23:30:00Z",
+  "overview": {
+    "description": "Establish a professional release process and distribute Jarvy to all major package managers (Homebrew, apt, dnf, pacman, winget, Chocolatey, cargo) with automated CI/CD pipelines, binary builds for all platforms, and proper versioning.",
+    "goals": [
+      "One-command install on any platform",
+      "Available everywhere: brew, apt, dnf, pacman, winget, choco, cargo",
+      "Automated releases: Tag → Build → Publish pipeline",
+      "Professional versioning: SemVer, changelogs, release notes",
+      "Cross-platform binaries: macOS (Intel/ARM), Linux (x64/ARM), Windows (x64)"
+    ]
+  },
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Phase 1: Version Management Foundation",
+      "description": "As a maintainer, I want automated version management with semantic versioning and changelog generation so that releases are professional and consistent.",
+      "passed": false,
+      "priority": "P0",
+      "impact": "High",
+      "acceptanceCriteria": [
+        {
+          "criterion": "cargo-release configured in release.toml",
+          "passed": false
+        },
+        {
+          "criterion": "git-cliff configured in cliff.toml for changelog generation",
+          "passed": false
+        },
+        {
+          "criterion": "Cargo.toml has complete package metadata (description, license, repository, homepage, keywords, categories)",
+          "passed": false
+        },
+        {
+          "criterion": "CHANGELOG.md auto-generates from conventional commits",
+          "passed": false
+        },
+        {
+          "criterion": "Version tags follow v1.0.0 format",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Phase 2: Cross-Platform Binary Builds",
+      "description": "As a user, I want pre-compiled binaries for my platform so that I don't need to build from source.",
+      "passed": false,
+      "priority": "P0",
+      "impact": "High",
+      "acceptanceCriteria": [
+        {
+          "criterion": "GitHub Actions release.yml workflow created",
+          "passed": false
+        },
+        {
+          "criterion": "macOS x86_64 binary builds successfully",
+          "passed": false
+        },
+        {
+          "criterion": "macOS aarch64 (ARM) binary builds successfully",
+          "passed": false
+        },
+        {
+          "criterion": "Linux x86_64 (glibc) binary builds successfully",
+          "passed": false
+        },
+        {
+          "criterion": "Linux x86_64 (musl) binary builds successfully",
+          "passed": false
+        },
+        {
+          "criterion": "Linux aarch64 binary builds successfully",
+          "passed": false
+        },
+        {
+          "criterion": "Windows x86_64 binary builds successfully",
+          "passed": false
+        },
+        {
+          "criterion": "All binaries are stripped for smaller size",
+          "passed": false
+        },
+        {
+          "criterion": "Archives created (.tar.gz for Unix, .zip for Windows)",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Phase 3: GitHub Releases Automation",
+      "description": "As a user, I want releases to be automatically created on GitHub with all binaries and checksums so that I can download the appropriate version.",
+      "passed": false,
+      "priority": "P0",
+      "impact": "High",
+      "acceptanceCriteria": [
+        {
+          "criterion": "GitHub Release created automatically on version tag push",
+          "passed": false
+        },
+        {
+          "criterion": "All binary artifacts attached to release",
+          "passed": false
+        },
+        {
+          "criterion": "SHA256SUMS file generated and attached",
+          "passed": false
+        },
+        {
+          "criterion": "Release notes auto-generated from commits",
+          "passed": false
+        },
+        {
+          "criterion": "Installation instructions included in release body",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Phase 4: Homebrew Distribution",
+      "description": "As a macOS/Linux user, I want to install Jarvy via Homebrew so that I can manage it with my existing package manager.",
+      "passed": false,
+      "priority": "P0",
+      "impact": "High",
+      "acceptanceCriteria": [
+        {
+          "criterion": "Homebrew tap repository created (jarvy-dev/homebrew-tap)",
+          "passed": false
+        },
+        {
+          "criterion": "Formula template created in dist/homebrew/jarvy.rb",
+          "passed": false
+        },
+        {
+          "criterion": "Formula supports macOS Intel and ARM",
+          "passed": false
+        },
+        {
+          "criterion": "Formula supports Linux Homebrew",
+          "passed": false
+        },
+        {
+          "criterion": "Automatic formula update workflow on release",
+          "passed": false
+        },
+        {
+          "criterion": "brew install jarvy-dev/tap/jarvy works",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "Phase 5: Linux Package Repositories",
+      "description": "As a Linux user, I want to install Jarvy via my distro's package manager so that updates are managed automatically.",
+      "passed": false,
+      "priority": "P1",
+      "impact": "High",
+      "acceptanceCriteria": [
+        {
+          "criterion": "Debian package control file created (dist/debian/control)",
+          "passed": false
+        },
+        {
+          "criterion": ".deb package builds successfully",
+          "passed": false
+        },
+        {
+          "criterion": "RPM spec file created (dist/rpm/jarvy.spec)",
+          "passed": false
+        },
+        {
+          "criterion": ".rpm package builds successfully",
+          "passed": false
+        },
+        {
+          "criterion": "AUR PKGBUILD created for source build",
+          "passed": false
+        },
+        {
+          "criterion": "AUR PKGBUILD-bin created for binary install",
+          "passed": false
+        },
+        {
+          "criterion": "Packages are GPG signed",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-006",
+      "title": "Phase 6: Windows Distribution",
+      "description": "As a Windows user, I want to install Jarvy via winget or Chocolatey so that I can use my preferred package manager.",
+      "passed": false,
+      "priority": "P1",
+      "impact": "High",
+      "acceptanceCriteria": [
+        {
+          "criterion": "Winget manifest template created (dist/windows/winget.yaml)",
+          "passed": false
+        },
+        {
+          "criterion": "Winget manifest auto-submitted on release",
+          "passed": false
+        },
+        {
+          "criterion": "Chocolatey nuspec created (dist/windows/chocolatey/jarvy.nuspec)",
+          "passed": false
+        },
+        {
+          "criterion": "Chocolatey install script created",
+          "passed": false
+        },
+        {
+          "criterion": "choco install jarvy works",
+          "passed": false
+        },
+        {
+          "criterion": "winget install Jarvy.Jarvy works",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-007",
+      "title": "Phase 7: Install Scripts",
+      "description": "As a user, I want a one-liner install command so that I can quickly set up Jarvy without adding repositories.",
+      "passed": false,
+      "priority": "P0",
+      "impact": "High",
+      "acceptanceCriteria": [
+        {
+          "criterion": "Unix install script created (dist/scripts/install.sh)",
+          "passed": false
+        },
+        {
+          "criterion": "Install script detects OS and architecture",
+          "passed": false
+        },
+        {
+          "criterion": "Install script downloads correct binary",
+          "passed": false
+        },
+        {
+          "criterion": "curl -fsSL https://jarvy.dev/install.sh | bash works",
+          "passed": false
+        },
+        {
+          "criterion": "Windows install script created (dist/scripts/install.ps1)",
+          "passed": false
+        },
+        {
+          "criterion": "irm https://jarvy.dev/install.ps1 | iex works",
+          "passed": false
+        },
+        {
+          "criterion": "Scripts add jarvy to PATH",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-008",
+      "title": "Phase 8: crates.io Publishing",
+      "description": "As a Rust developer, I want to install Jarvy via cargo so that I can use my existing toolchain.",
+      "passed": false,
+      "priority": "P0",
+      "impact": "Medium",
+      "acceptanceCriteria": [
+        {
+          "criterion": "Cargo.toml has all required metadata for crates.io",
+          "passed": false
+        },
+        {
+          "criterion": "Package published to crates.io",
+          "passed": false
+        },
+        {
+          "criterion": "cargo install jarvy works",
+          "passed": false
+        },
+        {
+          "criterion": "Documentation available on docs.rs",
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "functionalRequirements": [
+    {
+      "id": "FR-1",
+      "description": "Semantic versioning (MAJOR.MINOR.PATCH) with git tags",
+      "passed": false
+    },
+    {
+      "id": "FR-2",
+      "description": "Binary builds for 6 platform targets",
+      "passed": false
+    },
+    {
+      "id": "FR-3",
+      "description": "Automatic GitHub Release creation on version tag",
+      "passed": false
+    },
+    {
+      "id": "FR-4",
+      "description": "Homebrew tap with formula for Intel/ARM Mac and Linux",
+      "passed": false
+    },
+    {
+      "id": "FR-5",
+      "description": "Debian/Ubuntu .deb package with apt repository",
+      "passed": false
+    },
+    {
+      "id": "FR-6",
+      "description": "Fedora/RHEL .rpm package with dnf repository",
+      "passed": false
+    },
+    {
+      "id": "FR-7",
+      "description": "Arch Linux AUR packages (source and binary)",
+      "passed": false
+    },
+    {
+      "id": "FR-8",
+      "description": "Windows winget manifest with auto-submission",
+      "passed": false
+    },
+    {
+      "id": "FR-9",
+      "description": "Chocolatey package for Windows",
+      "passed": false
+    },
+    {
+      "id": "FR-10",
+      "description": "crates.io publishing for cargo install",
+      "passed": false
+    },
+    {
+      "id": "FR-11",
+      "description": "Unix install script (curl | bash)",
+      "passed": false
+    },
+    {
+      "id": "FR-12",
+      "description": "Windows install script (PowerShell)",
+      "passed": false
+    }
+  ],
+  "nonGoals": [
+    "Docker image distribution (Jarvy provisions environments, not containers)",
+    "Snap or Flatpak initially (P2/P3 priority)",
+    "ARM Windows binaries (low demand)",
+    "32-bit platform support"
+  ],
+  "technicalConsiderations": [
+    {
+      "area": "Cross-compilation",
+      "details": "Use cross or cargo-zigbuild for Linux ARM targets from x86 runners"
+    },
+    {
+      "area": "Code signing",
+      "details": "macOS binaries may need notarization for Gatekeeper; Windows may need Authenticode"
+    },
+    {
+      "area": "Package repository hosting",
+      "details": "APT/RPM repos can use GitHub Pages or Cloudflare R2 for free hosting"
+    },
+    {
+      "area": "Secrets management",
+      "details": "GPG keys, crates.io token, Chocolatey API key stored as GitHub secrets"
+    }
+  ],
+  "filesToCreate": [
+    ".github/workflows/release.yml",
+    ".github/workflows/publish-packages.yml",
+    "dist/homebrew/jarvy.rb",
+    "dist/debian/control",
+    "dist/debian/rules",
+    "dist/debian/postinst",
+    "dist/rpm/jarvy.spec",
+    "dist/aur/PKGBUILD",
+    "dist/aur/PKGBUILD-bin",
+    "dist/windows/winget.yaml",
+    "dist/windows/chocolatey/jarvy.nuspec",
+    "dist/windows/chocolatey/tools/chocolateyinstall.ps1",
+    "dist/scripts/install.sh",
+    "dist/scripts/install.ps1",
+    "cliff.toml",
+    "release.toml",
+    "CHANGELOG.md"
+  ],
+  "successMetrics": [
+    "Package managers supported: 8+",
+    "Platforms with binaries: 6",
+    "Install time (network): < 30s",
+    "Release automation: 100%",
+    "Time from tag to published: < 15 min"
+  ],
+  "risks": [
+    {
+      "risk": "Package manager rejection",
+      "likelihood": "Medium",
+      "impact": "High",
+      "mitigation": "Follow guidelines, provide quality packages"
+    },
+    {
+      "risk": "Build failures on new platforms",
+      "likelihood": "Medium",
+      "impact": "Medium",
+      "mitigation": "Extensive CI matrix, cross-compilation"
+    },
+    {
+      "risk": "GPG key management",
+      "likelihood": "Low",
+      "impact": "High",
+      "mitigation": "Secure key storage, rotation policy"
+    },
+    {
+      "risk": "CDN/hosting costs",
+      "likelihood": "Low",
+      "impact": "Medium",
+      "mitigation": "GitHub Releases free, consider sponsors"
+    }
+  ],
+  "dependencies": [
+    "cargo-release",
+    "git-cliff",
+    "cross (for ARM cross-compilation)",
+    "GitHub Actions runners (macOS, Linux, Windows)"
+  ],
+  "effortEstimate": "11 days"
+}
