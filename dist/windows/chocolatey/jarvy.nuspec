@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>jarvy</id>
+    <version>VERSION_PLACEHOLDER</version>
+    <title>Jarvy</title>
+    <authors>Jarvy Team</authors>
+    <owners>bearbinary</owners>
+    <projectUrl>https://github.com/bearbinary/jarvy</projectUrl>
+    <licenseUrl>https://github.com/bearbinary/jarvy/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectSourceUrl>https://github.com/bearbinary/jarvy</projectSourceUrl>
+    <docsUrl>https://github.com/bearbinary/jarvy#readme</docsUrl>
+    <bugTrackerUrl>https://github.com/bearbinary/jarvy/issues</bugTrackerUrl>
+    <tags>devtools provisioning cli developer-experience setup rust</tags>
+    <summary>Fast, cross-platform CLI that installs and manages developer tools</summary>
+    <description>
+Jarvy provisions development environments from a jarvy.toml config file.
+It installs tools via native package managers (brew, apt, dnf, winget).
+
+## Features
+
+- 97+ supported tools across macOS, Linux, and Windows
+- Parallel installation with batch package manager operations
+- Post-install hooks for shell completion and configuration
+- CI/CD detection for 11 providers
+- Service management with Docker Compose and Tilt
+
+## Quick Start
+
+```powershell
+# Initialize a new project
+jarvy configure
+
+# Install all tools defined in jarvy.toml
+jarvy setup
+```
+    </description>
+    <releaseNotes>https://github.com/bearbinary/jarvy/releases/tag/vVERSION_PLACEHOLDER</releaseNotes>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

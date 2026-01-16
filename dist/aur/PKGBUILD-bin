@@ -1,0 +1,23 @@
+# Maintainer: Jarvy Team <team@jarvy.dev>
+# AUR Package: jarvy-bin (pre-compiled binary)
+
+pkgname=jarvy-bin
+pkgver=VERSION_PLACEHOLDER
+pkgrel=1
+pkgdesc="Fast, cross-platform CLI that installs and manages developer tools (binary release)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/bearbinary/jarvy"
+license=('MIT' 'Apache-2.0')
+provides=('jarvy')
+conflicts=('jarvy')
+depends=('gcc-libs')
+
+source_x86_64=("https://github.com/bearbinary/jarvy/releases/download/v${pkgver}/jarvy-v${pkgver}-x86_64-unknown-linux-gnu.tar.gz")
+source_aarch64=("https://github.com/bearbinary/jarvy/releases/download/v${pkgver}/jarvy-v${pkgver}-aarch64-unknown-linux-gnu.tar.gz")
+
+sha256sums_x86_64=('SHA256_PLACEHOLDER_X86')
+sha256sums_aarch64=('SHA256_PLACEHOLDER_ARM')
+
+package() {
+    install -Dm755 "jarvy" "$pkgdir/usr/bin/jarvy"
+}

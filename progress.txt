@@ -16,6 +16,7 @@
 | PRD-001 | Optimized Tool Installation (P2) | 2026-01-15 | Parallel version checking with rayon |
 | PRD-002 | Tool Post-Install Hooks | 2026-01-15 | Shell completions for just, flux, argocd, etc. |
 | HOOKS-003 | Additional Tool Hooks | 2026-01-15 | delta, eza, ripgrep, minikube, kind, fd hooks |
+| PRD-012 | Release Distribution | 2026-01-15 | Package managers, install scripts, GitHub releases |
 
 ---
 
@@ -383,3 +384,115 @@ fi
 - Always add fpath modification check for zsh (`if ! grep -q 'fpath'...`)
 
 **Total Default Hooks**: 29 tools (18 original + 11 new)
+
+---
+
+## PRD-012: Release Process and Multi-Platform Distribution
+
+**Files Created**:
+```
+Cargo.toml                          # Updated with crates.io metadata
+release.toml                        # cargo-release configuration
+cliff.toml                          # git-cliff changelog config
+CHANGELOG.md                        # Initial changelog
+.github/workflows/release.yml       # Updated for tag triggers
+.github/workflows/publish-packages.yml  # Package manager publishing
+dist/
+├── homebrew/jarvy.rb               # Homebrew formula template
+├── debian/control                  # Debian package metadata
+├── rpm/jarvy.spec                  # RPM spec file
+├── aur/
+│   ├── PKGBUILD                    # AUR source build
+│   └── PKGBUILD-bin                # AUR binary package
+├── windows/
+│   ├── winget.yaml                 # winget manifest
+│   └── chocolatey/
+│       ├── jarvy.nuspec            # Chocolatey nuspec
+│       └── tools/chocolateyinstall.ps1
+└── scripts/
+    ├── install.sh                  # Unix install script
+    └── install.ps1                 # Windows install script
+docs/MAINTAINER_RELEASE_GUIDE.md    # Credentials and setup guide
+```
+
+**Dependencies**: cargo-release, git-cliff (dev tools, not runtime)
+
+**Key Features**:
+1. **Version Management**:
+   - cargo-release for automated version bumps, tags, and publishing
+   - git-cliff for conventional commit changelog generation
+   - Cargo.toml with full crates.io metadata (keywords, categories, etc.)
+
+2. **Binary Builds** (6 targets):
+   - macOS: x86_64-apple-darwin, aarch64-apple-darwin
+   - Linux: x86_64-unknown-linux-gnu, x86_64-unknown-linux-musl, aarch64-unknown-linux-gnu
+   - Windows: x86_64-pc-windows-msvc
+
+3. **GitHub Releases**:
+   - Automatic release creation on version tag (v*.*.*)
+   - SHA256 checksums for all artifacts
+   - Installation instructions in release body
+   - Build provenance attestation
+
+4. **Package Managers**:
+   - **Homebrew**: Formula with platform-specific URLs and SHA256
+   - **crates.io**: Full metadata, auto-publish via workflow
+   - **APT/Debian**: Control file with dependencies
+   - **RPM/Fedora**: Spec file with changelog
+   - **AUR**: Both source and binary PKGBUILDs
+   - **winget**: Manifest for Windows Package Manager
+   - **Chocolatey**: nuspec and install script
+
+5. **Install Scripts**:
+   - Unix: Platform detection, version fetch, PATH setup
+   - Windows: PowerShell with PATH modification
+
+**Release Workflow**:
+```bash
+# 1. Prepare
+cargo test && cargo clippy
+
+# 2. Release (patch/minor/major)
+cargo release patch --execute
+
+# 3. GitHub Actions automatically:
+#    - Builds binaries for all platforms
+#    - Creates GitHub Release with artifacts
+#    - Publishes to crates.io
+#    - Updates Homebrew tap
+#    - Submits to winget/Chocolatey/AUR
+```
+
+**Required Secrets** (GitHub repository secrets):
+| Secret | Purpose |
+|--------|---------|
+| `CRATES_IO_TOKEN` | Publish to crates.io |
+| `HOMEBREW_TAP_DEPLOY_KEY` | Push to homebrew-tap repo |
+| `AUR_SSH_PRIVATE_KEY` | Publish to AUR |
+| `AUR_USERNAME` | AUR account username |
+| `AUR_EMAIL` | AUR account email |
+| `WINGET_TOKEN` | Submit to winget-pkgs |
+| `CHOCOLATEY_API_KEY` | Push to Chocolatey |
+
+**Key Learnings**:
+- cargo-release `pre-release-hook` can run git-cliff for changelog generation
+- winget manifests use NestedInstallerType for zip archives containing executables
+- Chocolatey uses nuspec XML format with PowerShell install scripts
+- AUR requires separate .SRCINFO file generated from PKGBUILD
+- GitHub Actions can use softprops/action-gh-release for release creation
+
+**User Installation Commands**:
+```bash
+# Quick install (Unix)
+curl -fsSL https://raw.githubusercontent.com/bearbinary/jarvy/main/dist/scripts/install.sh | bash
+
+# Quick install (Windows)
+irm https://raw.githubusercontent.com/bearbinary/jarvy/main/dist/scripts/install.ps1 | iex
+
+# Package managers
+brew install bearbinary/tap/jarvy
+cargo install jarvy
+choco install jarvy
+winget install Jarvy.Jarvy
+yay -S jarvy-bin  # AUR
+```

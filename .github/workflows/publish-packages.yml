@@ -1,0 +1,167 @@
+name: Publish to Package Managers
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 1.0.0)'
+        required: true
+
+env:
+  VERSION: ${{ github.event.inputs.version || github.event.release.tag_name }}
+
+jobs:
+  publish-crates-io:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish to crates.io
+        run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+
+  update-homebrew:
+    name: Update Homebrew Formula
+    runs-on: ubuntu-latest
+    needs: [publish-crates-io]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get release assets
+        id: get_assets
+        run: |
+          VERSION="${{ env.VERSION }}"
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          # Download checksums
+          curl -sL "https://github.com/bearbinary/jarvy/releases/download/v${VERSION}/SHA256SUMS.txt" -o checksums.txt
+
+          # Extract SHA256 for each platform
+          MACOS_X86_SHA=$(grep "x86_64-apple-darwin" checksums.txt | awk '{print $1}' || echo "")
+          MACOS_ARM_SHA=$(grep "aarch64-apple-darwin" checksums.txt | awk '{print $1}' || echo "")
+          LINUX_X86_SHA=$(grep "x86_64-unknown-linux-gnu" checksums.txt | awk '{print $1}' || echo "")
+          LINUX_ARM_SHA=$(grep "aarch64-unknown-linux-gnu" checksums.txt | awk '{print $1}' || echo "")
+
+          echo "macos_x86_sha=$MACOS_X86_SHA" >> $GITHUB_OUTPUT
+          echo "macos_arm_sha=$MACOS_ARM_SHA" >> $GITHUB_OUTPUT
+          echo "linux_x86_sha=$LINUX_X86_SHA" >> $GITHUB_OUTPUT
+          echo "linux_arm_sha=$LINUX_ARM_SHA" >> $GITHUB_OUTPUT
+
+      - name: Update formula
+        run: |
+          VERSION="${{ steps.get_assets.outputs.version }}"
+          FORMULA="dist/homebrew/jarvy.rb"
+
+          # Update version and SHA256 placeholders
+          sed -i "s/VERSION_PLACEHOLDER/$VERSION/g" "$FORMULA"
+          sed -i "s/SHA256_PLACEHOLDER_MACOS_X86/${{ steps.get_assets.outputs.macos_x86_sha }}/g" "$FORMULA"
+          sed -i "s/SHA256_PLACEHOLDER_MACOS_ARM/${{ steps.get_assets.outputs.macos_arm_sha }}/g" "$FORMULA"
+          sed -i "s/SHA256_PLACEHOLDER_LINUX_X86/${{ steps.get_assets.outputs.linux_x86_sha }}/g" "$FORMULA"
+          sed -i "s/SHA256_PLACEHOLDER_LINUX_ARM/${{ steps.get_assets.outputs.linux_arm_sha }}/g" "$FORMULA"
+
+      - name: Push to Homebrew tap
+        uses: cpina/github-action-push-to-another-repository@main
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        with:
+          source-directory: dist/homebrew
+          destination-github-username: bearbinary
+          destination-repository-name: homebrew-tap
+          user-email: github-actions[bot]@users.noreply.github.com
+          target-branch: main
+          commit-message: "Update jarvy to ${{ steps.get_assets.outputs.version }}"
+
+  update-aur:
+    name: Update AUR Package
+    runs-on: ubuntu-latest
+    needs: [publish-crates-io]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION="${{ env.VERSION }}"
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Update PKGBUILD
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          sed -i "s/VERSION_PLACEHOLDER/$VERSION/g" dist/aur/PKGBUILD-bin
+
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v2.7.2
+        with:
+          pkgname: jarvy-bin
+          pkgbuild: dist/aur/PKGBUILD-bin
+          commit_username: ${{ secrets.AUR_USERNAME }}
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to ${{ steps.version.outputs.version }}"
+        continue-on-error: true  # AUR publish may require manual setup
+
+  update-winget:
+    name: Submit to winget
+    runs-on: windows-latest
+    needs: [publish-crates-io]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: |
+          VERSION="${{ env.VERSION }}"
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Update winget manifest
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          sed -i "s/VERSION_PLACEHOLDER/$VERSION/g" dist/windows/winget.yaml
+
+      - name: Submit to winget-pkgs
+        uses: vedantmgoyal2009/winget-releaser@v2
+        with:
+          identifier: Jarvy.Jarvy
+          installers-regex: 'jarvy-.*-x86_64-pc-windows-.*\.zip$'
+          token: ${{ secrets.WINGET_TOKEN }}
+        continue-on-error: true  # May require manual approval
+
+  update-chocolatey:
+    name: Publish to Chocolatey
+    runs-on: windows-latest
+    needs: [publish-crates-io]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: |
+          VERSION="${{ env.VERSION }}"
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Update nuspec
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          sed -i "s/VERSION_PLACEHOLDER/$VERSION/g" dist/windows/chocolatey/jarvy.nuspec
+
+      - name: Pack and push to Chocolatey
+        shell: powershell
+        run: |
+          cd dist/windows/chocolatey
+          choco pack
+          choco push jarvy.${{ steps.version.outputs.version }}.nupkg --source https://push.chocolatey.org/ --api-key ${{ secrets.CHOCOLATEY_API_KEY }}
+        continue-on-error: true  # May require manual setup

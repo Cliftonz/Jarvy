@@ -1,10 +1,20 @@
 name: Build and Release
 
 on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0)'
+        required: false
+        default: ''
 
 env:
-  VERSION: 1.0.5
+  VERSION: ${{ github.event.inputs.version || github.ref_name }}
+  CARGO_TERM_COLOR: always
 
 jobs:
   build_and_package:
@@ -127,10 +137,44 @@ jobs:
         with:
           subject-path: artifacts/**/jarvy*
 
+      - name: Generate SHA256 checksums
+        run: |
+          cd artifacts
+          find . -type f -name 'jarvy*' | while read -r file; do
+            sha256sum "$file" >> SHA256SUMS.txt
+          done
+          mv SHA256SUMS.txt ../
+
       - name: Release to GitHub
         uses: softprops/action-gh-release@v2
         with:
           draft: true
           generate_release_notes: true
-          tag_name: Jarvy v${{ env.VERSION }}
-          files: artifacts/**/jarvy*
+          tag_name: ${{ env.VERSION }}
+          files: |
+            artifacts/**/jarvy*
+            SHA256SUMS.txt
+          body: |
+            ## Installation
+
+            ### Quick Install (Unix)
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/bearbinary/jarvy/main/dist/scripts/install.sh | bash
+            ```
+
+            ### Quick Install (Windows PowerShell)
+            ```powershell
+            irm https://raw.githubusercontent.com/bearbinary/jarvy/main/dist/scripts/install.ps1 | iex
+            ```
+
+            ### Homebrew
+            ```bash
+            brew install bearbinary/tap/jarvy
+            ```
+
+            ### Cargo
+            ```bash
+            cargo install jarvy
+            ```
+
+            See [installation docs](https://github.com/bearbinary/jarvy#installation) for more options.

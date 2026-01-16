@@ -1,0 +1,42 @@
+# winget manifest for Jarvy
+# Submit to: https://github.com/microsoft/winget-pkgs
+# Documentation: https://learn.microsoft.com/en-us/windows/package-manager/package/manifest
+
+PackageIdentifier: Jarvy.Jarvy
+PackageVersion: VERSION_PLACEHOLDER
+PackageLocale: en-US
+Publisher: Jarvy
+PublisherUrl: https://github.com/bearbinary
+PublisherSupportUrl: https://github.com/bearbinary/jarvy/issues
+PackageName: Jarvy
+PackageUrl: https://github.com/bearbinary/jarvy
+License: MIT OR Apache-2.0
+LicenseUrl: https://github.com/bearbinary/jarvy/blob/main/LICENSE
+ShortDescription: Fast, cross-platform CLI that installs and manages developer tools
+Description: |
+  Jarvy provisions development environments from a jarvy.toml config file.
+  It installs tools via native package managers (brew, apt, dnf, winget).
+
+  Features:
+  - 97+ supported tools across macOS, Linux, and Windows
+  - Parallel installation with batch package manager operations
+  - Post-install hooks for shell completion and configuration
+  - CI/CD detection for 11 providers
+  - Service management with Docker Compose and Tilt
+Tags:
+  - cli
+  - developer-tools
+  - devtools
+  - provisioning
+  - setup
+Installers:
+  - Architecture: x64
+    InstallerType: zip
+    InstallerUrl: https://github.com/bearbinary/jarvy/releases/download/vVERSION_PLACEHOLDER/jarvy-vVERSION_PLACEHOLDER-x86_64-pc-windows-msvc.zip
+    InstallerSha256: SHA256_PLACEHOLDER
+    NestedInstallerType: portable
+    NestedInstallerFiles:
+      - RelativeFilePath: jarvy.exe
+        PortableCommandAlias: jarvy
+ManifestType: singleton
+ManifestVersion: 1.6.0

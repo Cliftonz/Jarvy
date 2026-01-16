@@ -1,0 +1,35 @@
+# cargo-release configuration
+# https://github.com/crate-ci/cargo-release
+
+[workspace]
+# Allow releasing from main branch
+allow-branch = ["main"]
+# Run consolidation for workspaces
+consolidate-commits = true
+
+# Pre-release replacements
+[[pre-release-replacements]]
+file = "CHANGELOG.md"
+search = "## \\[Unreleased\\]"
+replace = "## [Unreleased]\n\n## [{{version}}] - {{date}}"
+
+# Commit message template
+pre-release-commit-message = "chore(release): prepare v{{version}}"
+
+# Tag configuration
+tag-message = "v{{version}}"
+tag-name = "v{{version}}"
+
+# Push to remote after release
+push = true
+push-remote = "origin"
+
+# Sign commits and tags (disabled by default, enable if GPG is configured)
+sign-commit = false
+sign-tag = false
+
+# Publish to crates.io
+publish = true
+
+# Generate changelog using git-cliff before release
+pre-release-hook = ["git-cliff", "-o", "CHANGELOG.md", "--tag", "v{{version}}"]
