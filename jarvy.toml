@@ -1,0 +1,125 @@
+# jarvy.toml - Development environment for Jarvy
+#
+# Run: jarvy setup
+# This will install all tools needed to develop, build, and contribute to Jarvy.
+
+[privileges]
+use_sudo = true
+
+[privileges.per_os]
+linux = true
+macos = false
+windows = false
+
+# =============================================================================
+# Core Development Tools
+# =============================================================================
+[provisioner]
+# Rust toolchain - required for building Jarvy (edition 2024, rust-version 1.85)
+rust = "latest"
+
+# Version control
+git = "latest"
+git-lfs = "latest"
+
+# GitHub CLI for PRs, issues, and workflows
+gh = "latest"
+
+# =============================================================================
+# Code Quality & Linting
+# =============================================================================
+# Shell script linting (used by pre-commit)
+shellcheck = "latest"
+shfmt = "latest"
+
+# YAML/Markdown linting (used by pre-commit)
+yamllint = "latest"
+
+# GitHub Actions linting
+actionlint = "latest"
+
+# Dockerfile linting
+hadolint = "latest"
+
+# =============================================================================
+# Security Scanning
+# =============================================================================
+# Secret detection (used by pre-commit)
+gitleaks = "latest"
+
+# Vulnerability scanning
+trivy = "latest"
+grype = "latest"
+
+# SBOM generation
+syft = "latest"
+
+# =============================================================================
+# Developer Experience
+# =============================================================================
+# Modern CLI alternatives
+ripgrep = "latest"    # rg - fast code search
+fd = "latest"         # fast file finder
+bat = "latest"        # cat with syntax highlighting
+jq = "latest"         # JSON processor
+yq = "latest"         # YAML processor
+fzf = "latest"        # fuzzy finder
+
+# Git enhancements
+lazygit = "latest"    # Git TUI
+delta = "latest"      # Better git diffs
+
+# Navigation & productivity
+zoxide = "latest"     # Smart cd with frecency
+eza = "latest"        # Modern ls replacement
+
+# Process monitoring
+btop = "latest"
+
+# =============================================================================
+# Hooks Configuration
+# =============================================================================
+[hooks]
+post_setup = """
+echo ""
+echo "=========================================="
+echo "  Jarvy development environment ready!"
+echo "=========================================="
+echo ""
+echo "Next steps:"
+echo "  1. Install pre-commit hooks: pip install pre-commit && pre-commit install"
+echo "  2. Build the project: cargo build"
+echo "  3. Run tests: cargo test --verbose"
+echo "  4. Run lints: cargo clippy --all-features -- -D warnings"
+echo ""
+"""
+
+[hooks.config]
+timeout = 60
+continue_on_error = true
+
+# Configure git to use delta for diffs
+[hooks.delta]
+post_install = """
+if command -v delta >/dev/null 2>&1; then
+    git config --global core.pager delta
+    git config --global interactive.diffFilter 'delta --color-only'
+    git config --global delta.navigate true
+    git config --global delta.side-by-side true
+fi
+"""
+
+# =============================================================================
+# Environment Variables
+# =============================================================================
+[env.vars]
+# Rust configuration
+CARGO_INCREMENTAL = "1"
+RUSTFLAGS = "-C target-cpu=native"
+
+# Better compiler errors
+RUST_BACKTRACE = "1"
+
+[env.config]
+generate_dotenv = false
+update_rc = false

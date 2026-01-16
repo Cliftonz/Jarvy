@@ -1,0 +1,132 @@
+# .pre-commit-config.yaml - Pre-commit hooks configuration
+# PRD-020: Security Scanning Infrastructure
+#
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+# Update hooks: pre-commit autoupdate
+
+# Minimum pre-commit version
+minimum_pre_commit_version: "3.0.0"
+
+# Default settings for all hooks
+default_stages: [commit]
+
+repos:
+  # Gitleaks - Secret scanning
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+        name: Detect secrets (gitleaks)
+        description: Detect hardcoded secrets, passwords, api keys
+        args: ['--config', '.gitleaks.toml']
+        stages: [commit, push]
+
+  # Standard pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        name: Trim trailing whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+        name: Fix end of files
+      - id: check-yaml
+        name: Check YAML syntax
+        args: [--allow-multiple-documents]
+      - id: check-toml
+        name: Check TOML syntax
+      - id: check-json
+        name: Check JSON syntax
+      - id: check-merge-conflict
+        name: Check for merge conflicts
+      - id: check-added-large-files
+        name: Check for large files
+        args: ['--maxkb=1000']
+      - id: check-case-conflict
+        name: Check for case conflicts
+      - id: check-symlinks
+        name: Check for broken symlinks
+      - id: detect-private-key
+        name: Detect private keys
+
+  # Local Rust hooks (no external dependencies)
+  - repo: local
+    hooks:
+      # Format Rust code
+      - id: cargo-fmt
+        name: cargo fmt
+        description: Format Rust code with rustfmt
+        entry: cargo fmt --all -- --check
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      # Lint Rust code
+      - id: cargo-clippy
+        name: cargo clippy
+        description: Lint Rust code with clippy
+        entry: cargo clippy --all-features -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [commit]
+
+      # Check Rust code compiles
+      - id: cargo-check
+        name: cargo check
+        description: Check Rust code compiles
+        entry: cargo check --all-features
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [commit]
+
+      # Run cargo-deny for license/advisory checks (optional, can be slow)
+      - id: cargo-deny
+        name: cargo deny
+        description: Check licenses and advisories
+        entry: cargo deny check
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [push]  # Only on push to avoid slowdown
+        verbose: true
+
+  # YAML linting
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        name: Lint YAML files
+        args: [-c, .yamllint.yml]
+        types: [yaml]
+
+  # Markdown linting (optional)
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.43.0
+    hooks:
+      - id: markdownlint
+        name: Lint Markdown files
+        args: [--config, .markdownlint.json]
+        types: [markdown]
+        exclude: ^CHANGELOG\.md$
+
+  # Shell script linting
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        name: Lint shell scripts
+        types: [shell]
+        args: [-x]  # Follow sourced files
+
+# CI-specific configuration
+ci:
+  autofix_commit_msg: "style: auto-fix from pre-commit hooks"
+  autofix_prs: true
+  autoupdate_branch: ""
+  autoupdate_commit_msg: "chore: update pre-commit hooks"
+  autoupdate_schedule: monthly
+  skip: [cargo-clippy, cargo-check, cargo-deny]  # Skip slow hooks in CI
+  submodules: false

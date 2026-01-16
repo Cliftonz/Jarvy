@@ -22,7 +22,7 @@
 //! };
 //! ```
 
-use super::common::{cmd_satisfies, has, run, InstallError, PackageManager};
+use super::common::{InstallError, PackageManager, cmd_satisfies, has, run};
 
 /// Type alias for tool handler functions registered in the registry.
 pub type ToolHandler = fn(&str) -> Result<(), InstallError>;
@@ -49,7 +49,7 @@ pub fn iter_tools() -> impl Iterator<Item = &'static ToolEntry> {
 }
 
 #[cfg(target_os = "linux")]
-use super::common::{default_use_sudo, PkgOps};
+use super::common::{PkgOps, default_use_sudo};
 
 /// macOS installation options.
 #[derive(Debug, Clone, Copy, serde::Serialize)]
@@ -402,7 +402,6 @@ impl ToolSpec {
             ))
         }
     }
-
 }
 
 /// Macro for defining tools with minimal boilerplate.
@@ -596,11 +595,7 @@ impl ToolIndex {
 
 /// Manually registered tools that don't use the `define_tool!` macro.
 /// These tools have custom installation logic and are registered in `register_all()`.
-const MANUAL_TOOLS: &[(&str, &str)] = &[
-    ("nvm", "nvm"),
-    ("rust", "rustc"),
-    ("brew", "brew"),
-];
+const MANUAL_TOOLS: &[(&str, &str)] = &[("nvm", "nvm"), ("rust", "rustc"), ("brew", "brew")];
 
 /// Generate the complete tool index by collecting all tools.
 ///
@@ -642,16 +637,12 @@ pub fn generate_tool_index() -> ToolIndex {
 /// Generate the tool index as a JSON string.
 pub fn generate_tool_index_json() -> String {
     let index = generate_tool_index();
-    serde_json::to_string_pretty(&index).unwrap_or_else(|e| {
-        format!(r#"{{"error": "{}"}}"#, e)
-    })
+    serde_json::to_string_pretty(&index).unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
 }
 
 /// Get a list of all supported tool names (lowercase).
 pub fn list_tool_names() -> Vec<String> {
-    let mut names: Vec<String> = iter_tools()
-        .map(|e| e.spec.name.to_lowercase())
-        .collect();
+    let mut names: Vec<String> = iter_tools().map(|e| e.spec.name.to_lowercase()).collect();
 
     // Add manually registered tools
     for (name, _) in MANUAL_TOOLS {
@@ -848,7 +839,8 @@ pub struct ToolInstallInfo {
 #[derive(Debug, Default)]
 pub struct ToolGroups {
     /// Tools grouped by package manager (package_manager -> list of (tool_name, package_name, version))
-    pub by_package_manager: std::collections::HashMap<PackageManager, Vec<(String, String, String)>>,
+    pub by_package_manager:
+        std::collections::HashMap<PackageManager, Vec<(String, String, String)>>,
     /// Tools with custom installers that must run individually
     pub custom_install: Vec<(String, String)>,
     /// Tools not in the registry (unknown)
@@ -969,7 +961,9 @@ pub fn has_custom_installer(tool_name: &str) -> bool {
     get_tool_spec(tool_name)
         .map(|spec| spec.custom_install.is_some())
         .unwrap_or(false)
-        || MANUAL_TOOLS.iter().any(|(name, _)| *name == tool_name.to_lowercase())
+        || MANUAL_TOOLS
+            .iter()
+            .any(|(name, _)| *name == tool_name.to_lowercase())
 }
 
 /// Group a list of tools by their installation method.
@@ -1001,7 +995,9 @@ where
 
         // Check for custom installer
         if has_custom_installer(&name_lower) {
-            groups.custom_install.push((name.to_string(), version.to_string()));
+            groups
+                .custom_install
+                .push((name.to_string(), version.to_string()));
             continue;
         }
 
@@ -1014,7 +1010,9 @@ where
                 .push((info.name, info.package_name, info.version));
         } else {
             // No PM info available (e.g., platform not supported), treat as custom
-            groups.custom_install.push((name.to_string(), version.to_string()));
+            groups
+                .custom_install
+                .push((name.to_string(), version.to_string()));
         }
     }
 
@@ -1160,7 +1158,11 @@ mod tests {
     fn test_generate_tool_index_has_tools() {
         let index = generate_tool_index();
         // Should have at least the 3 manual tools (nvm, rust, brew)
-        assert!(index.count >= 3, "Expected at least 3 tools, got {}", index.count);
+        assert!(
+            index.count >= 3,
+            "Expected at least 3 tools, got {}",
+            index.count
+        );
         assert_eq!(index.tools.len(), index.count);
     }
 
@@ -1335,11 +1337,19 @@ mod tests {
             windows: None,
             custom_install: None,
             #[cfg(target_os = "macos")]
-            default_hook: Some(DefaultHook::for_platform("macOS hook", "brew info", "macos")),
+            default_hook: Some(DefaultHook::for_platform(
+                "macOS hook",
+                "brew info",
+                "macos",
+            )),
             #[cfg(target_os = "linux")]
             default_hook: Some(DefaultHook::for_platform("Linux hook", "apt info", "linux")),
             #[cfg(target_os = "windows")]
-            default_hook: Some(DefaultHook::for_platform("Windows hook", "winget info", "windows")),
+            default_hook: Some(DefaultHook::for_platform(
+                "Windows hook",
+                "winget info",
+                "windows",
+            )),
         };
 
         // Hook should be available on current platform

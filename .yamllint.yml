@@ -1,0 +1,53 @@
+# .yamllint.yml - YAML linting configuration
+# Used by pre-commit hooks
+
+extends: default
+
+rules:
+  # Allow long lines (common in GitHub Actions workflows)
+  line-length:
+    max: 150
+    level: warning
+
+  # Allow multiple documents in YAML files
+  document-start: disable
+
+  # Relaxed indentation rules
+  indentation:
+    spaces: 2
+    indent-sequences: whatever
+
+  # Allow trailing spaces in comments
+  trailing-spaces: enable
+
+  # Truthy values configuration
+  truthy:
+    allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
+    check-keys: false
+
+  # Comments configuration
+  comments:
+    require-starting-space: true
+    ignore-shebangs: true
+    min-spaces-from-content: 1
+
+  # Braces and brackets
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  # Empty lines
+  empty-lines:
+    max: 2
+    max-start: 0
+    max-end: 1
+
+ignore: |
+  # Ignore generated files
+  target/
+  node_modules/
+  # Ignore external configs that may not follow our rules
+  .pre-commit-config.yaml

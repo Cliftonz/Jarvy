@@ -29,6 +29,8 @@ pipelining=true
 
 [dependencies]
 clap = { version = "4.5.6", features = ["derive"] }
+clap_complete = "4.5"
+strsim = "0.11"
 inquire = "0.9.1"
 serde = { version = "1.0.204", features = ["derive"] }
 toml = "0.9.5"
@@ -52,10 +54,25 @@ inventory = "0.3.21"
 wait-timeout = "0.2"
 rpassword = "7.3"
 rayon = "1.10"
+rustls = "0.23"
 
 [dev-dependencies]
 tempfile = "3.20.0"
 assert_cmd = "2.0.17"
+proptest = "1.5"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "config_parsing"
+harness = false
+
+[[bench]]
+name = "registry_lookup"
+harness = false
+
+[[bench]]
+name = "version_comparison"
+harness = false
 
 [build-dependencies]
 serde = { version = "1.0.204", features = ["derive"] }

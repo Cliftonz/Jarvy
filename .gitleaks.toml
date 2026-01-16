@@ -1,0 +1,118 @@
+# .gitleaks.toml - Gitleaks secret scanning configuration
+# https://gitleaks.io/
+#
+# Run with: gitleaks detect
+
+title = "Jarvy Gitleaks Configuration"
+
+[extend]
+# Use default ruleset as base
+useDefault = true
+
+# Custom rules specific to Jarvy project
+[[rules]]
+id = "jarvy-api-key"
+description = "Jarvy API Key"
+regex = '''jarvy[_-]?api[_-]?key['\"]?\s*[:=]\s*['\"]?([a-zA-Z0-9]{32,})'''
+secretGroup = 1
+
+[[rules]]
+id = "jarvy-telemetry-key"
+description = "Jarvy Telemetry/PostHog Key"
+regex = '''(?i)(posthog|telemetry)[_-]?(api)?[_-]?key['\"]?\s*[:=]\s*['\"]?([a-zA-Z0-9_-]{32,})'''
+secretGroup = 3
+
+[[rules]]
+id = "otlp-endpoint-secret"
+description = "OTLP Endpoint with credentials"
+regex = '''(?i)otlp[_-]?endpoint['\"]?\s*[:=]\s*['\"]?(https?://[^:]+:[^@]+@[^\s'\"]+)'''
+secretGroup = 1
+
+[[rules]]
+id = "homebrew-tap-key"
+description = "Homebrew Tap Deploy Key"
+regex = '''(?i)homebrew[_-]?tap[_-]?(deploy)?[_-]?key['\"]?\s*[:=]\s*['\"]?([a-zA-Z0-9/+=]{40,})'''
+secretGroup = 2
+
+[[rules]]
+id = "crates-io-token"
+description = "Crates.io API Token"
+regex = '''(?i)crates[_-]?io[_-]?(api)?[_-]?token['\"]?\s*[:=]\s*['\"]?([a-zA-Z0-9]{32,})'''
+secretGroup = 2
+
+[[rules]]
+id = "aur-ssh-key"
+description = "AUR SSH Private Key"
+regex = '''(?i)aur[_-]?ssh[_-]?(private)?[_-]?key['\"]?\s*[:=]\s*['\"]?([a-zA-Z0-9/+=]{40,})'''
+secretGroup = 2
+
+[[rules]]
+id = "chocolatey-api-key"
+description = "Chocolatey API Key"
+regex = '''(?i)chocolatey[_-]?(api)?[_-]?key['\"]?\s*[:=]\s*['\"]?([a-f0-9-]{36})'''
+secretGroup = 2
+
+[[rules]]
+id = "winget-token"
+description = "Winget PAT Token"
+regex = '''(?i)winget[_-]?(pat)?[_-]?token['\"]?\s*[:=]\s*['\"]?([a-zA-Z0-9_]{40,})'''
+secretGroup = 2
+
+# Global allowlist for false positives
+[allowlist]
+description = "Global allowlist for Jarvy project"
+paths = [
+    # Config files that document secrets (not actual secrets)
+    '''\.gitleaks\.toml$''',
+    '''deny\.toml$''',
+    '''SECURITY\.md$''',
+
+    # Documentation
+    '''docs/.*\.md$''',
+    '''\.github/.*\.md$''',
+    '''prd/.*\.md$''',
+    '''MAINTAINER.*\.md$''',
+
+    # Test fixtures with mock secrets
+    '''tests/fixtures/.*''',
+    '''tests/.*_test\.rs$''',
+
+    # Lock files
+    '''Cargo\.lock$''',
+    '''package-lock\.json$''',
+
+    # Build artifacts
+    '''target/.*''',
+    '''dist/.*''',
+]
+
+# Regex patterns to allow (false positive strings)
+regexes = [
+    # Example version strings that look like keys
+    '''v[0-9]+\.[0-9]+\.[0-9]+''',
+    # SHA hashes in comments/docs
+    '''[a-f0-9]{40,64}''',
+    # Test placeholder values
+    '''(?i)(test|example|sample|placeholder|dummy)[_-]?(api)?[_-]?key''',
+]
+
+# Commit-specific allowlist
+commits = [
+    # Example: "abc123" # Initial commit with test data
+]
+
+# Stopwords that indicate non-secret context
+stopwords = [
+    "EXAMPLE",
+    "example",
+    "PLACEHOLDER",
+    "placeholder",
+    "YOUR_",
+    "your_",
+    "INSERT_",
+    "insert_",
+    "CHANGE_ME",
+    "change_me",
+    "xxx",
+    "XXX",
+]

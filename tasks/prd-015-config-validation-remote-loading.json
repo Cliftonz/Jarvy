@@ -1,0 +1,274 @@
+{
+  "title": "PRD-015: Config Validation and Remote Loading",
+  "priority": "Medium",
+  "status": "Not Started",
+  "source": "prd/015-team-enterprise-features.md",
+  "createdAt": "2026-01-15T12:00:00Z",
+  "updatedAt": "2026-01-15T12:00:00Z",
+  "overview": {
+    "description": "Add configuration validation and remote config loading to help teams share and validate jarvy.toml configurations.",
+    "goals": [
+      "Validate jarvy.toml before running setup to catch errors early",
+      "Provide helpful error messages with suggestions for typos",
+      "Load configs from HTTP(S) URLs for team sharing",
+      "Support authenticated requests for private configs"
+    ]
+  },
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Config Validation",
+      "description": "As a config author, I want to validate my jarvy.toml before sharing so that team members don't encounter errors.",
+      "passed": false,
+      "priority": "P0",
+      "impact": "High",
+      "acceptanceCriteria": [
+        {
+          "criterion": "jarvy validate command exists",
+          "passed": false
+        },
+        {
+          "criterion": "TOML syntax errors show line numbers",
+          "passed": false
+        },
+        {
+          "criterion": "Unknown tool names produce errors",
+          "passed": false
+        },
+        {
+          "criterion": "Typo suggestions provided (e.g., 'nodejs' -> 'node')",
+          "passed": false
+        },
+        {
+          "criterion": "Invalid version strings produce errors",
+          "passed": false
+        },
+        {
+          "criterion": "Hooks referencing unknown tools produce warnings",
+          "passed": false
+        },
+        {
+          "criterion": "--config FILE flag validates specific file",
+          "passed": false
+        },
+        {
+          "criterion": "--strict flag treats warnings as errors",
+          "passed": false
+        },
+        {
+          "criterion": "Exit code 0 for valid, non-zero for errors",
+          "passed": false
+        },
+        {
+          "criterion": "Validation completes in <100ms for local files",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Remote Config Loading",
+      "description": "As a team lead, I want to host our team's jarvy.toml on a server so that all team members use the same environment configuration.",
+      "passed": false,
+      "priority": "P0",
+      "impact": "High",
+      "acceptanceCriteria": [
+        {
+          "criterion": "jarvy setup --from <URL> fetches and uses remote config",
+          "passed": false
+        },
+        {
+          "criterion": "HTTPS URLs work with valid certificates",
+          "passed": false
+        },
+        {
+          "criterion": "HTTP URLs rejected in release builds",
+          "passed": false
+        },
+        {
+          "criterion": "--header flag allows custom headers for auth",
+          "passed": false
+        },
+        {
+          "criterion": "Clear error messages for network failures",
+          "passed": false
+        },
+        {
+          "criterion": "Timeout enforced (default 30s) to prevent hanging",
+          "passed": false
+        },
+        {
+          "criterion": "Size limit enforced (1MB) to prevent memory exhaustion",
+          "passed": false
+        },
+        {
+          "criterion": "Remote config validated before use",
+          "passed": false
+        },
+        {
+          "criterion": "jarvy validate --from <URL> validates without installing",
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "functionalRequirements": [
+    {
+      "id": "FR-1",
+      "description": "jarvy validate command checks local jarvy.toml",
+      "passed": false
+    },
+    {
+      "id": "FR-2",
+      "description": "Unknown tool names detected with fuzzy matching suggestions",
+      "passed": false
+    },
+    {
+      "id": "FR-3",
+      "description": "TOML syntax errors include line numbers",
+      "passed": false
+    },
+    {
+      "id": "FR-4",
+      "description": "jarvy setup --from URL fetches remote configs",
+      "passed": false
+    },
+    {
+      "id": "FR-5",
+      "description": "HTTPS enforced for remote configs (HTTP only in debug)",
+      "passed": false
+    },
+    {
+      "id": "FR-6",
+      "description": "Custom headers supported for authenticated requests",
+      "passed": false
+    },
+    {
+      "id": "FR-7",
+      "description": "Remote configs validated before execution",
+      "passed": false
+    }
+  ],
+  "nonGoals": [
+    "Config caching (fetch fresh each time)",
+    "Config inheritance/extends",
+    "Profiles (tool subsets)",
+    "Lock files (version pinning)",
+    "Audit logging (change tracking)"
+  ],
+  "technicalConsiderations": [
+    {
+      "area": "Fuzzy matching",
+      "details": "Use strsim crate or simple Levenshtein distance for typo suggestions"
+    },
+    {
+      "area": "HTTP client",
+      "details": "Use reqwest with minimal features (rustls-tls) to keep binary size small"
+    },
+    {
+      "area": "Tool registry",
+      "details": "Expose list of known tools from registry for validation"
+    },
+    {
+      "area": "Security",
+      "details": "No arbitrary code execution from configs; only declarative tool specs"
+    }
+  ],
+  "filesToCreate": [
+    "src/validate/mod.rs",
+    "src/remote/mod.rs",
+    "tests/validate.rs",
+    "tests/remote_config.rs"
+  ],
+  "filesToModify": [
+    "src/main.rs (add validate command and --from flag)",
+    "src/config.rs (expose validation hooks)",
+    "Cargo.toml (add reqwest, strsim dependencies)"
+  ],
+  "dependencies": [
+    "reqwest (HTTP client with rustls-tls)",
+    "strsim (string similarity for typo suggestions)"
+  ],
+  "implementationSteps": [
+    {
+      "step": 1,
+      "description": "Create src/validate/mod.rs with ValidationResult, ValidationError structs",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "description": "Implement known-tools registry check (expose tool names from registry)",
+      "status": "pending"
+    },
+    {
+      "step": 3,
+      "description": "Add fuzzy matching for tool name suggestions using strsim",
+      "status": "pending"
+    },
+    {
+      "step": 4,
+      "description": "Implement validate_config() function with all checks",
+      "status": "pending"
+    },
+    {
+      "step": 5,
+      "description": "Add jarvy validate CLI command with --config and --strict flags",
+      "status": "pending"
+    },
+    {
+      "step": 6,
+      "description": "Create src/remote/mod.rs with RemoteConfig struct",
+      "status": "pending"
+    },
+    {
+      "step": 7,
+      "description": "Add reqwest dependency with minimal features",
+      "status": "pending"
+    },
+    {
+      "step": 8,
+      "description": "Implement remote config fetching with HTTPS validation",
+      "status": "pending"
+    },
+    {
+      "step": 9,
+      "description": "Add --from and --header flags to jarvy setup command",
+      "status": "pending"
+    },
+    {
+      "step": 10,
+      "description": "Add --from flag to jarvy validate command",
+      "status": "pending"
+    },
+    {
+      "step": 11,
+      "description": "Write tests for validation rules",
+      "status": "pending"
+    },
+    {
+      "step": 12,
+      "description": "Write tests for remote config fetching",
+      "status": "pending"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Remote config availability",
+      "likelihood": "Medium",
+      "impact": "Medium",
+      "mitigation": "Clear error messages; users can fall back to local config"
+    },
+    {
+      "risk": "Malicious remote configs",
+      "likelihood": "Low",
+      "impact": "Medium",
+      "mitigation": "HTTPS only, validation before use, no code execution"
+    },
+    {
+      "risk": "reqwest binary size impact",
+      "likelihood": "Medium",
+      "impact": "Low",
+      "mitigation": "Use minimal features (rustls-tls only)"
+    }
+  ]
+}

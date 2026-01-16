@@ -1,0 +1,253 @@
+# Security scanning workflow
+# Implements PRD-020: Security Scanning Infrastructure
+#
+# Runs on:
+# - Every push to main
+# - Every pull request to main
+# - Daily schedule at 6 AM UTC (catch new CVEs)
+
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 6 AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  # Job 1: cargo-audit - RustSec Advisory Database
+  audit:
+    name: Security Audit (cargo-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/advisory-db
+          key: ${{ runner.os }}-cargo-audit-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run cargo-audit
+        run: cargo audit --deny warnings
+
+  # Job 2: cargo-deny - Licenses, Advisories, Bans, Sources
+  deny:
+    name: Dependency Check (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check all
+          arguments: --all-features
+
+  # Job 3: Gitleaks - Secret Scanning
+  secrets:
+    name: Secret Scanning (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for thorough scan
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  # Job 4: Semgrep - Static Analysis Security Testing (SAST)
+  semgrep:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule' || github.repository == 'bearbinary/jarvy'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/rust
+            p/security-audit
+            p/secrets
+            p/command-injection
+          generateSarif: true
+
+      - name: Upload Semgrep SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+        if: always()
+
+  # Job 5: CodeQL - Semantic Analysis
+  codeql:
+    name: SAST (CodeQL)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule' || github.repository == 'bearbinary/jarvy'
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: rust
+          queries: security-extended
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build for CodeQL Analysis
+        run: cargo build --release --all-features
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:rust"
+
+  # Job 6: cargo-geiger - Unsafe Code Audit (informational)
+  geiger:
+    name: Unsafe Code Audit (cargo-geiger)
+    runs-on: ubuntu-latest
+    continue-on-error: true  # Advisory, not blocking
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-geiger-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install cargo-geiger
+        run: cargo install cargo-geiger --locked
+
+      - name: Run cargo-geiger
+        run: |
+          cargo geiger --all-features --all-targets 2>&1 | tee geiger-report.txt || true
+          echo "## Unsafe Code Report" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat geiger-report.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload geiger report
+        uses: actions/upload-artifact@v4
+        with:
+          name: geiger-report
+          path: geiger-report.txt
+          retention-days: 30
+
+  # Job 7: Dependency freshness check (scheduled only)
+  freshness:
+    name: Dependency Freshness
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-outdated
+        run: cargo install cargo-outdated --locked
+
+      - name: Check outdated dependencies
+        run: |
+          echo "## Outdated Dependencies" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cargo outdated --depth 1 >> $GITHUB_STEP_SUMMARY 2>&1 || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  # Summary job - ensures all required checks pass
+  security-summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    needs: [audit, deny, secrets, semgrep, codeql]
+    if: always()
+    steps:
+      - name: Check security status
+        run: |
+          echo "## Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check each job status
+          if [ "${{ needs.audit.result }}" = "success" ]; then
+            echo "- :white_check_mark: cargo-audit: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- :x: cargo-audit: ${{ needs.audit.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.deny.result }}" = "success" ]; then
+            echo "- :white_check_mark: cargo-deny: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- :x: cargo-deny: ${{ needs.deny.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.secrets.result }}" = "success" ]; then
+            echo "- :white_check_mark: Gitleaks: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- :x: Gitleaks: ${{ needs.secrets.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.semgrep.result }}" = "success" ]; then
+            echo "- :white_check_mark: Semgrep: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- :x: Semgrep: ${{ needs.semgrep.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.codeql.result }}" = "success" ]; then
+            echo "- :white_check_mark: CodeQL: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- :x: CodeQL: ${{ needs.codeql.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Fail if any required check failed
+          if [ "${{ needs.audit.result }}" != "success" ] || \
+             [ "${{ needs.deny.result }}" != "success" ] || \
+             [ "${{ needs.secrets.result }}" != "success" ]; then
+            echo ""
+            echo ":warning: **Security checks failed. Please review and fix issues before merging.**" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          echo ""
+          echo ":shield: **All required security checks passed!**" >> $GITHUB_STEP_SUMMARY

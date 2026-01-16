@@ -1,0 +1,88 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  benchmark:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+
+      - name: Run benchmarks
+        run: cargo bench --bench config_parsing --bench registry_lookup --bench version_comparison -- --noplot
+
+      - name: Store benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: target/criterion/
+          retention-days: 30
+
+  benchmark-compare:
+    name: Compare Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+
+      - name: Install critcmp
+        run: cargo install critcmp
+
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          path: base
+
+      - name: Run base benchmarks
+        run: |
+          cd base
+          cargo bench --bench config_parsing --bench registry_lookup --bench version_comparison -- --save-baseline base --noplot
+        continue-on-error: true
+
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          path: pr
+
+      - name: Run PR benchmarks
+        run: |
+          cd pr
+          cargo bench --bench config_parsing --bench registry_lookup --bench version_comparison -- --save-baseline pr --noplot
+
+      - name: Compare benchmarks
+        id: compare
+        run: |
+          echo "## Benchmark Comparison" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -d "base/target/criterion" ] && [ -d "pr/target/criterion" ]; then
+            critcmp base/target/criterion pr/target/criterion >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "No baseline to compare against" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Baseline benchmarks not available for comparison" >> $GITHUB_STEP_SUMMARY
+          fi
+        continue-on-error: true

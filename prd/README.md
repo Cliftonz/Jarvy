@@ -36,6 +36,19 @@ This folder contains PRDs for improving Jarvy based on a comprehensive codebase 
 | 9 | [Service Management](009-service-management.md) | Full stacks | 7-8 days | Docker containers, databases |
 | 12 | [Release Distribution](012-release-distribution.md) | Adoption | 11 days | Package managers, binaries, install scripts |
 
+### Tier 5: Security & Compliance
+
+| # | PRD | Impact | Effort | Description |
+|---|-----|--------|--------|-------------|
+| 20 | [Security Scanning Infrastructure](020-security-scanning-infrastructure.md) | Supply chain | 8 days | SAST, SBOM, signing, OpenSSF Scorecard |
+
+### Tier 6: Ecosystem & Integrations
+
+| # | PRD | Impact | Effort | Description |
+|---|-----|--------|--------|-------------|
+| 21 | [MCP Server](021-mcp-server.md) | LLM integration | 10 days | Expose Jarvy as MCP server for Claude, Cursor, etc. |
+| 22 | [Remote Telemetry & Monitoring](022-remote-telemetry-monitoring.md) | Observability | 3-5 days | OTEL metrics, traces, unsupported tool reporting |
+
 ## Recommended Implementation Order
 
 ```
@@ -60,6 +73,13 @@ Phase 4: Advanced (4+ weeks)
 Phase 5: Distribution (2+ weeks)
 ├── PRD-011: Comprehensive Docs        ← User and developer guides
 └── PRD-012: Release Distribution      ← Package managers, binaries
+
+Phase 6: Security & Compliance (1+ week)
+└── PRD-020: Security Scanning         ← SAST, SBOM, signing, Scorecard
+
+Phase 7: Ecosystem & Integrations (2+ weeks)
+├── PRD-021: MCP Server                ← LLM integration via Claude, Cursor, etc.
+└── PRD-022: Remote Telemetry          ← OTEL observability, unsupported tool feedback
 ```
 
 ## Quick Reference
@@ -79,6 +99,9 @@ Phase 5: Distribution (2+ weeks)
 | Can't start databases/services | [009](009-service-management.md) |
 | Doesn't work in CI/CD | [010](010-ci-detection-integration.md) |
 | Must build from source | [012](012-release-distribution.md) |
+| Only basic dependency scanning | [020](020-security-scanning-infrastructure.md) |
+| LLMs can't install tools safely | [021](021-mcp-server.md) |
+| No visibility into unsupported tool requests | [022](022-remote-telemetry-monitoring.md) |
 
 ### Dependencies Between PRDs
 
@@ -98,6 +121,18 @@ PRD-010 (CI) ←─────────────────────�
 PRD-012 (Distribution) ←────────────────────── PRD-011 (Docs) for README
        ↓
 Enables wide adoption via brew/apt/winget/cargo
+
+PRD-020 (Security) ←───────────────────────── PRD-012 (Distribution) for release signing
+       ↓
+Enables supply chain security, SBOM, OpenSSF Scorecard
+
+PRD-021 (MCP Server) ←─────────────────────── PRD-012 (Distribution) for npm/Docker publishing
+       ↓
+Enables LLMs to safely install tools via Claude, Cursor, etc.
+
+PRD-022 (Telemetry) ←──────────────────────── PRD-021 (MCP Server) for unsupported tool feedback
+       ↓
+Enables operational monitoring, OTEL metrics/traces, tool request tracking
 ```
 
 ## Analysis Sources

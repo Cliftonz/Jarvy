@@ -1,0 +1,84 @@
+# OpenSSF Scorecard workflow
+# Implements PRD-020: Security Scanning Infrastructure
+#
+# Runs:
+# - On branch protection rule changes
+# - Weekly on Monday at midnight UTC
+# - On push to main
+#
+# See: https://securityscorecards.dev/
+
+name: OpenSSF Scorecard
+
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: '0 0 * * 1'  # Weekly on Monday at midnight UTC
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      id-token: write  # For Sigstore-based OIDC authentication
+      contents: read
+      actions: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run OpenSSF Scorecard
+        uses: ossf/scorecard-action@v2
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publish results to OpenSSF for badge generation
+          publish_results: true
+          # Optional: Personal Access Token for private repos (not needed for public)
+          # repo_token: ${{ secrets.SCORECARD_TOKEN }}
+
+      - name: Upload Scorecard SARIF results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+
+      - name: Upload Scorecard results as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 30
+
+      # Generate summary for workflow run
+      - name: Generate Scorecard summary
+        run: |
+          echo "## OpenSSF Scorecard Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "View detailed results at: https://securityscorecards.dev/viewer/?uri=github.com/${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Target Score: 8.0+" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Key checks evaluated:" >> $GITHUB_STEP_SUMMARY
+          echo "- Binary-Artifacts: No checked-in binaries" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch-Protection: Require reviews, status checks" >> $GITHUB_STEP_SUMMARY
+          echo "- CI-Tests: Tests run on PRs" >> $GITHUB_STEP_SUMMARY
+          echo "- Code-Review: All changes reviewed" >> $GITHUB_STEP_SUMMARY
+          echo "- Dangerous-Workflow: No dangerous patterns" >> $GITHUB_STEP_SUMMARY
+          echo "- Dependency-Update-Tool: Dependabot enabled" >> $GITHUB_STEP_SUMMARY
+          echo "- License: License file present" >> $GITHUB_STEP_SUMMARY
+          echo "- Maintained: Recent commits" >> $GITHUB_STEP_SUMMARY
+          echo "- Pinned-Dependencies: Pinned GitHub Actions" >> $GITHUB_STEP_SUMMARY
+          echo "- SAST: Static analysis enabled" >> $GITHUB_STEP_SUMMARY
+          echo "- Security-Policy: SECURITY.md present" >> $GITHUB_STEP_SUMMARY
+          echo "- Signed-Releases: Releases signed" >> $GITHUB_STEP_SUMMARY
+          echo "- Token-Permissions: Minimal token permissions" >> $GITHUB_STEP_SUMMARY
+          echo "- Vulnerabilities: No known vulns" >> $GITHUB_STEP_SUMMARY

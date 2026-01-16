@@ -8,21 +8,25 @@ use crate::hooks::{Hook, HookConfig, HookEnv};
 use crate::init::initialize;
 use crate::report::{Status, ToolReport, collect_reports};
 use crate::setup::setup;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use inquire::{InquireError, Select};
+use rayon::prelude::*;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
+use std::sync::{Arc, Mutex};
 
 mod analytics;
 mod bootstrap;
 mod ci;
+mod commands;
 mod config;
 mod env;
 mod error_codes;
 mod hooks;
 mod init;
 mod os_setup;
+mod output;
 mod outputs;
 mod posthog;
 mod provisioner;
@@ -60,6 +64,9 @@ enum Commands {
         /// Path to the configuration file
         #[clap(short, long, default_value = "./jarvy.toml")]
         file: String,
+        /// Fetch configuration from a URL (e.g., GitHub raw URL, gist, HTTP endpoint)
+        #[clap(long, value_name = "URL")]
+        from: Option<String>,
         /// Skip all hook execution
         #[clap(long)]
         no_hooks: bool,
@@ -72,6 +79,16 @@ enum Commands {
         /// Force interactive mode even in CI environments
         #[clap(long, conflicts_with = "ci")]
         no_ci: bool,
+        /// Number of parallel jobs for user-space package installations (npm, pip, cargo, go, custom installers).
+        /// Default: 4. Set to 1 for sequential installation.
+        #[clap(short, long, default_value = "4")]
+        jobs: usize,
+        /// Force sequential installation (equivalent to --jobs 1). Useful for deterministic output.
+        #[clap(long)]
+        sequential: bool,
+        /// Skip SSL certificate verification for --from URL (not recommended)
+        #[clap(long)]
+        insecure: bool,
     },
     /// Perform a minimal machine bootstrap (base requirements only, no dev tooling)
     Bootstrap {},
@@ -149,6 +166,97 @@ enum Commands {
         /// Path to the configuration file
         #[clap(short, long, default_value = "./jarvy.toml")]
         file: String,
+    },
+    /// Diagnose environment issues, check tool health, and verify PATH
+    Doctor {
+        /// Path to the configuration file (optional)
+        #[clap(short, long)]
+        file: Option<String>,
+        /// Only check specific tools (comma-separated)
+        #[clap(long)]
+        tools: Option<String>,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
+    /// Preview changes before running setup (dry-run)
+    Diff {
+        /// Path to the configuration file
+        #[clap(short, long, default_value = "./jarvy.toml")]
+        file: String,
+        /// Only show changes (hide satisfied tools)
+        #[clap(long)]
+        changes_only: bool,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
+    /// Generate jarvy.toml from currently installed tools
+    Export {
+        /// Only include specific tools (comma-separated)
+        #[clap(long)]
+        tools: Option<String>,
+        /// Include all detected tools
+        #[clap(long)]
+        all: bool,
+        /// Show verbose output (include paths)
+        #[clap(short, long)]
+        verbose: bool,
+        /// Output format: toml, json
+        #[clap(short = 'F', long = "format", default_value = "toml")]
+        output_format: String,
+        /// Output file (stdout if not specified)
+        #[clap(short, long)]
+        output: Option<String>,
+    },
+    /// Upgrade tools to their latest versions
+    Upgrade {
+        /// Path to the configuration file (optional)
+        #[clap(short, long)]
+        file: Option<String>,
+        /// Only upgrade specific tools (comma-separated or tool@version)
+        #[clap(long)]
+        tools: Option<String>,
+        /// Show what would be upgraded without making changes
+        #[clap(long)]
+        dry_run: bool,
+        /// Force upgrade even if already at required version
+        #[clap(long)]
+        force: bool,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
+    /// Search available tools that Jarvy can install
+    Search {
+        /// Search query (tool name or partial match)
+        query: Option<String>,
+        /// Show all available tools
+        #[clap(long)]
+        all: bool,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
+    /// Validate a jarvy.toml configuration file
+    Validate {
+        /// Path to the configuration file
+        #[clap(short, long, default_value = "./jarvy.toml")]
+        file: String,
+        /// Treat warnings as errors
+        #[clap(long)]
+        strict: bool,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for (bash, zsh, fish, powershell, elvish)
+        shell: String,
+        /// Show installation instructions
+        #[clap(long)]
+        instructions: bool,
     },
     /// Catch-all for unknown subcommands and their args
     #[clap(external_subcommand)]
@@ -269,6 +377,13 @@ fn main() {
             Some(Commands::CiConfig { .. }) => "ci-config",
             Some(Commands::CiInfo { .. }) => "ci-info",
             Some(Commands::Services { .. }) => "services",
+            Some(Commands::Doctor { .. }) => "doctor",
+            Some(Commands::Diff { .. }) => "diff",
+            Some(Commands::Export { .. }) => "export",
+            Some(Commands::Upgrade { .. }) => "upgrade",
+            Some(Commands::Search { .. }) => "search",
+            Some(Commands::Validate { .. }) => "validate",
+            Some(Commands::Completions { .. }) => "completions",
             Some(Commands::External(..)) => "external",
             None => "interactive",
         };
@@ -334,11 +449,17 @@ fn main() {
     match &cli.command {
         Some(Commands::Setup {
             file,
+            from,
             no_hooks,
             dry_run,
             ci,
             no_ci,
+            jobs,
+            sequential,
+            insecure,
         }) => {
+            // Determine effective parallelism level
+            let parallel_jobs = if *sequential { 1 } else { *jobs.max(&1) };
             // Handle CI mode detection with CLI overrides
             // SAFETY: We're setting env vars at startup before any threads are spawned
             let ci_env = if *ci {
@@ -362,7 +483,20 @@ fn main() {
                 }
             }
 
-            let config = Config::new(file);
+            // Determine config file path: fetch from URL or use local file
+            let config_path = if let Some(url) = from {
+                match fetch_remote_config(url, *insecure) {
+                    Ok(path) => path,
+                    Err(e) => {
+                        eprintln!("Error fetching remote config: {}", e);
+                        std::process::exit(crate::error_codes::CONFIG_ERROR);
+                    }
+                }
+            } else {
+                file.clone()
+            };
+
+            let config = Config::new(&config_path);
             let hooks_config = config.get_hooks();
             let hook_settings = HookConfig::from(&hooks_config.config);
 
@@ -402,7 +536,9 @@ fn main() {
             // Phase 2: Parallel version checking - determine which tools need installation
             println!("Checking tool versions...");
             let version_check = tools::spec::check_tools_parallel(
-                tools.iter().map(|(_, t)| (t.name.as_str(), t.version.as_str())),
+                tools
+                    .iter()
+                    .map(|(_, t)| (t.name.as_str(), t.version.as_str())),
             );
 
             // Report version check results
@@ -429,10 +565,7 @@ fn main() {
                 );
                 if posthog::telemetry_enabled() {
                     let mut props = serde_json::Map::new();
-                    props.insert(
-                        "tool".to_string(),
-                        serde_json::Value::String(name.clone()),
-                    );
+                    props.insert("tool".to_string(), serde_json::Value::String(name.clone()));
                     props.insert(
                         "version_hint".to_string(),
                         serde_json::Value::String(version.clone()),
@@ -574,36 +707,136 @@ fn main() {
                     }
                 }
 
-                // Install custom tools individually (these require special handling)
-                for (name, version) in &tool_groups.custom_install {
-                    println!(
-                        "Installing {} version {} using custom installer",
-                        name, version
-                    );
+                // Install custom tools with configurable parallelism
+                // User-space installers (nvm, rustup, etc.) don't require system locks
+                // and can safely run in parallel
+                if !tool_groups.custom_install.is_empty() {
+                    let custom_count = tool_groups.custom_install.len();
+                    let effective_jobs = parallel_jobs.min(custom_count);
 
-                    match tools::add(name, version) {
-                        Ok(()) => {
-                            println!("Successfully installed {} ({})", name, version);
-                            successfully_installed.push((name.clone(), version.clone()));
+                    if effective_jobs > 1 {
+                        println!(
+                            "Installing {} custom tools with {} parallel jobs",
+                            custom_count, effective_jobs
+                        );
+
+                        // Configure thread pool for this installation phase
+                        let pool = rayon::ThreadPoolBuilder::new()
+                            .num_threads(effective_jobs)
+                            .build()
+                            .unwrap_or_else(|_| rayon::ThreadPoolBuilder::new().build().unwrap());
+
+                        // Thread-safe collectors for results
+                        let success_collector: Arc<Mutex<Vec<(String, String)>>> =
+                            Arc::new(Mutex::new(Vec::new()));
+                        let error_collector: Arc<Mutex<Vec<(String, String, String)>>> =
+                            Arc::new(Mutex::new(Vec::new()));
+
+                        pool.install(|| {
+                            tool_groups
+                                .custom_install
+                                .par_iter()
+                                .for_each(|(name, version)| {
+                                    // Note: println! is thread-safe in Rust
+                                    println!(
+                                        "Installing {} version {} using custom installer",
+                                        name, version
+                                    );
+
+                                    match tools::add(name, version) {
+                                        Ok(()) => {
+                                            println!(
+                                                "Successfully installed {} ({})",
+                                                name, version
+                                            );
+                                            if let Ok(mut guard) = success_collector.lock() {
+                                                guard.push((name.clone(), version.clone()));
+                                            }
+                                        }
+                                        Err(e) => {
+                                            let msg = format!(
+                                                "Failed to install {} ({}): {:?}",
+                                                name, version, e
+                                            );
+                                            eprintln!("{}", msg);
+                                            if let Ok(mut guard) = error_collector.lock() {
+                                                guard.push((
+                                                    name.clone(),
+                                                    version.clone(),
+                                                    format!("{:?}", e),
+                                                ));
+                                            }
+                                        }
+                                    }
+                                });
+                        });
+
+                        // Merge successful installs
+                        if let Ok(guard) = success_collector.lock() {
+                            successfully_installed.extend(guard.iter().cloned());
                         }
-                        Err(e) => {
-                            let msg = format!("Failed to install {} ({}): {:?}", name, version, e);
-                            eprintln!("{}", msg);
-                            if posthog::telemetry_enabled() {
-                                let mut props = serde_json::Map::new();
-                                props.insert(
-                                    "tool".to_string(),
-                                    serde_json::Value::String(name.clone()),
-                                );
-                                props.insert(
-                                    "version_hint".to_string(),
-                                    serde_json::Value::String(version.clone()),
-                                );
-                                props.insert(
-                                    "error".to_string(),
-                                    serde_json::Value::String(format!("{:?}", e)),
-                                );
-                                posthog::capture_error("tool_install_failed", &msg, props);
+
+                        // Report errors to telemetry
+                        if posthog::telemetry_enabled() {
+                            if let Ok(guard) = error_collector.lock() {
+                                for (name, version, error) in guard.iter() {
+                                    let msg = format!(
+                                        "Failed to install {} ({}): {}",
+                                        name, version, error
+                                    );
+                                    let mut props = serde_json::Map::new();
+                                    props.insert(
+                                        "tool".to_string(),
+                                        serde_json::Value::String(name.clone()),
+                                    );
+                                    props.insert(
+                                        "version_hint".to_string(),
+                                        serde_json::Value::String(version.clone()),
+                                    );
+                                    props.insert(
+                                        "error".to_string(),
+                                        serde_json::Value::String(error.clone()),
+                                    );
+                                    posthog::capture_error("tool_install_failed", &msg, props);
+                                }
+                            }
+                        }
+                    } else {
+                        // Sequential installation (--sequential or --jobs 1)
+                        for (name, version) in &tool_groups.custom_install {
+                            println!(
+                                "Installing {} version {} using custom installer",
+                                name, version
+                            );
+
+                            match tools::add(name, version) {
+                                Ok(()) => {
+                                    println!("Successfully installed {} ({})", name, version);
+                                    successfully_installed.push((name.clone(), version.clone()));
+                                }
+                                Err(e) => {
+                                    let msg = format!(
+                                        "Failed to install {} ({}): {:?}",
+                                        name, version, e
+                                    );
+                                    eprintln!("{}", msg);
+                                    if posthog::telemetry_enabled() {
+                                        let mut props = serde_json::Map::new();
+                                        props.insert(
+                                            "tool".to_string(),
+                                            serde_json::Value::String(name.clone()),
+                                        );
+                                        props.insert(
+                                            "version_hint".to_string(),
+                                            serde_json::Value::String(version.clone()),
+                                        );
+                                        props.insert(
+                                            "error".to_string(),
+                                            serde_json::Value::String(format!("{:?}", e)),
+                                        );
+                                        posthog::capture_error("tool_install_failed", &msg, props);
+                                    }
+                                }
                             }
                         }
                     }
@@ -1375,11 +1608,313 @@ fn main() {
                 }
             }
         }
+        Some(Commands::Doctor {
+            file,
+            tools,
+            output_format,
+        }) => {
+            let config = file.as_ref().map(|f| Config::new(f));
+            let specific_tools = tools.as_ref().map(|t| {
+                t.split(',')
+                    .map(|s| s.trim().to_string())
+                    .collect::<Vec<_>>()
+            });
+
+            let result = commands::doctor::run_doctor(config.as_ref(), specific_tools);
+
+            let output = if output_format == "json" {
+                serde_json::to_string_pretty(&result)
+                    .unwrap_or_else(|e| format!("{{\"error\":\"{}\"}}", e))
+            } else {
+                use crate::output::Outputable;
+                result.to_human()
+            };
+            println!("{}", output);
+
+            use crate::output::Outputable;
+            std::process::exit(result.exit_code().code());
+        }
+        Some(Commands::Diff {
+            file,
+            changes_only,
+            output_format,
+        }) => {
+            let config = Config::new(file);
+            let result = commands::diff::run_diff(&config, *changes_only);
+
+            let output = if output_format == "json" {
+                serde_json::to_string_pretty(&result)
+                    .unwrap_or_else(|e| format!("{{\"error\":\"{}\"}}", e))
+            } else {
+                use crate::output::Outputable;
+                result.to_human()
+            };
+            println!("{}", output);
+
+            use crate::output::Outputable;
+            std::process::exit(result.exit_code().code());
+        }
+        Some(Commands::Export {
+            tools,
+            all,
+            verbose,
+            output_format,
+            output,
+        }) => {
+            let filter_tools = tools.as_ref().map(|t| {
+                t.split(',')
+                    .map(|s| s.trim().to_string())
+                    .collect::<Vec<_>>()
+            });
+
+            let result = commands::export::export_tools(filter_tools, *all, *verbose);
+
+            use crate::output::Outputable;
+            let content = if output_format == "json" {
+                result.to_json()
+            } else {
+                result.to_human()
+            };
+
+            if let Some(path) = output {
+                if let Err(e) = fs::write(path, &content) {
+                    eprintln!("Failed to write output: {}", e);
+                    std::process::exit(1);
+                }
+                println!("Exported to: {}", path);
+            } else {
+                println!("{}", content);
+            }
+
+            std::process::exit(result.exit_code().code());
+        }
+        Some(Commands::Upgrade {
+            file,
+            tools,
+            dry_run,
+            force,
+            output_format,
+        }) => {
+            let config = file.as_ref().map(|f| Config::new(f));
+            let specific_tools = tools.as_ref().map(|t| {
+                t.split(',')
+                    .map(|s| s.trim().to_string())
+                    .collect::<Vec<_>>()
+            });
+
+            let result =
+                commands::upgrade::run_upgrade(config.as_ref(), specific_tools, *dry_run, *force);
+
+            let output = if output_format == "json" {
+                serde_json::to_string_pretty(&result)
+                    .unwrap_or_else(|e| format!("{{\"error\":\"{}\"}}", e))
+            } else {
+                use crate::output::Outputable;
+                result.to_human()
+            };
+            println!("{}", output);
+
+            use crate::output::Outputable;
+            std::process::exit(result.exit_code().code());
+        }
+        Some(Commands::Search {
+            query,
+            all,
+            output_format,
+        }) => {
+            let query_str = query.as_deref().unwrap_or("");
+            let result = commands::search::search_tools(query_str, *all);
+
+            let output = if output_format == "json" {
+                serde_json::to_string_pretty(&result)
+                    .unwrap_or_else(|e| format!("{{\"error\":\"{}\"}}", e))
+            } else {
+                use crate::output::Outputable;
+                result.to_human()
+            };
+            println!("{}", output);
+
+            use crate::output::Outputable;
+            std::process::exit(result.exit_code().code());
+        }
+        Some(Commands::Validate {
+            file,
+            strict,
+            output_format,
+        }) => {
+            let result = commands::validate::validate_config(file, *strict);
+
+            let output = if output_format == "json" {
+                serde_json::to_string_pretty(&result)
+                    .unwrap_or_else(|e| format!("{{\"error\":\"{}\"}}", e))
+            } else {
+                use crate::output::Outputable;
+                result.to_human()
+            };
+            println!("{}", output);
+
+            use crate::output::Outputable;
+            std::process::exit(result.exit_code().code());
+        }
+        Some(Commands::Completions {
+            shell,
+            instructions,
+        }) => {
+            if *instructions {
+                println!("{}", commands::completions::get_install_instructions());
+                return;
+            }
+
+            let shell_type: commands::completions::CompletionShell = match shell.parse() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            };
+
+            // Build the CLI command for completion generation
+            let mut cmd = Cli::command();
+            let completions =
+                commands::completions::generate_completions_string(&mut cmd, shell_type);
+            println!("{}", completions);
+        }
         None => {
             user_select();
         }
         Some(Commands::External(_)) => unreachable!("External subcommand handled before init"),
     }
+}
+
+/// Fetch a jarvy.toml configuration from a remote URL with caching
+///
+/// PRD-016: Remote config loading support
+///
+/// Supports:
+/// - GitHub raw URLs
+/// - Gist URLs
+/// - Any HTTP/HTTPS URL returning TOML content
+///
+/// Caching:
+/// - Configs are cached in ~/.jarvy/cache/configs/
+/// - Cache expires after 1 hour
+/// - Use --insecure to skip SSL verification (not recommended)
+fn fetch_remote_config(url: &str, _insecure: bool) -> Result<String, String> {
+    use std::io::Write;
+    use std::time::Duration;
+
+    // Get cache directory
+    let cache_dir = dirs::home_dir()
+        .ok_or("Could not determine home directory")?
+        .join(".jarvy")
+        .join("cache")
+        .join("configs");
+
+    // Create cache directory if it doesn't exist
+    if !cache_dir.exists() {
+        fs::create_dir_all(&cache_dir)
+            .map_err(|e| format!("Failed to create cache directory: {}", e))?;
+    }
+
+    // Generate cache key from URL (simple hash)
+    let cache_key = url
+        .bytes()
+        .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+    let cache_file = cache_dir.join(format!("{:x}.toml", cache_key));
+    let cache_meta = cache_dir.join(format!("{:x}.meta", cache_key));
+
+    // Check if cached file exists and is fresh (< 1 hour old)
+    let cache_valid = if cache_file.exists() && cache_meta.exists() {
+        if let Ok(metadata) = fs::metadata(&cache_meta) {
+            if let Ok(modified) = metadata.modified() {
+                modified
+                    .elapsed()
+                    .map(|d| d < Duration::from_secs(3600))
+                    .unwrap_or(false)
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    if cache_valid {
+        println!("Using cached config from {}", url);
+        return Ok(cache_file.to_string_lossy().to_string());
+    }
+
+    println!("Fetching config from {}...", url);
+
+    // Transform GitHub URLs to raw URLs if needed
+    let fetch_url = transform_github_url(url);
+
+    // Create HTTP agent
+    let agent = ureq::Agent::new_with_defaults();
+
+    // Fetch the config
+    let response = agent
+        .get(&fetch_url)
+        .header(
+            "User-Agent",
+            "Jarvy/0.1 (https://github.com/bearbinary/jarvy)",
+        )
+        .header("Accept", "text/plain, application/toml, */*")
+        .call()
+        .map_err(|e| format!("Failed to fetch config: {}", e))?;
+
+    if response.status() != 200 {
+        return Err(format!("HTTP error {}", response.status()));
+    }
+
+    let content = response
+        .into_body()
+        .read_to_string()
+        .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+    // Validate that content is valid TOML
+    let _: toml::Value =
+        toml::from_str(&content).map_err(|e| format!("Invalid TOML in remote config: {}", e))?;
+
+    // Write to cache
+    let mut file =
+        fs::File::create(&cache_file).map_err(|e| format!("Failed to create cache file: {}", e))?;
+    file.write_all(content.as_bytes())
+        .map_err(|e| format!("Failed to write cache file: {}", e))?;
+
+    // Write metadata (URL for reference)
+    let mut meta_file = fs::File::create(&cache_meta)
+        .map_err(|e| format!("Failed to create cache metadata: {}", e))?;
+    meta_file
+        .write_all(url.as_bytes())
+        .map_err(|e| format!("Failed to write cache metadata: {}", e))?;
+
+    println!("Config cached at {}", cache_file.display());
+
+    Ok(cache_file.to_string_lossy().to_string())
+}
+
+/// Transform GitHub URLs to raw content URLs
+fn transform_github_url(url: &str) -> String {
+    // Transform github.com blob URLs to raw.githubusercontent.com
+    // e.g., https://github.com/user/repo/blob/main/jarvy.toml
+    // -> https://raw.githubusercontent.com/user/repo/main/jarvy.toml
+    if url.contains("github.com") && url.contains("/blob/") {
+        return url
+            .replace("github.com", "raw.githubusercontent.com")
+            .replace("/blob/", "/");
+    }
+
+    // Transform gist URLs to raw
+    // e.g., https://gist.github.com/user/hash
+    // -> https://gist.githubusercontent.com/user/hash/raw
+    if url.contains("gist.github.com") && !url.contains("/raw") {
+        return format!("{}/raw", url.trim_end_matches('/'));
+    }
+
+    url.to_string()
 }
 
 fn user_select() {

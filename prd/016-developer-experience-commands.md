@@ -33,7 +33,9 @@ Users currently must manually investigate issues, read documentation to find ava
 3. **`jarvy export`**: Generate jarvy.toml from installed tools
 4. **`jarvy upgrade`**: Upgrade all tools to latest versions
 5. **`jarvy search`**: Search available tools
-6. **Shell completions**: bash, zsh, fish, PowerShell
+6. **`jarvy validate`**: Lint and validate configurations
+7. **`jarvy setup --from URL`**: Load and use remote configurations
+8. **Shell completions**: bash, zsh, fish, PowerShell
 
 ### Non-Functional Requirements
 
@@ -314,7 +316,84 @@ jarvy search docker --show-install
 - Description and metadata
 - Installation hints
 
-### 6. Shell Completions
+### 6. `jarvy validate`
+
+Lint and validate jarvy.toml configurations before use.
+
+```bash
+# Validate local config
+jarvy validate
+
+# Output:
+# Validating jarvy.toml...
+# [WARN] Line 5: Tool 'node' version '20' will match 20.x.x - consider pinning exact version
+# [ERROR] Line 12: Unknown tool 'nodejs' - did you mean 'node'?
+# [WARN] Line 18: Hook references undefined tool 'postgres'
+#
+# Validation failed: 1 error, 2 warnings
+
+# Validate remote config
+jarvy validate --from https://company.com/jarvy.toml
+
+# Validate with strict mode (warnings become errors)
+jarvy validate --strict
+
+# JSON output for CI
+jarvy validate --format json
+
+# Quiet mode (exit code only)
+jarvy validate --format quiet
+# Exit 0: valid
+# Exit 1: warnings present
+# Exit 2: errors present
+```
+
+**Validation checks:**
+- Syntax errors in TOML
+- Unknown tool names (with "did you mean?" suggestions)
+- Invalid version strings
+- Hook references to undefined tools
+- Deprecated configuration options
+- Duplicate tool entries
+- Invalid configuration structure
+
+### 7. `jarvy setup --from URL`
+
+Load and use jarvy.toml from a remote URL.
+
+```bash
+# Load config from URL
+jarvy setup --from https://company.com/configs/jarvy.toml
+
+# Load config from GitHub raw URL
+jarvy setup --from https://raw.githubusercontent.com/org/repo/main/jarvy.toml
+
+# Load config with auth header
+jarvy setup --from https://company.com/configs/jarvy.toml \
+    --header "Authorization: Bearer $TOKEN"
+
+# Preview what remote config would do (combine with diff)
+jarvy diff --from https://company.com/configs/jarvy.toml
+
+# Validate remote config before using
+jarvy validate --from https://company.com/configs/jarvy.toml
+```
+
+**Remote config behavior:**
+- HTTPS only (HTTP rejected for security)
+- Configs are cached locally (~/.jarvy/cache/configs/)
+- Cache TTL is 1 hour by default
+- Maximum config size: 1MB
+- Timeout: 30 seconds
+- Content validated before use (must be valid TOML)
+
+**Security considerations:**
+- No arbitrary code execution from remote configs
+- Certificate validation required
+- Clear error messages for network failures
+- Cache uses secure file permissions (0600)
+
+### 8. Shell Completions
 
 Generate shell completions for bash, zsh, fish, and PowerShell.
 
@@ -455,6 +534,28 @@ All commands support `--format` flag:
 - [ ] Includes tool names for relevant commands
 - [ ] Provides installation instructions
 
+### `jarvy validate`
+- [ ] Validates local jarvy.toml syntax
+- [ ] Detects unknown tool names
+- [ ] Suggests corrections for typos ("did you mean?")
+- [ ] Validates version string formats
+- [ ] Detects hook references to undefined tools
+- [ ] Supports `--from URL` for remote configs
+- [ ] Supports `--strict` mode (warnings as errors)
+- [ ] Supports `--format json` for CI
+- [ ] Returns appropriate exit codes (0=valid, 1=warnings, 2=errors)
+
+### `jarvy setup --from URL`
+- [ ] Fetches config from HTTPS URLs
+- [ ] Rejects HTTP URLs (insecure)
+- [ ] Supports custom headers (`--header`)
+- [ ] Caches fetched configs locally
+- [ ] Validates config before using
+- [ ] Enforces size limit (1MB)
+- [ ] Enforces timeout (30s)
+- [ ] Clear error messages for network failures
+- [ ] Works with `jarvy diff --from` for preview
+
 ## Technical Approach
 
 ### Module Structure
@@ -540,15 +641,19 @@ pub fn generate_completions(shell: Shell) -> String {
 4. Implement `jarvy export` command
 5. Implement `jarvy upgrade` command
 6. Implement `jarvy search` command
-7. Add shell completion generation
-8. Write unit tests for each command
-9. Write integration tests
-10. Update documentation and help text
+7. Implement `jarvy validate` command
+8. Add remote config fetching (`--from URL`)
+9. Add config caching module
+10. Add shell completion generation
+11. Write unit tests for each command
+12. Write integration tests
+13. Update documentation and help text
 
 ## Dependencies
 
 - `clap_complete` - Shell completion generation (already available via clap)
-- No new external dependencies required
+- `reqwest` - HTTP client for remote config fetching (minimal features)
+- `strsim` - String similarity for "did you mean?" suggestions
 
 ## Effort Estimate
 
@@ -560,10 +665,13 @@ pub fn generate_completions(shell: Shell) -> String {
 | `jarvy export` | 1.5 days |
 | `jarvy upgrade` | 2 days |
 | `jarvy search` | 1 day |
+| `jarvy validate` | 1.5 days |
+| Remote config (`--from`) | 1.5 days |
+| Config caching | 0.5 days |
 | Shell completions | 0.5 days |
-| Testing | 2 days |
+| Testing | 2.5 days |
 | Documentation | 1 day |
-| **Total** | **12 days** |
+| **Total** | **16 days** |
 
 ## Files to Create/Modify
 
@@ -573,7 +681,10 @@ pub fn generate_completions(shell: Shell) -> String {
 - `src/commands/export.rs`
 - `src/commands/upgrade.rs`
 - `src/commands/search.rs`
+- `src/commands/validate.rs`
 - `src/commands/completions.rs`
+- `src/remote/mod.rs` - Remote config fetching
+- `src/remote/cache.rs` - Config caching
 - `src/output/mod.rs`
 - `src/output/human.rs`
 - `src/output/json.rs`
@@ -583,10 +694,14 @@ pub fn generate_completions(shell: Shell) -> String {
 - `tests/export_integration.rs`
 - `tests/upgrade_integration.rs`
 - `tests/search_integration.rs`
+- `tests/validate_integration.rs`
+- `tests/remote_config_integration.rs`
 
 ### Modified Files
 - `src/main.rs` - Add new CLI commands
 - `src/commands/mod.rs` - Export new modules
+- `src/commands/setup.rs` - Add `--from` flag
+- `Cargo.toml` - Add reqwest, strsim dependencies
 - `CLAUDE.md` - Document new commands
 
 ## Success Metrics
@@ -597,6 +712,8 @@ pub fn generate_completions(shell: Shell) -> String {
 | Setup preview | None | Full diff |
 | Tool discovery | Read docs | `jarvy search` |
 | Config generation | Manual | `jarvy export` |
+| Config validation | Runtime errors | Pre-flight check |
+| Remote config sharing | Manual copy | URL-based |
 | Shell completion | None | 4 shells |
 
 ## Risks
@@ -612,3 +729,12 @@ pub fn generate_completions(shell: Shell) -> String {
 
 4. **Upgrade safety**: Upgrades could break user environments
    - Mitigation: Always show dry-run first, prompt for confirmation
+
+5. **Remote config availability**: Network issues could block setup
+   - Mitigation: Cache configs locally, clear offline error messages
+
+6. **Remote config security**: Malicious configs from untrusted URLs
+   - Mitigation: HTTPS only, validate before use, no arbitrary code execution
+
+7. **Validation false positives**: Over-aggressive warnings annoy users
+   - Mitigation: Tune validation rules, provide `--strict` for opt-in strictness

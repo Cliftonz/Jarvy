@@ -1,5 +1,10 @@
 name: Build and Release
 
+# PRD-020: Security Scanning Infrastructure
+# - Sigstore signing for all release artifacts
+# - SBOM generation (SPDX and CycloneDX)
+# - Build provenance attestation
+
 on:
   push:
     tags:
@@ -121,16 +126,160 @@ jobs:
           name: ${{ matrix.platform }}${{ matrix.cross && format('-{0}', matrix.pkg_arch) || '' }}-release-artifacts
           path: ${{ matrix.artifact_paths }}
 
-  upload_to_release:
-    name: Upload to GitHub Release
+  # Generate Software Bill of Materials (SBOM)
+  generate_sbom:
+    name: Generate SBOM
     runs-on: ubuntu-latest
-    permissions: write-all
-    needs: [ build_and_package ]
+    needs: [build_and_package]
+    outputs:
+      sbom_artifact: sbom-${{ env.VERSION }}
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: ${{ runner.os }}-cargo-sbom-tools
+
+      - name: Install SBOM tools
+        run: |
+          cargo install cargo-sbom --locked || true
+          cargo install cargo-cyclonedx --locked || true
+
+      - name: Generate SPDX SBOM
+        run: |
+          cargo sbom --output-format spdx_json_2_3 > sbom.spdx.json || \
+          cargo metadata --format-version 1 | jq '{
+            spdxVersion: "SPDX-2.3",
+            dataLicense: "CC0-1.0",
+            SPDXID: "SPDXRef-DOCUMENT",
+            name: "jarvy-sbom",
+            documentNamespace: "https://github.com/bearbinary/jarvy/releases/tag/${{ env.VERSION }}",
+            packages: [.packages[] | {
+              SPDXID: ("SPDXRef-Package-" + .name),
+              name: .name,
+              versionInfo: .version,
+              downloadLocation: .repository,
+              licenseDeclared: .license
+            }]
+          }' > sbom.spdx.json
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          cargo cyclonedx --format json > sbom.cdx.json 2>/dev/null || \
+          cargo metadata --format-version 1 | jq '{
+            bomFormat: "CycloneDX",
+            specVersion: "1.4",
+            version: 1,
+            metadata: {
+              timestamp: (now | strftime("%Y-%m-%dT%H:%M:%SZ")),
+              component: {
+                type: "application",
+                name: "jarvy",
+                version: "${{ env.VERSION }}"
+              }
+            },
+            components: [.packages[] | {
+              type: "library",
+              name: .name,
+              version: .version,
+              purl: ("pkg:cargo/" + .name + "@" + .version),
+              licenses: [{license: {id: .license}}]
+            }]
+          }' > sbom.cdx.json
+
+      - name: Upload SBOMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ env.VERSION }}
+          path: |
+            sbom.spdx.json
+            sbom.cdx.json
+          retention-days: 90
+
+  # Sign all release artifacts with Sigstore
+  sign_artifacts:
+    name: Sign Artifacts (Sigstore)
+    runs-on: ubuntu-latest
+    needs: [build_and_package, generate_sbom]
+    permissions:
+      contents: write
+      id-token: write  # Required for Sigstore OIDC
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: Download SBOMs
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom-${{ env.VERSION }}
+          path: artifacts/sbom
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign artifacts with Sigstore
+        run: |
+          # Find all artifacts to sign
+          find artifacts -type f \( -name 'jarvy*' -o -name 'sbom.*' \) | while read -r file; do
+            # Skip signature and certificate files
+            if [[ "$file" =~ \.(sig|pem|bundle)$ ]]; then
+              continue
+            fi
+
+            echo "Signing: $file"
+
+            # Sign with keyless Sigstore (OIDC-based)
+            cosign sign-blob --yes "$file" \
+              --output-signature "${file}.sig" \
+              --output-certificate "${file}.pem" \
+              --bundle "${file}.bundle"
+          done
+
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-artifacts-${{ env.VERSION }}
+          path: |
+            artifacts/**/*.sig
+            artifacts/**/*.pem
+            artifacts/**/*.bundle
+          retention-days: 90
+
+  upload_to_release:
+    name: Upload to GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    needs: [build_and_package, generate_sbom, sign_artifacts]
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Download SBOMs
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom-${{ env.VERSION }}
+          path: sbom
+
+      - name: Download signatures
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-artifacts-${{ env.VERSION }}
+          path: signatures
 
       - name: Create attestation for all builds
         uses: actions/attest-build-provenance@v2
@@ -140,10 +289,13 @@ jobs:
       - name: Generate SHA256 checksums
         run: |
           cd artifacts
-          find . -type f -name 'jarvy*' | while read -r file; do
+          find . -type f -name 'jarvy*' ! -name '*.sig' ! -name '*.pem' ! -name '*.bundle' | while read -r file; do
             sha256sum "$file" >> SHA256SUMS.txt
           done
-          mv SHA256SUMS.txt ../
+          # Also checksum SBOMs
+          cd ../sbom
+          sha256sum sbom.* >> ../artifacts/SHA256SUMS.txt
+          mv ../artifacts/SHA256SUMS.txt ../
 
       - name: Release to GitHub
         uses: softprops/action-gh-release@v2
@@ -153,6 +305,10 @@ jobs:
           tag_name: ${{ env.VERSION }}
           files: |
             artifacts/**/jarvy*
+            sbom/sbom.*
+            signatures/**/*.sig
+            signatures/**/*.pem
+            signatures/**/*.bundle
             SHA256SUMS.txt
           body: |
             ## Installation
@@ -178,3 +334,34 @@ jobs:
             ```
 
             See [installation docs](https://github.com/bearbinary/jarvy#installation) for more options.
+
+            ## Security
+
+            ### Verify Signatures
+            All release artifacts are signed with [Sigstore](https://sigstore.dev/). To verify:
+
+            ```bash
+            # Install cosign
+            brew install cosign  # or see https://docs.sigstore.dev/cosign/installation
+
+            # Download artifact and signature
+            curl -LO https://github.com/bearbinary/jarvy/releases/download/${{ env.VERSION }}/jarvy-linux-x86_64.tar.gz
+            curl -LO https://github.com/bearbinary/jarvy/releases/download/${{ env.VERSION }}/jarvy-linux-x86_64.tar.gz.sig
+            curl -LO https://github.com/bearbinary/jarvy/releases/download/${{ env.VERSION }}/jarvy-linux-x86_64.tar.gz.pem
+
+            # Verify
+            cosign verify-blob \
+              --signature jarvy-linux-x86_64.tar.gz.sig \
+              --certificate jarvy-linux-x86_64.tar.gz.pem \
+              --certificate-identity-regexp "https://github.com/bearbinary/jarvy" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              jarvy-linux-x86_64.tar.gz
+            ```
+
+            ### Software Bill of Materials (SBOM)
+            This release includes SBOMs in both SPDX and CycloneDX formats:
+            - `sbom.spdx.json` - SPDX 2.3 format
+            - `sbom.cdx.json` - CycloneDX 1.4 format
+
+            ### Checksums
+            SHA256 checksums for all artifacts are in `SHA256SUMS.txt`

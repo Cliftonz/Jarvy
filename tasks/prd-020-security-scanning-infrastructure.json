@@ -1,0 +1,232 @@
+{
+  "id": "PRD-020",
+  "parent_prd": "PRD-020",
+  "title": "Security Scanning Infrastructure",
+  "description": "Implement comprehensive security scanning beyond GitHub Dependabot to ensure supply chain security, detect vulnerabilities early, enforce license compliance, and establish security best practices for the Jarvy project",
+  "status": "pending",
+  "priority": "high",
+  "dependencies": ["PRD-012"],
+  "estimated_complexity": "high",
+  "acceptance_criteria": [
+    "cargo-audit runs on every PR and fails on known CVEs",
+    "cargo-deny enforces license compliance (MIT/Apache/BSD allowed only)",
+    "Gitleaks scans for secrets in pre-commit and CI",
+    "Semgrep/CodeQL run SAST on Rust code",
+    "SBOM generated in SPDX and CycloneDX formats for releases",
+    "Release artifacts signed with Sigstore/cosign",
+    "OpenSSF Scorecard achieves 8.0+ score",
+    "SECURITY.md documents vulnerability reporting process",
+    "Pre-commit hooks available for local security checks"
+  ],
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Configure cargo-deny",
+      "description": "Create deny.toml with license, advisory, and ban policies",
+      "passed": false,
+      "priority": "high",
+      "files": ["deny.toml"],
+      "subtasks": [
+        "Define allowed licenses (MIT, Apache-2.0, BSD, ISC, Zlib, CC0, Unlicense, MPL-2.0)",
+        "Block copyleft licenses (GPL, AGPL, SSPL)",
+        "Configure advisory database scanning",
+        "Set unmaintained and yanked crate policies",
+        "Configure source restrictions (crates.io only)",
+        "Add any necessary exceptions with justification"
+      ]
+    },
+    {
+      "id": "T2",
+      "title": "Create security CI workflow",
+      "description": "Create .github/workflows/security.yml for PR and scheduled scans",
+      "passed": false,
+      "priority": "high",
+      "files": [".github/workflows/security.yml"],
+      "subtasks": [
+        "Add cargo-audit job for CVE scanning",
+        "Add cargo-deny job for license/advisory/ban checks",
+        "Add Gitleaks job for secret scanning",
+        "Add Semgrep job with Rust security rules",
+        "Add CodeQL job for semantic analysis",
+        "Configure SARIF upload for GitHub Security tab",
+        "Set up daily scheduled scans"
+      ]
+    },
+    {
+      "id": "T3",
+      "title": "Configure Gitleaks",
+      "description": "Create .gitleaks.toml with custom rules and allowlist",
+      "passed": false,
+      "priority": "high",
+      "files": [".gitleaks.toml"],
+      "subtasks": [
+        "Extend default rules for Jarvy-specific patterns",
+        "Add custom rule for API keys",
+        "Configure allowlist for docs and config examples",
+        "Test with existing codebase"
+      ]
+    },
+    {
+      "id": "T4",
+      "title": "Create SECURITY.md",
+      "description": "Document security policy and vulnerability reporting",
+      "passed": false,
+      "priority": "high",
+      "files": ["SECURITY.md"],
+      "subtasks": [
+        "Document supported versions",
+        "Explain vulnerability reporting process",
+        "List security measures implemented",
+        "Add security acknowledgments section"
+      ]
+    },
+    {
+      "id": "T5",
+      "title": "Add release signing with Sigstore",
+      "description": "Sign release artifacts with cosign keyless signing",
+      "passed": false,
+      "priority": "high",
+      "files": [".github/workflows/release.yml", "scripts/security/verify-signatures.sh"],
+      "subtasks": [
+        "Add cosign-installer step to release workflow",
+        "Sign all binary artifacts",
+        "Upload .sig and .pem files to release",
+        "Create verification script for users",
+        "Document signature verification in release notes"
+      ]
+    },
+    {
+      "id": "T6",
+      "title": "Add SBOM generation",
+      "description": "Generate SPDX and CycloneDX SBOMs for releases",
+      "passed": false,
+      "priority": "high",
+      "files": [".github/workflows/release.yml", "scripts/security/generate-sbom.sh"],
+      "subtasks": [
+        "Install cargo-sbom in release workflow",
+        "Generate SPDX 2.3 JSON SBOM",
+        "Install cargo-cyclonedx for CycloneDX format",
+        "Attach SBOMs to GitHub Release",
+        "Create helper script for local SBOM generation"
+      ]
+    },
+    {
+      "id": "T7",
+      "title": "Create OpenSSF Scorecard workflow",
+      "description": "Set up weekly Scorecard analysis and badge",
+      "passed": false,
+      "priority": "medium",
+      "files": [".github/workflows/scorecard.yml"],
+      "subtasks": [
+        "Create scorecard workflow with weekly schedule",
+        "Configure SARIF upload",
+        "Enable publish_results for public badge",
+        "Add Scorecard badge to README",
+        "Document score improvement areas"
+      ]
+    },
+    {
+      "id": "T8",
+      "title": "Add cargo-geiger unsafe audit",
+      "description": "Run unsafe code detection as advisory check",
+      "passed": false,
+      "priority": "low",
+      "files": [".github/workflows/security.yml"],
+      "subtasks": [
+        "Add cargo-geiger job to security workflow",
+        "Configure threshold warning (not blocking)",
+        "Generate and upload geiger report",
+        "Document any justified unsafe usage"
+      ]
+    },
+    {
+      "id": "T9",
+      "title": "Create pre-commit configuration",
+      "description": "Set up pre-commit hooks for local security checks",
+      "passed": false,
+      "priority": "medium",
+      "files": [".pre-commit-config.yaml"],
+      "subtasks": [
+        "Add gitleaks hook",
+        "Add cargo fmt and clippy hooks",
+        "Add cargo check hook",
+        "Add YAML/TOML/JSON validators",
+        "Document pre-commit setup in CONTRIBUTING.md"
+      ]
+    },
+    {
+      "id": "T10",
+      "title": "Configure branch protection",
+      "description": "Document and recommend branch protection rules",
+      "passed": false,
+      "priority": "medium",
+      "files": ["docs/MAINTAINER_SECURITY_SETUP.md"],
+      "subtasks": [
+        "Document required status checks",
+        "Document review requirements",
+        "Document force push restrictions",
+        "Add GitHub Secret Scanning enablement guide"
+      ]
+    }
+  ],
+  "implementation_notes": {
+    "sigstore": "Uses keyless signing via OIDC - requires id-token: write permission",
+    "cargo_deny": "EmbarkStudios/cargo-deny-action@v2 handles installation and caching",
+    "gitleaks": "Requires fetch-depth: 0 for full history scanning",
+    "codeql": "Rust support requires building the project during analysis",
+    "sbom": "cargo-sbom and cargo-cyclonedx may be flaky; fallback to cargo metadata + jq"
+  },
+  "non_goals": [
+    "Runtime application security monitoring",
+    "Penetration testing infrastructure",
+    "Bug bounty program management",
+    "SOC 2 / compliance certification processes"
+  ],
+  "files_to_create": [
+    "deny.toml",
+    ".gitleaks.toml",
+    "SECURITY.md",
+    ".github/workflows/security.yml",
+    ".github/workflows/scorecard.yml",
+    ".pre-commit-config.yaml",
+    "scripts/security/verify-signatures.sh",
+    "scripts/security/generate-sbom.sh",
+    "docs/MAINTAINER_SECURITY_SETUP.md"
+  ],
+  "files_to_modify": [
+    ".github/workflows/release.yml",
+    "README.md"
+  ],
+  "risks": [
+    {
+      "description": "False positives blocking PRs",
+      "mitigation": "Allowlist with justification, separate advisory vs blocking checks"
+    },
+    {
+      "description": "Tool performance degradation",
+      "mitigation": "Caching, parallel execution, separate workflow for heavy scans"
+    },
+    {
+      "description": "Sigstore outages affecting releases",
+      "mitigation": "Document manual signing fallback procedure"
+    },
+    {
+      "description": "New CVE in critical dependency",
+      "mitigation": "Daily scans, rapid response process documented"
+    }
+  ],
+  "effort_estimate": {
+    "cargo_deny_config": "0.5 days",
+    "security_ci_workflow": "1 day",
+    "gitleaks_config": "0.5 days",
+    "security_md": "0.5 days",
+    "sigstore_signing": "1 day",
+    "sbom_generation": "0.5 days",
+    "scorecard": "0.5 days",
+    "geiger_audit": "0.5 days",
+    "pre_commit": "0.5 days",
+    "branch_protection_docs": "0.5 days",
+    "testing_refinement": "1 day",
+    "total": "7 days"
+  }
+}

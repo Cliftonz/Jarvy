@@ -1,0 +1,310 @@
+{
+  "id": "PRD-021",
+  "parent_prd": "PRD-021",
+  "title": "Jarvy MCP Server for Safe Tool Installation",
+  "description": "Expose Jarvy as a Model Context Protocol (MCP) server, enabling LLMs (Claude, GPT, etc.) to safely discover, verify, and install development tools with mandatory user confirmation",
+  "status": "pending",
+  "priority": "high",
+  "dependencies": [],
+  "estimated_complexity": "high",
+  "acceptance_criteria": [
+    "jarvy mcp command starts stdio-based MCP server",
+    "jarvy_list_tools returns all available tools with metadata",
+    "jarvy_get_tool returns detailed info for specific tool",
+    "jarvy_check_tool verifies installation status and version",
+    "jarvy_install_tool defaults to dry_run=true (safe by default)",
+    "Non-dry-run installs require terminal confirmation",
+    "Rate limiting prevents abuse (10 checks/min, 3 installs/min)",
+    "Allowlist/denylist configurable via ~/.jarvy/mcp-config.toml",
+    "Audit logging to ~/.jarvy/mcp-audit.log",
+    "Works with Claude Desktop, Cursor, and VS Code",
+    "npm package @jarvy/mcp-server published",
+    "Docker image jarvy/mcp-server published"
+  ],
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Create MCP module structure",
+      "description": "Set up src/mcp/ module with core files",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/mcp/mod.rs", "src/mcp/error.rs", "src/mcp/config.rs"],
+      "subtasks": [
+        "Create module directory structure",
+        "Define McpError enum with JSON-RPC error codes",
+        "Create McpConfig struct for mcp-config.toml",
+        "Add config loading from ~/.jarvy/mcp-config.toml",
+        "Add module exports"
+      ]
+    },
+    {
+      "id": "T2",
+      "title": "Implement MCP server core",
+      "description": "Create JSON-RPC server with stdio transport",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/mcp/server.rs", "src/mcp/transport.rs"],
+      "subtasks": [
+        "Implement JSON-RPC request parsing",
+        "Implement JSON-RPC response formatting",
+        "Create stdio transport (read from stdin, write to stdout)",
+        "Handle initialize/initialized handshake",
+        "Route requests to handlers",
+        "Implement graceful shutdown"
+      ]
+    },
+    {
+      "id": "T3",
+      "title": "Implement MCP tool handlers",
+      "description": "Create handlers for jarvy_* tools",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/mcp/tools.rs"],
+      "subtasks": [
+        "Implement jarvy_list_tools handler with filtering",
+        "Implement jarvy_get_tool handler with platform info",
+        "Implement jarvy_check_tool handler with version detection",
+        "Implement jarvy_check_multiple handler for batch checks",
+        "Implement jarvy_install_tool handler with dry_run support",
+        "Add tool categorization logic",
+        "Add platform availability detection"
+      ]
+    },
+    {
+      "id": "T4",
+      "title": "Implement safety mechanisms",
+      "description": "Add rate limiting, allowlist/denylist, and confirmation",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/mcp/safety.rs"],
+      "subtasks": [
+        "Implement RateLimiter with configurable limits",
+        "Implement allowlist checking",
+        "Implement denylist checking (takes precedence)",
+        "Implement confirmation prompt via stderr",
+        "Add 'Always allow tool X' option"
+      ]
+    },
+    {
+      "id": "T5",
+      "title": "Implement audit logging",
+      "description": "Log all MCP requests to audit file",
+      "passed": false,
+      "priority": "medium",
+      "files": ["src/mcp/audit.rs"],
+      "subtasks": [
+        "Create structured audit log format",
+        "Log timestamp, action, tool, result",
+        "Handle log rotation",
+        "Add client identifier tracking"
+      ]
+    },
+    {
+      "id": "T6",
+      "title": "Implement MCP resources",
+      "description": "Add resource handlers for tool index and platform info",
+      "passed": false,
+      "priority": "medium",
+      "files": ["src/mcp/resources.rs"],
+      "subtasks": [
+        "Implement jarvy://tools/index resource",
+        "Implement jarvy://platform/info resource",
+        "Implement jarvy://tools/{name} resource",
+        "Add resource list handler"
+      ]
+    },
+    {
+      "id": "T7",
+      "title": "Implement MCP prompts",
+      "description": "Add prompt handlers for guided workflows",
+      "passed": false,
+      "priority": "low",
+      "files": ["src/mcp/prompts.rs"],
+      "subtasks": [
+        "Implement setup_dev_environment prompt",
+        "Implement diagnose_missing_tools prompt",
+        "Add prompt list handler"
+      ]
+    },
+    {
+      "id": "T8",
+      "title": "Add CLI subcommand",
+      "description": "Add 'jarvy mcp' command to start server",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/main.rs"],
+      "subtasks": [
+        "Add Mcp variant to Commands enum",
+        "Add --transport flag (stdio default)",
+        "Add --config flag for custom config path",
+        "Wire up to MCP server run function"
+      ]
+    },
+    {
+      "id": "T9",
+      "title": "Write unit tests",
+      "description": "Test MCP handlers and safety mechanisms",
+      "passed": false,
+      "priority": "medium",
+      "files": ["src/mcp/tools.rs", "src/mcp/safety.rs"],
+      "subtasks": [
+        "Test list_tools returns all tools",
+        "Test check_tool with known/unknown tools",
+        "Test install_tool defaults to dry_run",
+        "Test rate limiter blocks excess requests",
+        "Test denylist blocks tools",
+        "Test allowlist restricts tools"
+      ]
+    },
+    {
+      "id": "T10",
+      "title": "Write integration tests",
+      "description": "Test MCP server end-to-end",
+      "passed": false,
+      "priority": "medium",
+      "files": ["tests/mcp_integration.rs"],
+      "subtasks": [
+        "Test initialize handshake",
+        "Test tools/list request",
+        "Test tools/call for each handler",
+        "Test resources/read for each resource",
+        "Test error responses"
+      ]
+    },
+    {
+      "id": "T11",
+      "title": "Create npm package",
+      "description": "Create @jarvy/mcp-server npm package",
+      "passed": false,
+      "priority": "high",
+      "files": ["dist/mcp/package.json", "dist/mcp/scripts/download-binary.js", "dist/mcp/bin/jarvy-mcp"],
+      "subtasks": [
+        "Create package.json with metadata",
+        "Create postinstall script to download binary",
+        "Create shell wrapper for jarvy mcp",
+        "Test npx @jarvy/mcp-server works",
+        "Add to CI publish workflow"
+      ]
+    },
+    {
+      "id": "T12",
+      "title": "Create Docker image",
+      "description": "Create jarvy/mcp-server Docker image",
+      "passed": false,
+      "priority": "medium",
+      "files": ["dist/docker/Dockerfile.mcp", "dist/docker/docker-compose.mcp.yml"],
+      "subtasks": [
+        "Create minimal Alpine-based Dockerfile",
+        "Create docker-compose for testing",
+        "Add to CI publish workflow",
+        "Test Docker image works with stdio"
+      ]
+    },
+    {
+      "id": "T13",
+      "title": "Create client configurations",
+      "description": "Document MCP client setup",
+      "passed": false,
+      "priority": "medium",
+      "files": ["docs/mcp/README.md", "docs/mcp/claude-desktop.md", "docs/mcp/cursor.md"],
+      "subtasks": [
+        "Create Claude Desktop configuration example",
+        "Create Cursor configuration example",
+        "Create VS Code + Continue configuration example",
+        "Add troubleshooting guide"
+      ]
+    },
+    {
+      "id": "T14",
+      "title": "Submit to MCP registries",
+      "description": "Submit to smithery.ai and awesome-mcp-servers",
+      "passed": false,
+      "priority": "low",
+      "files": ["smithery.json"],
+      "subtasks": [
+        "Create smithery.json manifest",
+        "Submit to smithery.ai",
+        "Submit PR to awesome-mcp-servers",
+        "Submit to mcp.run if available"
+      ]
+    }
+  ],
+  "implementation_notes": {
+    "protocol_version": "Target MCP protocol version 2024-11-05 or later",
+    "async_runtime": "Use async-std for async stdio handling",
+    "json_rpc": "Use jsonrpc-core crate for JSON-RPC implementation",
+    "rate_limiting": "Use governor crate for token bucket rate limiting",
+    "confirmation": "Write confirmation prompts to stderr (not stdout) to not break MCP",
+    "binary_size": "Target < 10MB for standalone MCP server binary"
+  },
+  "non_goals": [
+    "Automatic/unattended installations",
+    "Managing tool configurations beyond default hooks",
+    "Version pinning or rollback capabilities (v1)",
+    "Installing tools not in Jarvy's registry"
+  ],
+  "files_to_create": [
+    "src/mcp/mod.rs",
+    "src/mcp/server.rs",
+    "src/mcp/transport.rs",
+    "src/mcp/tools.rs",
+    "src/mcp/resources.rs",
+    "src/mcp/prompts.rs",
+    "src/mcp/safety.rs",
+    "src/mcp/config.rs",
+    "src/mcp/audit.rs",
+    "src/mcp/error.rs",
+    "tests/mcp_integration.rs",
+    "dist/mcp/package.json",
+    "dist/mcp/scripts/download-binary.js",
+    "dist/mcp/bin/jarvy-mcp",
+    "dist/mcp/README.md",
+    "dist/docker/Dockerfile.mcp",
+    "dist/docker/docker-compose.mcp.yml",
+    "docs/mcp/README.md",
+    "docs/mcp/claude-desktop.md",
+    "docs/mcp/cursor.md",
+    "docs/mcp/safety.md",
+    "smithery.json"
+  ],
+  "files_to_modify": [
+    "src/main.rs",
+    "Cargo.toml",
+    "README.md",
+    ".github/workflows/release.yml"
+  ],
+  "risks": [
+    {
+      "description": "LLM bypasses confirmation",
+      "mitigation": "Confirmation via stderr (not MCP response), audit logging"
+    },
+    {
+      "description": "Rate limit circumvention",
+      "mitigation": "Per-process limits, not just per-request"
+    },
+    {
+      "description": "npm supply chain attack",
+      "mitigation": "Signed releases, verify checksums in postinstall"
+    },
+    {
+      "description": "MCP protocol changes",
+      "mitigation": "Pin to stable protocol version, monitor Anthropic releases"
+    }
+  ],
+  "effort_estimate": {
+    "module_structure": "0.5 days",
+    "server_core": "2 days",
+    "tool_handlers": "2 days",
+    "safety_mechanisms": "1 day",
+    "audit_logging": "0.5 days",
+    "resources_prompts": "1 day",
+    "cli_integration": "0.5 days",
+    "unit_tests": "1 day",
+    "integration_tests": "1 day",
+    "npm_package": "1 day",
+    "docker_image": "0.5 days",
+    "documentation": "1 day",
+    "registry_submission": "0.5 days",
+    "total": "13 days"
+  }
+}
