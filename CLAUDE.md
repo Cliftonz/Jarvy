@@ -93,7 +93,40 @@ List tools with default hooks: `jarvy tools --default-hooks`
 
 ### Telemetry
 
-Optional PostHog analytics + OTLP tracing. Configurable via `~/.jarvy/config.toml` or env vars (`JARVY_OTLP_ENDPOINT`).
+Jarvy uses OpenTelemetry (OTEL) for unified telemetry: logs, metrics, and optional traces. Telemetry is **opt-in by default** (disabled until configured).
+
+**Configuration** (`~/.jarvy/config.toml`):
+```toml
+[telemetry]
+enabled = true                          # Master switch
+endpoint = "http://localhost:4318"      # OTLP endpoint
+protocol = "http"                       # "http" or "grpc"
+logs = true                             # Log export
+metrics = true                          # Metrics export
+traces = false                          # Optional traces
+sample_rate = 1.0                       # Trace sampling (0.0-1.0)
+```
+
+**Environment Variables** (override config file):
+- `JARVY_TELEMETRY=1` - Enable/disable telemetry
+- `JARVY_OTLP_ENDPOINT=http://...` - OTLP endpoint URL
+- `JARVY_OTLP_PROTOCOL=grpc` - Protocol selection
+- `JARVY_OTLP_LOGS=1`, `JARVY_OTLP_METRICS=1`, `JARVY_OTLP_TRACES=1`
+- `JARVY_OTLP_SAMPLE_RATE=0.1` - Trace sampling rate
+
+**CI Behavior**: Auto-disabled when `CI=true` unless `JARVY_TELEMETRY=1` is set.
+
+**CLI Commands**:
+```bash
+jarvy telemetry status        # Show current config
+jarvy telemetry enable        # Enable telemetry
+jarvy telemetry disable       # Disable telemetry
+jarvy telemetry set-endpoint <url>  # Set OTLP endpoint
+jarvy telemetry test          # Test connectivity
+jarvy telemetry preview       # Show what events would be sent
+```
+
+**Module**: `src/telemetry.rs` - Unified telemetry API with event functions and metrics.
 
 ## Testing
 

@@ -29,6 +29,8 @@ if [ -f "$HOME/.zshrc" ] && ! grep -q '.npm-global/bin' "$HOME/.zshrc"; then
 fi
 "#
     },
+    // Install nvm before node if both are in the config
+    depends_on: &["nvm"],
 });
 
 #[cfg(test)]

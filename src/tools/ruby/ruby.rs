@@ -9,6 +9,8 @@ define_tool!(RUBY, {
     macos: { brew: "ruby" },
     linux: { uniform: "ruby" },
     windows: { winget: "RubyInstallerTeam.Ruby" },
+    // Install rbenv before ruby if both are in the config
+    depends_on: &["rbenv"],
 });
 
 #[cfg(test)]

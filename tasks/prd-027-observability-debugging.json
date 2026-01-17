@@ -1,0 +1,403 @@
+{
+  "id": "PRD-027",
+  "parent_prd": "PRD-027",
+  "title": "Observability & Debugging",
+  "description": "Add comprehensive observability and debugging features including structured logging, performance profiling, network tracing, and diagnostic tools to help users understand what Jarvy is doing, diagnose failures, and optimize performance",
+  "status": "pending",
+  "priority": "medium",
+  "dependencies": [],
+  "estimated_complexity": "high",
+  "acceptance_criteria": [
+    "--debug flag enables structured debug logging",
+    "--trace flag enables trace-level logging",
+    "--log-format json outputs machine-parseable JSON logs",
+    "--debug-filter limits logging to specific modules",
+    "--log-file writes logs to specified file",
+    "--profile flag generates performance timeline",
+    "Profile shows phase breakdown (parse, detect, download, install, hooks)",
+    "Per-tool timing displayed with visual bars",
+    "--profile-output saves JSON for comparison",
+    "--trace-network shows all HTTP requests with timing",
+    "Network trace includes DNS, connect, TLS, transfer breakdown",
+    "jarvy diagnose <tool> performs deep diagnosis",
+    "Diagnose checks binary, dependencies, config, connectivity",
+    "jarvy diagnose --fix offers automated remediation",
+    "jarvy doctor --extended shows full health dashboard",
+    "Dashboard includes system overview, PM status, performance metrics",
+    "jarvy diagnose --export creates sanitized diagnostic bundle",
+    "Sensitive data (tokens, passwords, emails) automatically redacted",
+    "Debug mode adds < 10% overhead",
+    "Works in CI environments"
+  ],
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Create observability module structure",
+      "description": "Set up src/observability/ module with core files and exports",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/observability/mod.rs"],
+      "subtasks": [
+        "Create src/observability/ directory",
+        "Create mod.rs with module exports",
+        "Define ObservabilityConfig struct",
+        "Add feature flags for optional components",
+        "Wire up module in src/main.rs"
+      ]
+    },
+    {
+      "id": "T2",
+      "title": "Implement structured logging",
+      "description": "Set up tracing-based logging with multiple output formats",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/observability/logging.rs"],
+      "subtasks": [
+        "Configure tracing-subscriber with EnvFilter",
+        "Implement LogLevel enum (Quiet, Normal, Verbose, Debug, Trace)",
+        "Add JSON formatter option",
+        "Implement module-specific filtering (--debug-filter)",
+        "Add file output writer (--log-file)",
+        "Integrate with existing CLI flags"
+      ]
+    },
+    {
+      "id": "T3",
+      "title": "Add debug CLI flags",
+      "description": "Add --debug, --trace, --log-format, --log-file flags to commands",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/main.rs", "src/commands/setup.rs"],
+      "subtasks": [
+        "Add --quiet flag (errors only)",
+        "Add --verbose / -v flag (warnings)",
+        "Add --debug / -vv flag (debug logs)",
+        "Add --trace / -vvv flag (trace logs)",
+        "Add --log-format [text|json] flag",
+        "Add --debug-filter <module> flag",
+        "Add --log-file <path> flag",
+        "Wire flags to logging initialization"
+      ]
+    },
+    {
+      "id": "T4",
+      "title": "Implement performance profiler",
+      "description": "Track timing of all operations with phase breakdown",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/observability/profiler.rs"],
+      "subtasks": [
+        "Create Profiler struct with phase tracking",
+        "Implement start_phase() and end_phase() methods",
+        "Track per-tool installation times",
+        "Calculate phase percentages",
+        "Generate ASCII bar charts for visualization",
+        "Create ProfileReport struct for JSON export",
+        "Add generate_recommendations() for optimization tips"
+      ]
+    },
+    {
+      "id": "T5",
+      "title": "Add profiling CLI integration",
+      "description": "Add --profile flag and profile commands",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/main.rs", "src/commands/profile.rs"],
+      "subtasks": [
+        "Add --profile flag to setup command",
+        "Add --profile-output <path> flag for JSON export",
+        "Create jarvy profile show <file> subcommand",
+        "Create jarvy profile compare <before> <after> subcommand",
+        "Display profile summary at end of operations",
+        "Wire profiler into tool installation pipeline"
+      ]
+    },
+    {
+      "id": "T6",
+      "title": "Implement network tracing",
+      "description": "Track all HTTP requests with detailed timing",
+      "passed": false,
+      "priority": "medium",
+      "files": ["src/observability/network_trace.rs"],
+      "subtasks": [
+        "Create NetworkTiming struct (DNS, connect, TLS, transfer)",
+        "Create NetworkTrace collector",
+        "Hook into HTTP client (reqwest middleware)",
+        "Track request/response headers (sanitized)",
+        "Calculate transfer speeds",
+        "Aggregate by domain for summary",
+        "Create NetworkSummary report struct"
+      ]
+    },
+    {
+      "id": "T7",
+      "title": "Add network tracing CLI",
+      "description": "Add --trace-network flag and network analysis command",
+      "passed": false,
+      "priority": "medium",
+      "files": ["src/main.rs", "src/commands/network.rs"],
+      "subtasks": [
+        "Add --trace-network flag to setup command",
+        "Add --network-log <path> flag for trace export",
+        "Create jarvy network analyze <file> subcommand",
+        "Display real-time request logging when enabled",
+        "Show summary statistics at end"
+      ]
+    },
+    {
+      "id": "T8",
+      "title": "Implement data sanitizer",
+      "description": "Redact sensitive data from logs and exports",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/observability/sanitizer.rs"],
+      "subtasks": [
+        "Define sensitive data patterns (API keys, tokens, passwords)",
+        "Add Bearer token redaction",
+        "Add email address masking",
+        "Add home directory path normalization (~/)",
+        "Create Sanitizer struct with regex patterns",
+        "Implement sanitize() method",
+        "Add configurable redaction level"
+      ]
+    },
+    {
+      "id": "T9",
+      "title": "Create diagnose command",
+      "description": "Implement jarvy diagnose <tool> for deep tool diagnosis",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/commands/diagnose.rs"],
+      "subtasks": [
+        "Create diagnose subcommand with tool argument",
+        "Check installation status and location",
+        "Perform binary analysis (type, permissions, symlinks)",
+        "Check dependencies and runtime requirements",
+        "Examine configuration files",
+        "Test network connectivity (registries)",
+        "Run tool-specific health checks",
+        "Display formatted diagnostic report"
+      ]
+    },
+    {
+      "id": "T10",
+      "title": "Add diagnose --fix option",
+      "description": "Implement automated remediation for common issues",
+      "passed": false,
+      "priority": "medium",
+      "files": ["src/commands/diagnose.rs"],
+      "subtasks": [
+        "Detect common issues (PATH, shell integration)",
+        "Generate fix suggestions with commands",
+        "Implement --fix flag for auto-remediation",
+        "Add confirmation prompts before applying fixes",
+        "Handle shell config file modifications safely",
+        "Report fix results"
+      ]
+    },
+    {
+      "id": "T11",
+      "title": "Enhance doctor dashboard",
+      "description": "Add --extended flag for comprehensive health dashboard",
+      "passed": false,
+      "priority": "medium",
+      "files": ["src/commands/doctor.rs", "src/doctor/dashboard.rs"],
+      "subtasks": [
+        "Create dashboard.rs for extended output",
+        "Add system overview (OS, shell, uptime, load, memory, disk)",
+        "Show package manager status with package counts",
+        "Display tool status summary (healthy/outdated/missing)",
+        "Show version comparison table",
+        "Add performance metrics section",
+        "Generate actionable recommendations",
+        "Create --report flag for markdown export"
+      ]
+    },
+    {
+      "id": "T12",
+      "title": "Add metrics collection",
+      "description": "Track and persist performance metrics over time",
+      "passed": false,
+      "priority": "low",
+      "files": ["src/doctor/metrics.rs"],
+      "subtasks": [
+        "Create MetricsStore for historical data",
+        "Store setup duration per run",
+        "Track cache hit rates",
+        "Calculate average setup times",
+        "Persist metrics to ~/.jarvy/metrics.json",
+        "Add trend analysis for dashboard"
+      ]
+    },
+    {
+      "id": "T13",
+      "title": "Implement diagnostic bundle export",
+      "description": "Create jarvy diagnose --export for support bundles",
+      "passed": false,
+      "priority": "medium",
+      "files": ["src/commands/diagnose.rs", "src/observability/bundle.rs"],
+      "subtasks": [
+        "Create bundle.rs for export logic",
+        "Collect system information",
+        "Collect Jarvy configuration (sanitized)",
+        "Collect tool status",
+        "Collect recent logs (limit lines)",
+        "Collect environment variables (sanitized)",
+        "Run network connectivity tests",
+        "Create ZIP archive with zip crate",
+        "Add --scope flag for selective export",
+        "Add --include-history flag for operation history"
+      ]
+    },
+    {
+      "id": "T14",
+      "title": "Add doctor category filtering",
+      "description": "Allow checking specific categories with --check flag",
+      "passed": false,
+      "priority": "low",
+      "files": ["src/commands/doctor.rs"],
+      "subtasks": [
+        "Add --check <category> flag",
+        "Implement tools category check",
+        "Implement network category check",
+        "Implement performance category check",
+        "Allow multiple categories"
+      ]
+    },
+    {
+      "id": "T15",
+      "title": "Write unit tests",
+      "description": "Test observability components in isolation",
+      "passed": false,
+      "priority": "medium",
+      "files": ["src/observability/logging.rs", "src/observability/profiler.rs", "src/observability/sanitizer.rs"],
+      "subtasks": [
+        "Test log level filtering",
+        "Test JSON log formatting",
+        "Test profiler phase timing",
+        "Test profiler report generation",
+        "Test sanitizer pattern matching",
+        "Test sensitive data redaction",
+        "Test network timing calculation"
+      ]
+    },
+    {
+      "id": "T16",
+      "title": "Write integration tests",
+      "description": "Test observability features end-to-end",
+      "passed": false,
+      "priority": "medium",
+      "files": ["tests/observability_integration.rs", "tests/diagnose_integration.rs"],
+      "subtasks": [
+        "Test --debug flag produces debug output",
+        "Test --log-format json produces valid JSON",
+        "Test --profile generates report",
+        "Test jarvy diagnose <tool> for known tool",
+        "Test jarvy doctor --extended dashboard",
+        "Test jarvy diagnose --export creates ZIP",
+        "Test bundle contains expected files"
+      ]
+    },
+    {
+      "id": "T17",
+      "title": "Update documentation",
+      "description": "Document all observability features",
+      "passed": false,
+      "priority": "low",
+      "files": ["docs/debugging.md", "CLAUDE.md", "README.md"],
+      "subtasks": [
+        "Create docs/debugging.md guide",
+        "Document all CLI flags",
+        "Add troubleshooting examples",
+        "Document diagnose command usage",
+        "Document bundle export for support",
+        "Update CLAUDE.md with debugging conventions",
+        "Add observability section to README"
+      ]
+    }
+  ],
+  "implementation_notes": {
+    "tracing_integration": "Use existing tracing crate, add tracing-subscriber for formatting",
+    "profiler_design": "Thread-local profiler instance, aggregate at end of operation",
+    "network_middleware": "Use tower-http or reqwest middleware for HTTP tracing",
+    "sanitizer_patterns": "Compile regex patterns once at startup for performance",
+    "bundle_format": "Standard ZIP with JSON files, text logs, no binaries",
+    "metrics_storage": "Simple JSON file, not a database - keep it lightweight",
+    "overhead_budget": "Debug mode < 10% overhead, profile mode < 5% overhead"
+  },
+  "non_goals": [
+    "Real-time monitoring dashboard",
+    "Metrics aggregation service",
+    "APM integration (future PRD)",
+    "Distributed tracing",
+    "Alerting system",
+    "Log shipping to external services"
+  ],
+  "files_to_create": [
+    "src/observability/mod.rs",
+    "src/observability/logging.rs",
+    "src/observability/profiler.rs",
+    "src/observability/network_trace.rs",
+    "src/observability/sanitizer.rs",
+    "src/observability/bundle.rs",
+    "src/commands/diagnose.rs",
+    "src/commands/network.rs",
+    "src/commands/profile.rs",
+    "src/doctor/dashboard.rs",
+    "src/doctor/metrics.rs",
+    "tests/observability_integration.rs",
+    "tests/diagnose_integration.rs",
+    "docs/debugging.md"
+  ],
+  "files_to_modify": [
+    "src/main.rs",
+    "src/commands/mod.rs",
+    "src/commands/doctor.rs",
+    "src/commands/setup.rs",
+    "Cargo.toml",
+    "CLAUDE.md",
+    "README.md"
+  ],
+  "risks": [
+    {
+      "description": "Log volume explosion in debug mode",
+      "mitigation": "Level filtering, log rotation, configurable limits"
+    },
+    {
+      "description": "Performance overhead from profiling",
+      "mitigation": "Optional feature, minimal instrumentation when disabled"
+    },
+    {
+      "description": "Sensitive data exposure in logs/bundles",
+      "mitigation": "Comprehensive sanitization, review prompts before sharing"
+    },
+    {
+      "description": "Disk space from logs and metrics",
+      "mitigation": "Rotation policies, size limits, cleanup commands"
+    },
+    {
+      "description": "Information overload for users",
+      "mitigation": "Clear formatting, summaries first, progressive disclosure"
+    }
+  ],
+  "effort_estimate": {
+    "module_structure": "0.5 days",
+    "structured_logging": "1.5 days",
+    "debug_cli_flags": "0.5 days",
+    "performance_profiler": "2 days",
+    "profiling_cli": "0.5 days",
+    "network_tracing": "2 days",
+    "network_cli": "0.5 days",
+    "data_sanitizer": "1 day",
+    "diagnose_command": "2.5 days",
+    "diagnose_fix": "1 day",
+    "doctor_dashboard": "2 days",
+    "metrics_collection": "1 day",
+    "bundle_export": "1.5 days",
+    "doctor_filtering": "0.5 days",
+    "unit_tests": "1.5 days",
+    "integration_tests": "1 day",
+    "documentation": "1 day",
+    "total": "19 days"
+  }
+}

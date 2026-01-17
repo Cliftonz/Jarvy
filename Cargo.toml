@@ -39,9 +39,10 @@ serde_yaml = "0.9"
 predicates = "3.1.0"
 tracing = "0.1.40"
 dirs = "6.0.0"
-tracing-subscriber = "0.3.18"
-opentelemetry-otlp = { version = "0.31.0", features = ["logs", "http-proto"] }
-opentelemetry_sdk = { version = "0.31.0" }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
+opentelemetry = { version = "0.31.0", features = ["metrics"] }
+opentelemetry-otlp = { version = "0.31.0", features = ["logs", "http-proto", "metrics"] }
+opentelemetry_sdk = { version = "0.31.0", features = ["metrics"] }
 opentelemetry-appender-tracing = "0.31.0"
 thiserror = "2.0.16"
 ureq = { version = "3.1.2", features = ["json"] }
@@ -55,6 +56,8 @@ wait-timeout = "0.2"
 rpassword = "7.3"
 rayon = "1.10"
 rustls = "0.23"
+zip = "2.2"
+hostname = "0.4"
 
 [dev-dependencies]
 tempfile = "3.20.0"

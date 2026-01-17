@@ -30,7 +30,7 @@ Version management is critical for stability, especially in team and CI environm
 
 1. **Rollback command**: `jarvy rollback <tool>` to previous version
 2. **Lock files**: `jarvy.lock` for exact version pinning
-3. **Environment snapshots**: Save/restore entire state
+3. **Environment snapshots**: Save/restore the entire state
 4. **Version history**: Track installed versions over time
 5. **Migration detection**: Warn about breaking changes
 6. **Version diffing**: Compare environments

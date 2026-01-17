@@ -2,19 +2,17 @@
 
 ## Overview
 
-This PRD defines the support and community infrastructure for Jarvy, including community platforms, issue templates, knowledge base, troubleshooting tools, and contributor recognition programs.
+This PRD defines the support and community infrastructure for Jarvy, including GitHub issue templates, FAQ knowledge base, and contributor recognition programs.
 
 ## Problem Statement
 
-Users have questions beyond what documentation covers, and first-party support is expensive and doesn't scale. Without proper community infrastructure, users struggle to get help, contributors lack recognition, and common problems are solved repeatedly instead of documented once.
+Users have questions beyond what documentation covers. Without proper community infrastructure, users struggle to get help, contributors lack recognition, and common problems are solved repeatedly instead of documented once.
 
 ## Evidence
 
-- Support requests come through disparate channels (GitHub issues, email, social media)
 - No standardized issue templates lead to incomplete bug reports
 - Common questions are answered repeatedly without centralized FAQ
 - Contributors have no visibility or recognition for their work
-- Troubleshooting requires manual back-and-forth to gather diagnostics
 
 ## Requirements
 
@@ -22,16 +20,12 @@ Users have questions beyond what documentation covers, and first-party support i
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-1 | Provide official community platform (Discord/Slack) | P0 |
-| FR-2 | Create comprehensive GitHub issue templates | P0 |
-| FR-3 | Build searchable FAQ knowledge base | P0 |
-| FR-4 | Implement interactive troubleshooting wizard | P1 |
-| FR-5 | Create contributor recognition program | P1 |
-| FR-6 | Automate diagnostic collection for support | P1 |
-| FR-7 | Provide community moderation tools | P2 |
-| FR-8 | Implement community metrics dashboard | P2 |
-| FR-9 | Create mentorship matching for new contributors | P2 |
-| FR-10 | Build community knowledge contribution workflow | P2 |
+| FR-1 | Create comprehensive GitHub issue templates | P0 |
+| FR-2 | Build searchable FAQ knowledge base | P0 |
+| FR-3 | Create contributor recognition program | P1 |
+| FR-4 | Implement community metrics tracking (GitHub-based) | P2 |
+| FR-5 | Create mentorship matching for new contributors | P2 |
+| FR-6 | Build community knowledge contribution workflow | P2 |
 
 ### Non-Functional Requirements
 
@@ -39,11 +33,15 @@ Users have questions beyond what documentation covers, and first-party support i
 |----|-------------|--------|
 | NFR-1 | FAQ search response time | < 200ms |
 | NFR-2 | Issue template completion rate | > 80% of required fields |
-| NFR-3 | Community response time (median) | < 24 hours |
-| NFR-4 | Knowledge base uptime | 99.9% |
+| NFR-3 | Knowledge base uptime | 99.9% |
 
 ## Non-Goals
 
+- Community platform (Discord/Slack) - separate PRD
+- Website or web-based FAQ portal - separate PRD
+- Interactive troubleshooting wizard
+- Automated diagnostic collection/upload service
+- Community moderation tools
 - Paid support tiers or SLAs
 - 24/7 staffed support channels
 - Automated AI-based issue resolution
@@ -51,49 +49,6 @@ Users have questions beyond what documentation covers, and first-party support i
 - Phone or video support
 
 ## Feature Specification
-
-### Community Platform
-
-```markdown
-# Jarvy Community - Discord Server Structure
-
-## Channels
-
-### Information
-- #welcome - Server rules and getting started
-- #announcements - Release notes, important updates
-- #faq - Frequently asked questions (read-only)
-
-### Support
-- #help-general - General questions
-- #help-installation - Installation issues
-- #help-configuration - jarvy.toml and config questions
-- #help-ci-cd - CI/CD pipeline integration
-
-### Development
-- #contributors - Contributor discussions
-- #pull-requests - PR review requests and discussions
-- #rfc-discussion - Feature proposals
-- #showcase - Share your jarvy.toml configs
-
-### Platforms
-- #macos - macOS-specific issues
-- #linux - Linux-specific issues
-- #windows - Windows-specific issues
-
-## Roles
-- @Team - Core maintainers
-- @Contributor - Merged PR authors
-- @Helper - Community helpers (active in support)
-- @Beta Tester - Early release testers
-
-## Bots
-- JarvyBot - Automated support assistant
-  - Links to relevant docs
-  - Suggests issue templates
-  - Posts release announcements
-  - Tracks community metrics
-```
 
 ### GitHub Issue Templates
 
@@ -135,7 +90,7 @@ body:
     id: diagnostic
     attributes:
       label: Diagnostic Output
-      description: Please run `jarvy diagnose --export` and paste the output
+      description: Please run `jarvy doctor` and paste the output
       render: shell
     validations:
       required: true
@@ -328,7 +283,6 @@ jarvy faq
 #
 # Search: jarvy faq search <query>
 # Browse: jarvy faq category <name>
-# Online: https://jarvy.dev/faq
 
 # Search FAQ
 jarvy faq search "github actions"
@@ -390,142 +344,6 @@ jarvy faq show ci-github-actions
 # Report issue: jarvy faq report ci-github-actions
 ```
 
-### Troubleshooting Wizard
-
-```bash
-# Interactive troubleshooting
-jarvy troubleshoot
-
-# Output:
-# Jarvy Troubleshooting Wizard
-# ═══════════════════════════════════════════════════════════════════════
-#
-# What issue are you experiencing?
-#
-#   1. Installation failed for a tool
-#   2. Jarvy command not found / won't start
-#   3. Configuration file errors
-#   4. Permission errors (sudo required)
-#   5. Network/download issues
-#   6. Tool works but wrong version
-#   7. CI/CD pipeline issues
-#   8. Other
-#
-# Select [1-8]: 1
-
-# After selection:
-# ═══════════════════════════════════════════════════════════════════════
-# Troubleshooting: Installation Failed
-# ═══════════════════════════════════════════════════════════════════════
-#
-# Which tool failed to install?
-# > rust
-#
-# Running diagnostics...
-#
-# ✓ Checking system compatibility... OK
-# ✓ Checking package manager... Homebrew 4.2.0
-# ✓ Checking network connectivity... OK
-# ✗ Checking rustup installation... FAILED
-#
-# Issue Identified:
-# ────────────────────────────────────────────────────────────────────────
-# rustup is already installed but managed outside Jarvy. This can cause
-# conflicts.
-#
-# Recommended Solutions:
-#
-# 1. Let Jarvy manage Rust (recommended):
-#    $ rustup self uninstall
-#    $ jarvy setup rust
-#
-# 2. Skip Rust in Jarvy (use existing):
-#    # Add to jarvy.toml:
-#    [tools.rust]
-#    skip = true
-#
-# 3. Force reinstall through Jarvy:
-#    $ jarvy setup rust --force
-#
-# Would you like to try solution 1? [y/n]
-
-# Specific tool troubleshooting
-jarvy troubleshoot rust
-
-# Network troubleshooting
-jarvy troubleshoot --network
-
-# Output:
-# Network Diagnostics
-# ═══════════════════════════════════════════════════════════════════════
-#
-# Testing connectivity to common download sources...
-#
-#   Source                    Status    Latency
-#   ───────────────────────────────────────────
-#   github.com                ✓ OK      45ms
-#   raw.githubusercontent.com ✓ OK      52ms
-#   homebrew.bintray.com      ✓ OK      78ms
-#   rustup.rs                 ✓ OK      112ms
-#   nodejs.org                ✗ SLOW    2340ms
-#
-# Warning: nodejs.org is responding slowly.
-#
-# Recommendations:
-#   • Use a Node mirror: jarvy config set mirrors.node "https://npmmirror.com"
-#   • Check if your network blocks certain domains
-#   • Try using a VPN if you're behind a restrictive firewall
-```
-
-### Automatic Diagnostic Collection
-
-```bash
-# Generate diagnostic bundle for support
-jarvy diagnose --export
-
-# Output:
-# Generating diagnostic bundle...
-#
-# Collected:
-#   ✓ System information
-#   ✓ Jarvy version and configuration
-#   ✓ Installed tools and versions
-#   ✓ Recent error logs
-#   ✓ Network connectivity tests
-#   ✓ Package manager status
-#
-# Sensitive data removed:
-#   ✗ API keys and tokens
-#   ✗ Private paths sanitized
-#   ✗ Environment variables filtered
-#
-# Bundle created: jarvy-diagnostic-2024-01-15-143052.json
-#
-# Share options:
-#   1. Copy to clipboard: jarvy diagnose --export --clipboard
-#   2. Upload to Jarvy (expires in 7 days): jarvy diagnose --export --upload
-#   3. Attach to GitHub issue manually
-
-# Upload for easy sharing
-jarvy diagnose --export --upload
-
-# Output:
-# Uploading diagnostic bundle...
-#
-# ✓ Uploaded successfully
-#
-# Share this link in your support request:
-#   https://diag.jarvy.dev/d/abc123xyz
-#
-# This link expires in 7 days and contains:
-#   • System: macOS 14.2 (arm64)
-#   • Jarvy: 0.1.0
-#   • Tools: 12 installed, 2 failed
-#   • Errors: 3 recent errors captured
-#
-# No sensitive information is included.
-```
-
 ### Contributor Recognition
 
 ```bash
@@ -555,7 +373,7 @@ jarvy contributors
 #   @newcontrib2    Fixed Windows installation bug
 #   @newcontrib3    Improved documentation
 #
-# Become a contributor: https://jarvy.dev/contributing
+# Become a contributor: https://github.com/jarvy-dev/jarvy/blob/main/CONTRIBUTING.md
 ```
 
 ### Contributor Recognition Program
@@ -584,14 +402,13 @@ Awarded for 25+ merged pull requests.
 Awarded for improving test coverage significantly.
 
 ### 💬 Community Helper
-Awarded for helping 50+ community members.
+Awarded for helping 50+ community members in GitHub Discussions.
 
 ## Monthly Recognition
 
-Each month, we highlight:
+Each month, we highlight in the README:
 - **Contributor of the Month**: Most impactful contributions
 - **Rising Star**: Best new contributor
-- **Helper of the Month**: Most helpful community member
 
 ## Recognition in CLI
 
@@ -610,24 +427,16 @@ All contributors are listed in CONTRIBUTORS.md with:
 - Contribution summary
 - Badges earned
 - Join date
-
-## Swag Program (Future)
-
-Top contributors may receive:
-- Jarvy stickers
-- T-shirts
-- Conference tickets
-- Exclusive beta access
 ```
 
-### Community Metrics Dashboard
+### GitHub-Based Community Metrics
 
 ```bash
 # Community health metrics (maintainer tool)
 jarvy community stats
 
 # Output:
-# Jarvy Community Metrics
+# Jarvy Community Metrics (from GitHub)
 # ═══════════════════════════════════════════════════════════════════════
 #
 # GitHub (Last 30 days)
@@ -639,18 +448,10 @@ jarvy community stats
 #   Avg time to first response: 4.2 hours
 #   Avg time to close:     2.3 days
 #
-# Discord (Last 30 days)
+# GitHub Discussions (Last 30 days)
 # ────────────────────────────────────────────────────────────────────────
-#   New members:           234
-#   Active members:        456
-#   Messages:              1,892
-#   Questions answered:    167  (89% resolution rate)
-#
-# Downloads
-# ────────────────────────────────────────────────────────────────────────
-#   This month:            12,456
-#   Total:                 89,234
-#   Growth:                +23% MoM
+#   Questions asked:       34
+#   Questions answered:    31  (91% answer rate)
 #
 # Top Contributors This Month
 # ────────────────────────────────────────────────────────────────────────
@@ -669,47 +470,31 @@ show_credits = true
 
 # Check for FAQ matches on errors
 faq_suggestions = true
-
-# Opt-in to anonymous usage statistics
-anonymous_stats = false
 ```
 
 ## Acceptance Criteria
 
-### AC-1: Community Platform
-- [ ] Discord server is set up with proper channel structure
-- [ ] Moderation tools and bots are configured
-- [ ] Welcome flow introduces new members to resources
-- [ ] Cross-posting from GitHub releases to announcements
-
-### AC-2: Issue Templates
-- [ ] Bug report template captures diagnostic info
+### AC-1: Issue Templates
+- [ ] Bug report template captures diagnostic info via `jarvy doctor` output
 - [ ] Feature request template is structured and complete
 - [ ] Tool request template exists with clear requirements
 - [ ] Templates guide users to provide necessary information
 
-### AC-3: FAQ Knowledge Base
+### AC-2: FAQ Knowledge Base
 - [ ] `jarvy faq` command provides searchable FAQ
 - [ ] Common issues have documented solutions
 - [ ] FAQ is updated based on support trends
-- [ ] Online version mirrors CLI content
+- [ ] Embedded FAQ data compiled into binary
 
-### AC-4: Troubleshooting Wizard
-- [ ] Interactive troubleshooting guides users through diagnosis
-- [ ] Common issues have automated detection and solutions
-- [ ] Diagnostic export sanitizes sensitive data
-- [ ] Upload feature creates shareable links
-
-### AC-5: Contributor Recognition
-- [ ] CONTRIBUTORS.md is automatically maintained
-- [ ] CLI shows contributor credits for tools
+### AC-3: Contributor Recognition
+- [ ] CONTRIBUTORS.md is automatically maintained via GitHub Actions
+- [ ] CLI shows contributor credits for tools (`jarvy info <tool>`)
 - [ ] Badge system tracks contribution milestones
-- [ ] Monthly recognition is published
+- [ ] Monthly recognition is published in releases
 
-### AC-6: Community Metrics
-- [ ] Maintainers can view community health metrics
+### AC-4: Community Metrics
+- [ ] Maintainers can view GitHub-based community health metrics
 - [ ] Issue response times are tracked
-- [ ] Download and usage trends are visible
 - [ ] Metrics inform prioritization decisions
 
 ## Technical Approach
@@ -721,13 +506,9 @@ src/
 ├── community/
 │   ├── mod.rs              # Module exports
 │   ├── faq.rs              # FAQ search and display
-│   ├── troubleshoot.rs     # Troubleshooting wizard
-│   ├── diagnose.rs         # Diagnostic collection
 │   └── contributors.rs     # Contributor display
 ├── commands/
 │   ├── faq.rs              # `jarvy faq` command
-│   ├── troubleshoot.rs     # `jarvy troubleshoot` command
-│   ├── diagnose.rs         # `jarvy diagnose` command
 │   └── contributors.rs     # `jarvy contributors` command
 
 .github/
@@ -738,21 +519,22 @@ src/
 │   └── config.yml
 ├── DISCUSSION_TEMPLATE/
 │   └── q-and-a.yml
+├── workflows/
+│   └── contributors.yml    # Auto-update CONTRIBUTORS.md
 ├── CONTRIBUTING.md
 ├── CODE_OF_CONDUCT.md
 └── SUPPORT.md
 
 docs/
-├── faq/
-│   ├── index.md
-│   ├── installation.md
-│   ├── configuration.md
-│   ├── troubleshooting.md
-│   └── ci-cd.md
-└── community/
-    ├── contributing.md
-    ├── recognition.md
-    └── code-of-conduct.md
+└── faq/
+    ├── index.md
+    ├── installation.md
+    ├── configuration.md
+    ├── troubleshooting.md
+    └── ci-cd.md
+
+data/
+└── faq.json                # Embedded FAQ database
 ```
 
 ### FAQ System Implementation
@@ -787,7 +569,7 @@ pub struct FaqSearch {
 
 impl FaqSearch {
     pub fn new() -> Result<Self, FaqError> {
-        // Load embedded FAQ database or fetch from remote
+        // Load embedded FAQ database
         let db = Self::load_database()?;
         Ok(Self { db })
     }
@@ -836,171 +618,62 @@ impl FaqSearch {
 }
 ```
 
-### Troubleshooting Wizard
+### Contributors Display
 
 ```rust
-// src/community/troubleshoot.rs
+// src/community/contributors.rs
 
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
-pub struct TroubleshootWizard {
-    issues: Vec<IssueCategory>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Contributor {
+    pub username: String,
+    pub name: Option<String>,
+    pub role: ContributorRole,
+    pub prs_merged: u32,
+    pub issues_opened: u32,
+    pub reviews: u32,
+    pub tools_added: Vec<String>,
+    pub badges: Vec<String>,
+    pub joined: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct IssueCategory {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-    pub diagnostic_steps: Vec<DiagnosticStep>,
-    pub solutions: Vec<Solution>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ContributorRole {
+    CoreTeam,
+    Contributor,
+    FirstTimeContributor,
 }
 
-#[derive(Debug, Clone)]
-pub struct DiagnosticStep {
-    pub name: String,
-    pub check: Box<dyn Fn() -> DiagnosticResult + Send + Sync>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContributorsDatabase {
+    pub core_team: Vec<Contributor>,
+    pub contributors: Vec<Contributor>,
+    pub last_updated: String,
 }
 
-#[derive(Debug, Clone)]
-pub enum DiagnosticResult {
-    Pass,
-    Fail(String),
-    Warning(String),
-}
-
-#[derive(Debug, Clone)]
-pub struct Solution {
-    pub title: String,
-    pub description: String,
-    pub commands: Vec<String>,
-    pub automatic: bool,
-}
-
-impl TroubleshootWizard {
-    pub fn new() -> Self {
-        Self {
-            issues: Self::build_issue_catalog(),
-        }
+impl ContributorsDatabase {
+    pub fn load() -> Result<Self, ContributorsError> {
+        let data = include_str!("../../data/contributors.json");
+        serde_json::from_str(data).map_err(ContributorsError::Parse)
     }
 
-    fn build_issue_catalog() -> Vec<IssueCategory> {
-        vec![
-            IssueCategory {
-                id: "install-failed".into(),
-                name: "Installation failed for a tool".into(),
-                description: "A tool failed to install during jarvy setup".into(),
-                diagnostic_steps: vec![
-                    DiagnosticStep {
-                        name: "Check system compatibility".into(),
-                        check: Box::new(|| {
-                            // Check OS, architecture
-                            DiagnosticResult::Pass
-                        }),
-                    },
-                    DiagnosticStep {
-                        name: "Check package manager".into(),
-                        check: Box::new(|| {
-                            // Check brew/apt/winget availability
-                            DiagnosticResult::Pass
-                        }),
-                    },
-                ],
-                solutions: vec![
-                    Solution {
-                        title: "Reinstall with verbose output".into(),
-                        description: "Run setup with debug logging".into(),
-                        commands: vec!["jarvy setup --verbose".into()],
-                        automatic: false,
-                    },
-                ],
-            },
-            // More categories...
-        ]
+    pub fn top_contributors(&self, limit: usize) -> Vec<&Contributor> {
+        let mut sorted: Vec<_> = self.contributors.iter().collect();
+        sorted.sort_by(|a, b| b.prs_merged.cmp(&a.prs_merged));
+        sorted.into_iter().take(limit).collect()
     }
 
-    pub fn run_interactive(&self) -> Result<(), TroubleshootError> {
-        // Interactive menu-driven troubleshooting
-        todo!()
+    pub fn recent_contributors(&self, days: u32) -> Vec<&Contributor> {
+        // Filter by join date within last N days
+        self.contributors.iter()
+            .filter(|c| Self::within_days(&c.joined, days))
+            .collect()
     }
 
-    pub fn diagnose_tool(&self, tool: &str) -> DiagnosticReport {
-        // Run all diagnostics for a specific tool
-        todo!()
-    }
-}
-```
-
-### Diagnostic Export
-
-```rust
-// src/community/diagnose.rs
-
-use serde::Serialize;
-use std::collections::HashMap;
-
-#[derive(Debug, Serialize)]
-pub struct DiagnosticBundle {
-    pub generated_at: String,
-    pub jarvy_version: String,
-    pub system: SystemInfo,
-    pub config: SanitizedConfig,
-    pub tools: Vec<ToolStatus>,
-    pub errors: Vec<ErrorLog>,
-    pub network: NetworkDiagnostics,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SystemInfo {
-    pub os: String,
-    pub os_version: String,
-    pub arch: String,
-    pub shell: String,
-    pub package_managers: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SanitizedConfig {
-    pub tools: Vec<String>,
-    pub hooks_count: usize,
-    pub settings: HashMap<String, String>,
-}
-
-impl DiagnosticBundle {
-    pub fn collect() -> Result<Self, DiagnosticError> {
-        Ok(Self {
-            generated_at: chrono::Utc::now().to_rfc3339(),
-            jarvy_version: env!("CARGO_PKG_VERSION").to_string(),
-            system: SystemInfo::collect()?,
-            config: SanitizedConfig::from_config()?,
-            tools: ToolStatus::collect_all()?,
-            errors: ErrorLog::recent(50)?,
-            network: NetworkDiagnostics::run()?,
-        })
-    }
-
-    pub fn to_json(&self) -> Result<String, DiagnosticError> {
-        serde_json::to_string_pretty(self).map_err(DiagnosticError::Serialize)
-    }
-
-    pub fn to_clipboard(&self) -> Result<(), DiagnosticError> {
-        let json = self.to_json()?;
-        // Use clipboard crate
-        todo!()
-    }
-
-    pub async fn upload(&self) -> Result<String, DiagnosticError> {
-        let json = self.to_json()?;
-        // Upload to diagnostic service
-        // Return URL
-        todo!()
-    }
-
-    fn sanitize_path(path: &str) -> String {
-        // Replace home directory with ~
-        // Remove usernames from paths
-        // Redact any API keys or tokens
-        path.replace(dirs::home_dir().unwrap().to_str().unwrap(), "~")
+    fn within_days(date_str: &str, days: u32) -> bool {
+        // Parse date and check if within range
+        true // Simplified
     }
 }
 ```
@@ -1010,97 +683,93 @@ impl DiagnosticBundle {
 ### Phase 1: Foundation (Week 1-2)
 1. Create GitHub issue templates
 2. Set up CONTRIBUTING.md and CODE_OF_CONDUCT.md
-3. Create initial FAQ content structure
-4. Implement basic `jarvy faq` command
+3. Create SUPPORT.md with guidance
+4. Set up GitHub Discussions
 
-### Phase 2: Community Platform (Week 3-4)
-5. Set up Discord server with channel structure
-6. Configure moderation bots and automation
-7. Create welcome flow and documentation
-8. Integrate GitHub notifications
+### Phase 2: FAQ System (Week 3-4)
+5. Create FAQ content structure in docs/faq/
+6. Build faq.json database format
+7. Implement `jarvy faq` command
+8. Add FAQ search functionality
+9. Integrate FAQ suggestions on errors
 
-### Phase 3: Troubleshooting (Week 5-6)
-9. Implement troubleshooting wizard
-10. Create diagnostic collection
-11. Build upload service for diagnostic sharing
-12. Add error-to-FAQ suggestions
+### Phase 3: Recognition (Week 5-6)
+10. Create CONTRIBUTORS.md template
+11. Build GitHub Action to auto-update contributors
+12. Implement `jarvy contributors` command
+13. Add contributor credits to `jarvy info <tool>`
+14. Define badge criteria and tracking
 
-### Phase 4: Recognition & Metrics (Week 7-8)
-13. Implement contributor tracking
-14. Create CONTRIBUTORS.md automation
-15. Add `jarvy contributors` command
-16. Build community metrics dashboard
-17. Write documentation
-18. Launch contributor recognition program
+### Phase 4: Metrics & Polish (Week 7)
+15. Implement `jarvy community stats` (GitHub API)
+16. Write documentation
+17. Test and polish
 
 ## Dependencies
 
-- **Internal**: Config system, error handling, telemetry
-- **PRD-027**: Diagnostic output integration
-- **External**: Discord bot framework, GitHub Actions for automation
+- **Internal**: Config system, output formatting
+- **PRD-016**: Commands infrastructure (doctor for diagnostics)
+- **External**: GitHub Actions for automation
 
 ## Effort Estimate
 
 | Phase | Tasks | Days |
 |-------|-------|------|
-| Design | Community structure, FAQ content | 2 |
+| Design | FAQ content structure | 1 |
 | Issue Templates | Bug, feature, tool templates | 2 |
-| FAQ System | Database, search, CLI | 4 |
-| Troubleshooting | Wizard, diagnostics, upload | 5 |
-| Discord Setup | Channels, bots, automation | 3 |
-| Recognition | Contributor tracking, badges | 3 |
-| Documentation | Guides, onboarding, policies | 3 |
-| Testing | End-to-end, community testing | 2 |
-| **Total** | | **24 days** |
+| GitHub Setup | Discussions, CONTRIBUTING, SUPPORT | 1 |
+| FAQ System | Database, search, CLI command | 4 |
+| Recognition | Contributors tracking, badges | 3 |
+| Metrics | GitHub-based stats command | 2 |
+| Documentation | Guides, policies | 2 |
+| Testing | End-to-end testing | 1 |
+| **Total** | | **16 days** |
 
 ## Files to Create/Modify
 
 ### New Files
 - `src/community/mod.rs`
 - `src/community/faq.rs`
-- `src/community/troubleshoot.rs`
-- `src/community/diagnose.rs`
 - `src/community/contributors.rs`
 - `src/commands/faq.rs`
-- `src/commands/troubleshoot.rs`
-- `src/commands/diagnose.rs`
 - `src/commands/contributors.rs`
 - `src/data/faq.json`
+- `src/data/contributors.json`
 - `.github/ISSUE_TEMPLATE/bug_report.yml`
 - `.github/ISSUE_TEMPLATE/feature_request.yml`
 - `.github/ISSUE_TEMPLATE/tool_request.yml`
+- `.github/ISSUE_TEMPLATE/config.yml`
+- `.github/DISCUSSION_TEMPLATE/q-and-a.yml`
+- `.github/workflows/contributors.yml`
 - `.github/CONTRIBUTING.md`
 - `.github/CODE_OF_CONDUCT.md`
 - `.github/SUPPORT.md`
-- `docs/community/`
+- `docs/faq/`
 - `CONTRIBUTORS.md`
 
 ### Modified Files
 - `src/main.rs` - Add new commands
-- `Cargo.toml` - Add dependencies
+- `src/commands/mod.rs` - Export new commands
+- `Cargo.toml` - Add dependencies if needed
 - `README.md` - Add community links
 
 ## Success Metrics
 
 | Metric | Target | Measurement |
 |--------|--------|-------------|
-| Issue template completion | > 80% | Track required fields |
-| FAQ search relevance | > 70% satisfaction | User feedback |
-| Troubleshoot resolution rate | > 60% | Track wizard completions |
-| Community response time | < 24 hours median | Discord/GitHub metrics |
+| Issue template completion | > 80% | Track required fields filled |
+| FAQ search relevance | > 70% satisfaction | User feedback via CLI |
+| Community response time | < 24 hours median | GitHub metrics |
 | Contributor retention | 40% return contributors | Track repeat contributions |
-| Support volume reduction | 20% fewer basic questions | Compare before/after |
 
 ## Risks
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
-| Low community adoption | Medium | Medium | Promote in docs, social |
-| Moderation burden | Medium | Low | Bot automation, clear rules |
-| FAQ staleness | Medium | Medium | Scheduled review process |
-| Diagnostic data privacy | Low | High | Strict sanitization, opt-in upload |
+| Low FAQ usage | Medium | Medium | Integrate suggestions on errors |
+| FAQ staleness | Medium | Medium | Scheduled review process, version in data |
 | Recognition gaming | Low | Low | Manual review for badges |
 
 ---
 
-*PRD-032 v1.0 | Support & Community Infrastructure | Priority: Low*
+*PRD-032 v2.0 | Support & Community Infrastructure | Priority: Low*

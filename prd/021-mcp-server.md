@@ -30,7 +30,7 @@ Jarvy already solves cross-platform tool installation. Exposing it via MCP creat
 - Automatic/unattended installations (always require confirmation)
 - Managing tool configurations beyond default hooks
 - Version pinning or rollback capabilities (v1)
-- Installing tools not in Jarvy's registry
+- Installing tools not in Jarvy's registry though they should still send otel events that it was attempted
 
 ## Target MCP Clients
 

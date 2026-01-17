@@ -7,7 +7,7 @@ Add interactive onboarding experiences and educational features that help new us
 ## Problem Statement
 
 Jarvy currently focuses on technical functionality, but lacks guided experiences for first-time users:
-- No interactive tutorial or quickstart experience
+- No interactive quickstart experience
 - New users must read documentation to understand basic concepts
 - No sample configurations for common development stacks
 - No in-CLI help for explaining concepts
@@ -31,13 +31,12 @@ Users who discover Jarvy need a smooth path from "what is this?" to "I'm using t
 2. **`jarvy quickstart`**: Guided first-run experience
 3. **`jarvy explain <concept>`**: Inline help for concepts
 4. **`jarvy templates`**: Browse and use stack templates
-5. **`jarvy tutorial`**: Step-by-step interactive tutorial
-6. **First-run detection**: Automatic guidance for new users
+5. **First-run detection**: Automatic guidance for new users
 
 ### Non-Functional Requirements
 
 1. Interactive prompts work in all terminals (fallback for non-TTY)
-2. Tutorials complete in < 5 minutes
+2. Quickstart completes in < 3 minutes
 3. Templates cover 80% of common development stacks
 4. All text is clear, jargon-free, and actionable
 5. Works offline after initial template download
@@ -93,7 +92,6 @@ jarvy init
 # Next steps:
 #   1. Review your config: cat jarvy.toml
 #   2. Install tools: jarvy setup
-#   3. Check status: jarvy doctor
 
 # Non-interactive mode for CI
 jarvy init --template react --non-interactive
@@ -163,7 +161,6 @@ jarvy quickstart
 # 🎉 You're all set!
 #
 # Useful commands:
-#   jarvy doctor    - Check environment health
 #   jarvy search    - Find available tools
 #   jarvy upgrade   - Update all tools
 #   jarvy --help    - See all commands
@@ -226,7 +223,6 @@ jarvy explain --list
 #
 # Commands:
 #   setup         - Installing tools
-#   doctor        - Environment diagnostics
 #   diff          - Preview changes
 #
 # Concepts:
@@ -264,12 +260,15 @@ jarvy templates
 #   react           React + Node.js + common tools (12 tools)
 #   vue             Vue.js development stack (10 tools)
 #   nextjs          Next.js full-stack template (14 tools)
+#   angular         Angular development environment (11 tools)
+#   svelte          Svelte/SvelteKit stack (10 tools)
 #
 # Backend:
 #   node-api        Node.js API development (8 tools)
 #   go-api          Go backend development (9 tools)
 #   rust-cli        Rust CLI development (7 tools)
 #   python-api      Python/FastAPI development (11 tools)
+#   java-spring     Java Spring Boot development (10 tools)
 #
 # Data & ML:
 #   python-ml       Python ML/Data Science (15 tools)
@@ -279,9 +278,15 @@ jarvy templates
 #   k8s-admin       Kubernetes administration (12 tools)
 #   terraform       Infrastructure as Code (9 tools)
 #   docker-dev      Docker development (6 tools)
+#   cicd            CI/CD pipeline tools (8 tools)
+#
+# Mobile:
+#   flutter         Flutter cross-platform development (9 tools)
+#   react-native    React Native mobile development (11 tools)
 #
 # Minimal:
 #   essential       Git + editor + shell tools (5 tools)
+#   shell-power     Power shell user toolkit (8 tools)
 #
 # Use: jarvy templates use <name>
 
@@ -292,7 +297,8 @@ jarvy templates show react
 # Template: react
 # ===============
 #
-# Description: Complete React development environment
+# Description: Complete React development environment with modern
+#              tooling for building production-ready web applications.
 #
 # Tools included:
 #   • node (20)        - JavaScript runtime
@@ -347,107 +353,13 @@ jarvy templates use react --setup
 - Version-pinned for stability
 - Community-contributed templates (future)
 
-### 5. `jarvy tutorial`
-
-Interactive step-by-step tutorial.
-
-```bash
-jarvy tutorial
-
-# Output:
-# ╔═══════════════════════════════════════════════════════════╗
-# ║                   Jarvy Tutorial                           ║
-# ║              Learn by doing (5 minutes)                    ║
-# ╚═══════════════════════════════════════════════════════════╝
-#
-# This tutorial will teach you:
-#   1. Creating a jarvy.toml config file
-#   2. Installing tools with jarvy setup
-#   3. Checking your environment with jarvy doctor
-#   4. Keeping tools updated
-#
-# ? Ready to start? (Y/n)
-#
-# ───────────────────────────────────────────────────────────
-# Lesson 1: Your First Config
-# ───────────────────────────────────────────────────────────
-#
-# A jarvy.toml file describes the tools your project needs.
-# Here's a simple example:
-#
-#   [tools]
-#   git = "latest"
-#   jq = "latest"
-#
-# Let's create one together.
-#
-# ? Create a temporary jarvy.toml for this tutorial? (Y/n)
-#
-# ✓ Created tutorial-jarvy.toml
-#
-# [Content of file shown]
-#
-# Press Enter to continue...
-#
-# ───────────────────────────────────────────────────────────
-# Lesson 2: Installing Tools
-# ───────────────────────────────────────────────────────────
-#
-# Run `jarvy setup` to install all tools in your config.
-# For this tutorial, we'll do a dry run (no changes).
-#
-# Running: jarvy diff --config tutorial-jarvy.toml
-#
-# [Output shown]
-#
-# The diff command shows what WOULD happen.
-# In real use, `jarvy setup` installs everything.
-#
-# Press Enter to continue...
-#
-# [Lessons 3-4 continue similarly]
-#
-# ───────────────────────────────────────────────────────────
-# Tutorial Complete! 🎉
-# ───────────────────────────────────────────────────────────
-#
-# You've learned the basics of Jarvy:
-#   ✓ Creating jarvy.toml configs
-#   ✓ Installing tools with setup
-#   ✓ Checking health with doctor
-#   ✓ Previewing changes with diff
-#
-# Next steps:
-#   • Create a real config: jarvy init
-#   • Explore templates: jarvy templates
-#   • Get help: jarvy explain <topic>
-#
-# Tutorial files cleaned up.
-
-# Resume from specific lesson
-jarvy tutorial --lesson 3
-
-# Skip to specific topic
-jarvy tutorial --topic hooks
-
-# List tutorial topics
-jarvy tutorial --list
-```
-
-**Tutorial features:**
-- Hands-on, interactive lessons
-- Safe sandbox (no real changes)
-- Progress saving (resume later)
-- Skip to specific topics
-- Clean up after completion
-
-### 6. First-Run Detection
+### 5. First-Run Detection
 
 Automatic guidance for new users.
 
 ```bash
 # When jarvy is run for the first time (any command)
-jarvy doctor
+jarvy setup
 
 # Output (first time only):
 # ╭──────────────────────────────────────────────────────────╮
@@ -457,13 +369,13 @@ jarvy doctor
 # │                                                           │
 # │ Quick options:                                            │
 # │   jarvy quickstart  - Guided setup (recommended)         │
-# │   jarvy tutorial    - Learn the basics                   │
 # │   jarvy init        - Create a config file               │
+# │   jarvy templates   - Browse starter templates           │
 # │                                                           │
 # │ To skip this message: jarvy config set show_welcome false │
 # ╰──────────────────────────────────────────────────────────╯
 #
-# [Normal jarvy doctor output follows]
+# [Normal command output follows]
 ```
 
 **First-run features:**
@@ -472,6 +384,362 @@ jarvy doctor
 - Quick action suggestions
 - Dismissible permanently
 - Respects `--quiet` flag
+- Does not show in CI environments
+
+## Template Specifications
+
+### Template: react
+
+**Description:** Complete React development environment with modern tooling for building production-ready web applications.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| node | 20 | JavaScript runtime |
+| git | latest | Version control |
+| docker | latest | Containerization |
+| jq | latest | JSON processing |
+| ripgrep | latest | Fast code search |
+| fd | latest | Fast file finder |
+| bat | latest | Syntax-highlighted cat |
+| eza | latest | Modern ls replacement |
+| fzf | latest | Fuzzy finder |
+| starship | latest | Cross-shell prompt |
+| gh | latest | GitHub CLI |
+| httpie | latest | HTTP client |
+
+### Template: vue
+
+**Description:** Vue.js development stack with Vite tooling and essential developer utilities.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| node | 20 | JavaScript runtime |
+| git | latest | Version control |
+| docker | latest | Containerization |
+| jq | latest | JSON processing |
+| ripgrep | latest | Fast code search |
+| fd | latest | Fast file finder |
+| bat | latest | Syntax-highlighted cat |
+| fzf | latest | Fuzzy finder |
+| gh | latest | GitHub CLI |
+| httpie | latest | HTTP client |
+
+### Template: nextjs
+
+**Description:** Next.js full-stack template with React, API routes support, and deployment tooling.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| node | 20 | JavaScript runtime |
+| git | latest | Version control |
+| docker | latest | Containerization |
+| jq | latest | JSON processing |
+| ripgrep | latest | Fast code search |
+| fd | latest | Fast file finder |
+| bat | latest | Syntax-highlighted cat |
+| eza | latest | Modern ls replacement |
+| fzf | latest | Fuzzy finder |
+| starship | latest | Cross-shell prompt |
+| gh | latest | GitHub CLI |
+| httpie | latest | HTTP client |
+| vercel | latest | Vercel CLI |
+| aws | latest | AWS CLI |
+
+### Template: angular
+
+**Description:** Angular development environment with TypeScript tooling and testing utilities.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| node | 20 | JavaScript runtime |
+| git | latest | Version control |
+| docker | latest | Containerization |
+| jq | latest | JSON processing |
+| ripgrep | latest | Fast code search |
+| fd | latest | Fast file finder |
+| bat | latest | Syntax-highlighted cat |
+| fzf | latest | Fuzzy finder |
+| gh | latest | GitHub CLI |
+| httpie | latest | HTTP client |
+| chromium | latest | Browser testing |
+
+### Template: svelte
+
+**Description:** Svelte/SvelteKit stack with Vite, modern tooling, and optimal DX.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| node | 20 | JavaScript runtime |
+| git | latest | Version control |
+| docker | latest | Containerization |
+| jq | latest | JSON processing |
+| ripgrep | latest | Fast code search |
+| fd | latest | Fast file finder |
+| bat | latest | Syntax-highlighted cat |
+| fzf | latest | Fuzzy finder |
+| gh | latest | GitHub CLI |
+| httpie | latest | HTTP client |
+
+### Template: node-api
+
+**Description:** Node.js API development with Express/Fastify patterns and testing tools.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| node | 20 | JavaScript runtime |
+| git | latest | Version control |
+| docker | latest | Containerization |
+| jq | latest | JSON processing |
+| ripgrep | latest | Fast code search |
+| httpie | latest | HTTP client |
+| gh | latest | GitHub CLI |
+| redis | latest | Redis CLI |
+
+### Template: go-api
+
+**Description:** Go backend development with common CLI tools and testing utilities.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| go | latest | Go runtime |
+| git | latest | Version control |
+| docker | latest | Containerization |
+| jq | latest | JSON processing |
+| ripgrep | latest | Fast code search |
+| fd | latest | Fast file finder |
+| httpie | latest | HTTP client |
+| gh | latest | GitHub CLI |
+| golangci-lint | latest | Go linter |
+
+### Template: rust-cli
+
+**Description:** Rust CLI development with cargo extensions and debugging tools.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| rust | latest | Rust toolchain |
+| git | latest | Version control |
+| docker | latest | Containerization |
+| jq | latest | JSON processing |
+| ripgrep | latest | Fast code search |
+| fd | latest | Fast file finder |
+| gh | latest | GitHub CLI |
+
+### Template: python-api
+
+**Description:** Python/FastAPI development with virtual environment and testing tools.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| python | 3.12 | Python runtime |
+| git | latest | Version control |
+| docker | latest | Containerization |
+| jq | latest | JSON processing |
+| ripgrep | latest | Fast code search |
+| fd | latest | Fast file finder |
+| httpie | latest | HTTP client |
+| gh | latest | GitHub CLI |
+| redis | latest | Redis CLI |
+| postgresql | latest | PostgreSQL client |
+| uv | latest | Fast Python package installer |
+
+### Template: java-spring
+
+**Description:** Java Spring Boot development with Maven/Gradle and debugging tools.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| java | 21 | Java runtime |
+| maven | latest | Maven build tool |
+| git | latest | Version control |
+| docker | latest | Containerization |
+| jq | latest | JSON processing |
+| ripgrep | latest | Fast code search |
+| httpie | latest | HTTP client |
+| gh | latest | GitHub CLI |
+| redis | latest | Redis CLI |
+| postgresql | latest | PostgreSQL client |
+
+### Template: python-ml
+
+**Description:** Python ML/Data Science with Jupyter, scientific computing, and visualization tools.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| python | 3.12 | Python runtime |
+| git | latest | Version control |
+| docker | latest | Containerization |
+| jq | latest | JSON processing |
+| ripgrep | latest | Fast code search |
+| fd | latest | Fast file finder |
+| gh | latest | GitHub CLI |
+| aws | latest | AWS CLI |
+| postgresql | latest | PostgreSQL client |
+| duckdb | latest | Analytical database |
+| uv | latest | Fast Python package installer |
+| bat | latest | Syntax-highlighted cat |
+| fzf | latest | Fuzzy finder |
+| httpie | latest | HTTP client |
+| sqlite | latest | SQLite CLI |
+
+### Template: jupyter
+
+**Description:** Jupyter notebook environment with essential data tools.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| python | 3.12 | Python runtime |
+| git | latest | Version control |
+| docker | latest | Containerization |
+| jq | latest | JSON processing |
+| gh | latest | GitHub CLI |
+| duckdb | latest | Analytical database |
+| uv | latest | Fast Python package installer |
+| sqlite | latest | SQLite CLI |
+
+### Template: k8s-admin
+
+**Description:** Kubernetes administration with cluster management and debugging tools.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| kubectl | latest | Kubernetes CLI |
+| helm | latest | Kubernetes package manager |
+| git | latest | Version control |
+| docker | latest | Containerization |
+| jq | latest | JSON processing |
+| ripgrep | latest | Fast code search |
+| k9s | latest | Kubernetes TUI |
+| stern | latest | Multi-pod log tailing |
+| kubectx | latest | Context switching |
+| gh | latest | GitHub CLI |
+| aws | latest | AWS CLI |
+| yq | latest | YAML processor |
+
+### Template: terraform
+
+**Description:** Infrastructure as Code with Terraform, cloud CLIs, and validation tools.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| terraform | latest | Infrastructure as Code |
+| git | latest | Version control |
+| jq | latest | JSON processing |
+| ripgrep | latest | Fast code search |
+| gh | latest | GitHub CLI |
+| aws | latest | AWS CLI |
+| yq | latest | YAML processor |
+| tflint | latest | Terraform linter |
+| terragrunt | latest | Terraform wrapper |
+
+### Template: docker-dev
+
+**Description:** Docker development with compose and container debugging tools.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| docker | latest | Containerization |
+| git | latest | Version control |
+| jq | latest | JSON processing |
+| ripgrep | latest | Fast code search |
+| dive | latest | Docker image analyzer |
+| lazydocker | latest | Docker TUI |
+
+### Template: cicd
+
+**Description:** CI/CD pipeline tools for building and deploying applications.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| git | latest | Version control |
+| docker | latest | Containerization |
+| gh | latest | GitHub CLI |
+| jq | latest | JSON processing |
+| yq | latest | YAML processor |
+| act | latest | Run GitHub Actions locally |
+| aws | latest | AWS CLI |
+| trivy | latest | Security scanner |
+
+### Template: flutter
+
+**Description:** Flutter cross-platform development with mobile tooling.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| flutter | latest | Flutter SDK |
+| git | latest | Version control |
+| docker | latest | Containerization |
+| jq | latest | JSON processing |
+| ripgrep | latest | Fast code search |
+| fd | latest | Fast file finder |
+| gh | latest | GitHub CLI |
+| android-studio | latest | Android development |
+| cocoapods | latest | iOS dependency manager |
+
+### Template: react-native
+
+**Description:** React Native mobile development with iOS/Android tooling.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| node | 20 | JavaScript runtime |
+| git | latest | Version control |
+| docker | latest | Containerization |
+| jq | latest | JSON processing |
+| ripgrep | latest | Fast code search |
+| fd | latest | Fast file finder |
+| gh | latest | GitHub CLI |
+| watchman | latest | File watcher |
+| android-studio | latest | Android development |
+| cocoapods | latest | iOS dependency manager |
+| fastlane | latest | Mobile CI/CD |
+
+### Template: essential
+
+**Description:** Minimal toolkit with git, editor support, and essential shell tools.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| git | latest | Version control |
+| ripgrep | latest | Fast code search |
+| fd | latest | Fast file finder |
+| bat | latest | Syntax-highlighted cat |
+| jq | latest | JSON processing |
+
+### Template: shell-power
+
+**Description:** Power shell user toolkit with productivity enhancers.
+
+**Tools:**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| git | latest | Version control |
+| ripgrep | latest | Fast code search |
+| fd | latest | Fast file finder |
+| bat | latest | Syntax-highlighted cat |
+| eza | latest | Modern ls replacement |
+| fzf | latest | Fuzzy finder |
+| starship | latest | Cross-shell prompt |
+| zoxide | latest | Smarter cd |
 
 ## Acceptance Criteria
 
@@ -491,7 +759,7 @@ jarvy doctor
 - [ ] Guides through config creation or import
 - [ ] Offers immediate setup option
 - [ ] Shows useful commands and documentation links
-- [ ] Completes in under 5 minutes
+- [ ] Completes in under 3 minutes
 - [ ] Works without network (except for setup)
 
 ### `jarvy explain`
@@ -510,15 +778,6 @@ jarvy doctor
 - [ ] Covers common development stacks (web, backend, ML, DevOps)
 - [ ] Templates are curated and tested
 - [ ] Non-interactive mode for scripting
-
-### `jarvy tutorial`
-- [ ] Interactive step-by-step lessons
-- [ ] Creates safe sandbox environment
-- [ ] No real system changes during tutorial
-- [ ] Can resume from specific lesson
-- [ ] Cleans up tutorial files on completion
-- [ ] Lists available topics with `--list`
-- [ ] Completes in approximately 5 minutes
 
 ### First-Run Detection
 - [ ] Detects first-time users reliably
@@ -539,7 +798,6 @@ src/
     quickstart.rs     # First-run experience
     explain.rs        # Inline help system
     templates.rs      # Template management
-    tutorial.rs       # Interactive tutorial
   onboarding/
     mod.rs            # First-run detection
     welcome.rs        # Welcome banner
@@ -673,17 +931,15 @@ pub fn mark_initialized() -> Result<(), Error> {
 2. Implement project type detection
 3. Implement `jarvy init` wizard
 4. Create template schema and loader
-5. Add built-in templates (10+ stacks)
+5. Add built-in templates (20 stacks)
 6. Implement `jarvy templates` command
 7. Implement `jarvy explain` with content
 8. Write explanation content for all topics
-9. Implement `jarvy tutorial` framework
-10. Create tutorial lessons
-11. Implement `jarvy quickstart` flow
-12. Add first-run detection and welcome
-13. Write unit tests for each component
-14. Write integration tests
-15. Update documentation and help text
+9. Implement `jarvy quickstart` flow
+10. Add first-run detection and welcome
+11. Write unit tests for each component
+12. Write integration tests
+13. Update documentation and help text
 
 ## Dependencies
 
@@ -698,17 +954,15 @@ pub fn mark_initialized() -> Result<(), Error> {
 | Project type detection | 1 day |
 | `jarvy init` wizard | 2 days |
 | Template schema & loader | 1 day |
-| Built-in templates (10+) | 1.5 days |
+| Built-in templates (20) | 2 days |
 | `jarvy templates` command | 1 day |
 | `jarvy explain` command | 1 day |
 | Explanation content | 1.5 days |
-| `jarvy tutorial` framework | 2 days |
-| Tutorial lessons | 1.5 days |
 | `jarvy quickstart` flow | 1 day |
 | First-run detection | 0.5 days |
 | Testing | 2 days |
 | Documentation | 1 day |
-| **Total** | **17.5 days** |
+| **Total** | **14.5 days** |
 
 ## Files to Create/Modify
 
@@ -717,18 +971,16 @@ pub fn mark_initialized() -> Result<(), Error> {
 - `src/commands/quickstart.rs`
 - `src/commands/explain.rs`
 - `src/commands/templates.rs`
-- `src/commands/tutorial.rs`
 - `src/onboarding/mod.rs`
 - `src/onboarding/welcome.rs`
 - `src/onboarding/detection.rs`
 - `src/templates/mod.rs`
 - `src/templates/builtin.rs`
 - `src/templates/schema.rs`
-- `data/templates/*.toml` (10+ files)
+- `data/templates/*.toml` (20 files)
 - `data/explain/*.md` (15+ files)
 - `tests/init_integration.rs`
 - `tests/templates_integration.rs`
-- `tests/tutorial_integration.rs`
 
 ### Modified Files
 - `src/main.rs` - Add new CLI commands
@@ -740,10 +992,10 @@ pub fn mark_initialized() -> Result<(), Error> {
 
 | Metric | Current | Target |
 |--------|---------|--------|
-| Time to first setup | Unknown (manual) | < 5 minutes |
+| Time to first setup | Unknown (manual) | < 3 minutes |
 | Config creation | Manual | Guided wizard |
 | Learning method | Read docs | Interactive |
-| Template availability | None | 10+ stacks |
+| Template availability | None | 20 stacks |
 | Concept help | External docs | In-CLI |
 | First-run guidance | None | Automatic |
 
@@ -755,11 +1007,12 @@ pub fn mark_initialized() -> Result<(), Error> {
 2. **Template maintenance**: Templates become outdated as tools evolve
    - Mitigation: Version templates, automated testing
 
-3. **Tutorial complexity**: Hard to make tutorials both simple and comprehensive
-   - Mitigation: Focus on essentials, link to docs for advanced topics
-
-4. **Project detection accuracy**: May misdetect project types
+3. **Project detection accuracy**: May misdetect project types
    - Mitigation: Always allow user override, show what was detected
 
-5. **Overwhelming for experts**: Experienced users may find onboarding annoying
+4. **Overwhelming for experts**: Experienced users may find onboarding annoying
    - Mitigation: One-time welcome, `--quiet` flag, direct command access
+
+---
+
+*PRD-023 v1.1 | User Onboarding & Education | Priority: High*

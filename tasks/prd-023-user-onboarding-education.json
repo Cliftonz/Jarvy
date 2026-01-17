@@ -1,0 +1,708 @@
+{
+  "id": "PRD-023",
+  "parent_prd": "PRD-023",
+  "title": "User Onboarding & Education",
+  "description": "Add interactive onboarding experiences and educational features that help new users learn Jarvy quickly and effectively, reducing time-to-productivity and support burden",
+  "status": "pending",
+  "priority": "high",
+  "dependencies": [],
+  "estimated_complexity": "high",
+  "acceptance_criteria": [
+    "jarvy init creates jarvy.toml interactively with project detection",
+    "jarvy quickstart guides new users through first-run experience",
+    "jarvy explain provides inline help for Jarvy concepts",
+    "jarvy templates lists and applies pre-built configuration templates",
+    "20 built-in templates cover common development stacks",
+    "First-run detection shows welcome banner for new users",
+    "All commands support non-interactive mode for scripting",
+    "Works in CI mode with appropriate defaults"
+  ],
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Create onboarding module structure",
+      "description": "Set up the base module structure for onboarding features",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/onboarding/mod.rs", "src/onboarding/welcome.rs", "src/onboarding/detection.rs"],
+      "subtasks": [
+        "Create src/onboarding/mod.rs with module exports",
+        "Create welcome.rs for first-run banner",
+        "Create detection.rs for project type detection",
+        "Add onboarding module to src/main.rs"
+      ]
+    },
+    {
+      "id": "T2",
+      "title": "Implement project type detection",
+      "description": "Detect project type from existing files (package.json, Cargo.toml, etc.)",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/onboarding/detection.rs"],
+      "subtasks": [
+        "Detect package.json for Node.js projects",
+        "Detect Cargo.toml for Rust projects",
+        "Detect go.mod for Go projects",
+        "Detect requirements.txt/pyproject.toml for Python projects",
+        "Detect pom.xml/build.gradle for Java projects",
+        "Detect pubspec.yaml for Flutter projects",
+        "Return detected stack with confidence score",
+        "Support multiple detections (e.g., full-stack)"
+      ]
+    },
+    {
+      "id": "T3",
+      "title": "Implement jarvy init command",
+      "description": "Interactive wizard to create jarvy.toml for current project",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/commands/init.rs", "src/main.rs"],
+      "subtasks": [
+        "Add Init subcommand to clap CLI",
+        "Implement interactive stack selection with inquire",
+        "Implement tool multi-select based on stack",
+        "Generate jarvy.toml with helpful comments",
+        "Support --template flag for non-interactive use",
+        "Support --stdout flag to output to terminal",
+        "Support --output flag to specify path",
+        "Support --non-interactive for CI environments",
+        "Show clear next steps after creation"
+      ]
+    },
+    {
+      "id": "T4",
+      "title": "Create template schema and loader",
+      "description": "Define template format and implement loader",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/templates/mod.rs", "src/templates/schema.rs", "src/templates/builtin.rs"],
+      "subtasks": [
+        "Define Template struct with metadata fields",
+        "Define TemplateCategory enum",
+        "Implement TOML parsing for templates",
+        "Implement template validation",
+        "Create builtin template registry",
+        "Support hooks in templates",
+        "Support metadata (author, version, min_jarvy_version)"
+      ]
+    },
+    {
+      "id": "T5",
+      "title": "Create template: react",
+      "description": "Complete React development environment with modern tooling for building production-ready web applications",
+      "passed": false,
+      "priority": "high",
+      "files": ["data/templates/react.toml"],
+      "subtasks": [
+        "Add node (20) - JavaScript runtime",
+        "Add git (latest) - Version control",
+        "Add docker (latest) - Containerization",
+        "Add jq (latest) - JSON processing",
+        "Add ripgrep (latest) - Fast code search",
+        "Add fd (latest) - Fast file finder",
+        "Add bat (latest) - Syntax-highlighted cat",
+        "Add eza (latest) - Modern ls replacement",
+        "Add fzf (latest) - Fuzzy finder",
+        "Add starship (latest) - Cross-shell prompt",
+        "Add gh (latest) - GitHub CLI",
+        "Add httpie (latest) - HTTP client",
+        "Configure starship and nvm hooks"
+      ]
+    },
+    {
+      "id": "T6",
+      "title": "Create template: vue",
+      "description": "Vue.js development stack with Vite tooling and essential developer utilities",
+      "passed": false,
+      "priority": "high",
+      "files": ["data/templates/vue.toml"],
+      "subtasks": [
+        "Add node (20) - JavaScript runtime",
+        "Add git (latest) - Version control",
+        "Add docker (latest) - Containerization",
+        "Add jq (latest) - JSON processing",
+        "Add ripgrep (latest) - Fast code search",
+        "Add fd (latest) - Fast file finder",
+        "Add bat (latest) - Syntax-highlighted cat",
+        "Add fzf (latest) - Fuzzy finder",
+        "Add gh (latest) - GitHub CLI",
+        "Add httpie (latest) - HTTP client"
+      ]
+    },
+    {
+      "id": "T7",
+      "title": "Create template: nextjs",
+      "description": "Next.js full-stack template with React, API routes support, and deployment tooling",
+      "passed": false,
+      "priority": "high",
+      "files": ["data/templates/nextjs.toml"],
+      "subtasks": [
+        "Add node (20) - JavaScript runtime",
+        "Add git (latest) - Version control",
+        "Add docker (latest) - Containerization",
+        "Add jq (latest) - JSON processing",
+        "Add ripgrep (latest) - Fast code search",
+        "Add fd (latest) - Fast file finder",
+        "Add bat (latest) - Syntax-highlighted cat",
+        "Add eza (latest) - Modern ls replacement",
+        "Add fzf (latest) - Fuzzy finder",
+        "Add starship (latest) - Cross-shell prompt",
+        "Add gh (latest) - GitHub CLI",
+        "Add httpie (latest) - HTTP client",
+        "Add vercel (latest) - Vercel CLI",
+        "Add aws (latest) - AWS CLI"
+      ]
+    },
+    {
+      "id": "T8",
+      "title": "Create template: angular",
+      "description": "Angular development environment with TypeScript tooling and testing utilities",
+      "passed": false,
+      "priority": "high",
+      "files": ["data/templates/angular.toml"],
+      "subtasks": [
+        "Add node (20) - JavaScript runtime",
+        "Add git (latest) - Version control",
+        "Add docker (latest) - Containerization",
+        "Add jq (latest) - JSON processing",
+        "Add ripgrep (latest) - Fast code search",
+        "Add fd (latest) - Fast file finder",
+        "Add bat (latest) - Syntax-highlighted cat",
+        "Add fzf (latest) - Fuzzy finder",
+        "Add gh (latest) - GitHub CLI",
+        "Add httpie (latest) - HTTP client",
+        "Add chromium (latest) - Browser testing"
+      ]
+    },
+    {
+      "id": "T9",
+      "title": "Create template: svelte",
+      "description": "Svelte/SvelteKit stack with Vite, modern tooling, and optimal DX",
+      "passed": false,
+      "priority": "high",
+      "files": ["data/templates/svelte.toml"],
+      "subtasks": [
+        "Add node (20) - JavaScript runtime",
+        "Add git (latest) - Version control",
+        "Add docker (latest) - Containerization",
+        "Add jq (latest) - JSON processing",
+        "Add ripgrep (latest) - Fast code search",
+        "Add fd (latest) - Fast file finder",
+        "Add bat (latest) - Syntax-highlighted cat",
+        "Add fzf (latest) - Fuzzy finder",
+        "Add gh (latest) - GitHub CLI",
+        "Add httpie (latest) - HTTP client"
+      ]
+    },
+    {
+      "id": "T10",
+      "title": "Create template: node-api",
+      "description": "Node.js API development with Express/Fastify patterns and testing tools",
+      "passed": false,
+      "priority": "high",
+      "files": ["data/templates/node-api.toml"],
+      "subtasks": [
+        "Add node (20) - JavaScript runtime",
+        "Add git (latest) - Version control",
+        "Add docker (latest) - Containerization",
+        "Add jq (latest) - JSON processing",
+        "Add ripgrep (latest) - Fast code search",
+        "Add httpie (latest) - HTTP client",
+        "Add gh (latest) - GitHub CLI",
+        "Add redis (latest) - Redis CLI"
+      ]
+    },
+    {
+      "id": "T11",
+      "title": "Create template: go-api",
+      "description": "Go backend development with common CLI tools and testing utilities",
+      "passed": false,
+      "priority": "high",
+      "files": ["data/templates/go-api.toml"],
+      "subtasks": [
+        "Add go (latest) - Go runtime",
+        "Add git (latest) - Version control",
+        "Add docker (latest) - Containerization",
+        "Add jq (latest) - JSON processing",
+        "Add ripgrep (latest) - Fast code search",
+        "Add fd (latest) - Fast file finder",
+        "Add httpie (latest) - HTTP client",
+        "Add gh (latest) - GitHub CLI",
+        "Add golangci-lint (latest) - Go linter"
+      ]
+    },
+    {
+      "id": "T12",
+      "title": "Create template: rust-cli",
+      "description": "Rust CLI development with cargo extensions and debugging tools",
+      "passed": false,
+      "priority": "high",
+      "files": ["data/templates/rust-cli.toml"],
+      "subtasks": [
+        "Add rust (latest) - Rust toolchain",
+        "Add git (latest) - Version control",
+        "Add docker (latest) - Containerization",
+        "Add jq (latest) - JSON processing",
+        "Add ripgrep (latest) - Fast code search",
+        "Add fd (latest) - Fast file finder",
+        "Add gh (latest) - GitHub CLI"
+      ]
+    },
+    {
+      "id": "T13",
+      "title": "Create template: python-api",
+      "description": "Python/FastAPI development with virtual environment and testing tools",
+      "passed": false,
+      "priority": "high",
+      "files": ["data/templates/python-api.toml"],
+      "subtasks": [
+        "Add python (3.12) - Python runtime",
+        "Add git (latest) - Version control",
+        "Add docker (latest) - Containerization",
+        "Add jq (latest) - JSON processing",
+        "Add ripgrep (latest) - Fast code search",
+        "Add fd (latest) - Fast file finder",
+        "Add httpie (latest) - HTTP client",
+        "Add gh (latest) - GitHub CLI",
+        "Add redis (latest) - Redis CLI",
+        "Add postgresql (latest) - PostgreSQL client",
+        "Add uv (latest) - Fast Python package installer"
+      ]
+    },
+    {
+      "id": "T14",
+      "title": "Create template: java-spring",
+      "description": "Java Spring Boot development with Maven/Gradle and debugging tools",
+      "passed": false,
+      "priority": "high",
+      "files": ["data/templates/java-spring.toml"],
+      "subtasks": [
+        "Add java (21) - Java runtime",
+        "Add maven (latest) - Maven build tool",
+        "Add git (latest) - Version control",
+        "Add docker (latest) - Containerization",
+        "Add jq (latest) - JSON processing",
+        "Add ripgrep (latest) - Fast code search",
+        "Add httpie (latest) - HTTP client",
+        "Add gh (latest) - GitHub CLI",
+        "Add redis (latest) - Redis CLI",
+        "Add postgresql (latest) - PostgreSQL client"
+      ]
+    },
+    {
+      "id": "T15",
+      "title": "Create template: python-ml",
+      "description": "Python ML/Data Science with Jupyter, scientific computing, and visualization tools",
+      "passed": false,
+      "priority": "high",
+      "files": ["data/templates/python-ml.toml"],
+      "subtasks": [
+        "Add python (3.12) - Python runtime",
+        "Add git (latest) - Version control",
+        "Add docker (latest) - Containerization",
+        "Add jq (latest) - JSON processing",
+        "Add ripgrep (latest) - Fast code search",
+        "Add fd (latest) - Fast file finder",
+        "Add gh (latest) - GitHub CLI",
+        "Add aws (latest) - AWS CLI",
+        "Add postgresql (latest) - PostgreSQL client",
+        "Add duckdb (latest) - Analytical database",
+        "Add uv (latest) - Fast Python package installer",
+        "Add bat (latest) - Syntax-highlighted cat",
+        "Add fzf (latest) - Fuzzy finder",
+        "Add httpie (latest) - HTTP client",
+        "Add sqlite (latest) - SQLite CLI"
+      ]
+    },
+    {
+      "id": "T16",
+      "title": "Create template: jupyter",
+      "description": "Jupyter notebook environment with essential data tools",
+      "passed": false,
+      "priority": "medium",
+      "files": ["data/templates/jupyter.toml"],
+      "subtasks": [
+        "Add python (3.12) - Python runtime",
+        "Add git (latest) - Version control",
+        "Add docker (latest) - Containerization",
+        "Add jq (latest) - JSON processing",
+        "Add gh (latest) - GitHub CLI",
+        "Add duckdb (latest) - Analytical database",
+        "Add uv (latest) - Fast Python package installer",
+        "Add sqlite (latest) - SQLite CLI"
+      ]
+    },
+    {
+      "id": "T17",
+      "title": "Create template: k8s-admin",
+      "description": "Kubernetes administration with cluster management and debugging tools",
+      "passed": false,
+      "priority": "medium",
+      "files": ["data/templates/k8s-admin.toml"],
+      "subtasks": [
+        "Add kubectl (latest) - Kubernetes CLI",
+        "Add helm (latest) - Kubernetes package manager",
+        "Add git (latest) - Version control",
+        "Add docker (latest) - Containerization",
+        "Add jq (latest) - JSON processing",
+        "Add ripgrep (latest) - Fast code search",
+        "Add k9s (latest) - Kubernetes TUI",
+        "Add stern (latest) - Multi-pod log tailing",
+        "Add kubectx (latest) - Context switching",
+        "Add gh (latest) - GitHub CLI",
+        "Add aws (latest) - AWS CLI",
+        "Add yq (latest) - YAML processor"
+      ]
+    },
+    {
+      "id": "T18",
+      "title": "Create template: terraform",
+      "description": "Infrastructure as Code with Terraform, cloud CLIs, and validation tools",
+      "passed": false,
+      "priority": "medium",
+      "files": ["data/templates/terraform.toml"],
+      "subtasks": [
+        "Add terraform (latest) - Infrastructure as Code",
+        "Add git (latest) - Version control",
+        "Add jq (latest) - JSON processing",
+        "Add ripgrep (latest) - Fast code search",
+        "Add gh (latest) - GitHub CLI",
+        "Add aws (latest) - AWS CLI",
+        "Add yq (latest) - YAML processor",
+        "Add tflint (latest) - Terraform linter",
+        "Add terragrunt (latest) - Terraform wrapper"
+      ]
+    },
+    {
+      "id": "T19",
+      "title": "Create template: docker-dev",
+      "description": "Docker development with compose and container debugging tools",
+      "passed": false,
+      "priority": "medium",
+      "files": ["data/templates/docker-dev.toml"],
+      "subtasks": [
+        "Add docker (latest) - Containerization",
+        "Add git (latest) - Version control",
+        "Add jq (latest) - JSON processing",
+        "Add ripgrep (latest) - Fast code search",
+        "Add dive (latest) - Docker image analyzer",
+        "Add lazydocker (latest) - Docker TUI"
+      ]
+    },
+    {
+      "id": "T20",
+      "title": "Create template: cicd",
+      "description": "CI/CD pipeline tools for building and deploying applications",
+      "passed": false,
+      "priority": "medium",
+      "files": ["data/templates/cicd.toml"],
+      "subtasks": [
+        "Add git (latest) - Version control",
+        "Add docker (latest) - Containerization",
+        "Add gh (latest) - GitHub CLI",
+        "Add jq (latest) - JSON processing",
+        "Add yq (latest) - YAML processor",
+        "Add act (latest) - Run GitHub Actions locally",
+        "Add aws (latest) - AWS CLI",
+        "Add trivy (latest) - Security scanner"
+      ]
+    },
+    {
+      "id": "T21",
+      "title": "Create template: flutter",
+      "description": "Flutter cross-platform development with mobile tooling",
+      "passed": false,
+      "priority": "medium",
+      "files": ["data/templates/flutter.toml"],
+      "subtasks": [
+        "Add flutter (latest) - Flutter SDK",
+        "Add git (latest) - Version control",
+        "Add docker (latest) - Containerization",
+        "Add jq (latest) - JSON processing",
+        "Add ripgrep (latest) - Fast code search",
+        "Add fd (latest) - Fast file finder",
+        "Add gh (latest) - GitHub CLI",
+        "Add android-studio (latest) - Android development",
+        "Add cocoapods (latest) - iOS dependency manager"
+      ]
+    },
+    {
+      "id": "T22",
+      "title": "Create template: react-native",
+      "description": "React Native mobile development with iOS/Android tooling",
+      "passed": false,
+      "priority": "medium",
+      "files": ["data/templates/react-native.toml"],
+      "subtasks": [
+        "Add node (20) - JavaScript runtime",
+        "Add git (latest) - Version control",
+        "Add docker (latest) - Containerization",
+        "Add jq (latest) - JSON processing",
+        "Add ripgrep (latest) - Fast code search",
+        "Add fd (latest) - Fast file finder",
+        "Add gh (latest) - GitHub CLI",
+        "Add watchman (latest) - File watcher",
+        "Add android-studio (latest) - Android development",
+        "Add cocoapods (latest) - iOS dependency manager",
+        "Add fastlane (latest) - Mobile CI/CD"
+      ]
+    },
+    {
+      "id": "T23",
+      "title": "Create template: essential",
+      "description": "Minimal toolkit with git, editor support, and essential shell tools",
+      "passed": false,
+      "priority": "medium",
+      "files": ["data/templates/essential.toml"],
+      "subtasks": [
+        "Add git (latest) - Version control",
+        "Add ripgrep (latest) - Fast code search",
+        "Add fd (latest) - Fast file finder",
+        "Add bat (latest) - Syntax-highlighted cat",
+        "Add jq (latest) - JSON processing"
+      ]
+    },
+    {
+      "id": "T24",
+      "title": "Create template: shell-power",
+      "description": "Power shell user toolkit with productivity enhancers",
+      "passed": false,
+      "priority": "medium",
+      "files": ["data/templates/shell-power.toml"],
+      "subtasks": [
+        "Add git (latest) - Version control",
+        "Add ripgrep (latest) - Fast code search",
+        "Add fd (latest) - Fast file finder",
+        "Add bat (latest) - Syntax-highlighted cat",
+        "Add eza (latest) - Modern ls replacement",
+        "Add fzf (latest) - Fuzzy finder",
+        "Add starship (latest) - Cross-shell prompt",
+        "Add zoxide (latest) - Smarter cd",
+        "Configure shell hooks for starship and zoxide"
+      ]
+    },
+    {
+      "id": "T25",
+      "title": "Implement jarvy templates command",
+      "description": "Command to list, show, and use templates",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/commands/templates.rs", "src/main.rs"],
+      "subtasks": [
+        "Add Templates subcommand to clap CLI",
+        "Implement list subcommand to show all templates",
+        "Implement show subcommand to display template details",
+        "Implement use subcommand to apply template",
+        "Support --output flag to specify jarvy.toml path",
+        "Support --setup flag to run setup after apply",
+        "Support --non-interactive for CI environments",
+        "Group templates by category in list output"
+      ]
+    },
+    {
+      "id": "T26",
+      "title": "Implement jarvy explain command",
+      "description": "Inline help system for Jarvy concepts",
+      "passed": false,
+      "priority": "medium",
+      "files": ["src/commands/explain.rs", "src/main.rs"],
+      "subtasks": [
+        "Add Explain subcommand to clap CLI",
+        "Create explanation content for jarvy.toml",
+        "Create explanation content for versions",
+        "Create explanation content for hooks",
+        "Create explanation content for tools",
+        "Create explanation content for platforms",
+        "Create explanation content for services",
+        "Create explanation content for setup command",
+        "Create explanation content for diff command",
+        "Support --list flag to show all topics",
+        "Support --quick flag for brief reference",
+        "Support --examples flag for code examples"
+      ]
+    },
+    {
+      "id": "T27",
+      "title": "Implement jarvy quickstart command",
+      "description": "Guided first-run experience for new users",
+      "passed": false,
+      "priority": "medium",
+      "files": ["src/commands/quickstart.rs", "src/main.rs"],
+      "subtasks": [
+        "Add Quickstart subcommand to clap CLI",
+        "Implement system compatibility check step",
+        "Implement package manager detection step",
+        "Integrate with init wizard for config creation",
+        "Offer template selection as alternative",
+        "Support immediate setup after config creation",
+        "Show useful commands at completion",
+        "Complete in under 3 minutes"
+      ]
+    },
+    {
+      "id": "T28",
+      "title": "Implement first-run detection",
+      "description": "Detect first-time users and show welcome banner",
+      "passed": false,
+      "priority": "low",
+      "files": ["src/onboarding/welcome.rs", "src/main.rs"],
+      "subtasks": [
+        "Create marker file on first run",
+        "Check for marker before showing banner",
+        "Show non-intrusive welcome with quick actions",
+        "Support dismissal via config setting",
+        "Respect --quiet flag",
+        "Skip in CI environments (detect CI env vars)",
+        "Do not interfere with command output"
+      ]
+    },
+    {
+      "id": "T29",
+      "title": "Write unit tests",
+      "description": "Create unit tests for onboarding modules",
+      "passed": false,
+      "priority": "medium",
+      "files": [
+        "src/onboarding/detection.rs",
+        "src/templates/schema.rs",
+        "src/commands/init.rs"
+      ],
+      "subtasks": [
+        "Test project type detection logic",
+        "Test template parsing and validation",
+        "Test init config generation",
+        "Test template application",
+        "Test first-run detection logic",
+        "Test explain content loading"
+      ]
+    },
+    {
+      "id": "T30",
+      "title": "Write integration tests",
+      "description": "Create integration tests for CLI commands",
+      "passed": false,
+      "priority": "medium",
+      "files": [
+        "tests/init_integration.rs",
+        "tests/templates_integration.rs"
+      ],
+      "subtasks": [
+        "Test jarvy init --template generates valid TOML",
+        "Test jarvy init --non-interactive works",
+        "Test jarvy templates list shows all templates",
+        "Test jarvy templates show displays details",
+        "Test jarvy templates use creates jarvy.toml",
+        "Test jarvy explain outputs help content",
+        "Test jarvy quickstart flow"
+      ]
+    },
+    {
+      "id": "T31",
+      "title": "Update documentation",
+      "description": "Document new commands and update CLAUDE.md",
+      "passed": false,
+      "priority": "low",
+      "files": ["CLAUDE.md"],
+      "subtasks": [
+        "Add init command to CLAUDE.md",
+        "Add templates command to CLAUDE.md",
+        "Add explain command to CLAUDE.md",
+        "Add quickstart command to CLAUDE.md",
+        "Document template format specification",
+        "Add usage examples in help output"
+      ]
+    }
+  ],
+  "implementation_notes": {
+    "inquire": "Use inquire crate for interactive prompts (already in dependencies)",
+    "template_format": "Templates use TOML with [template], [tools], [hooks], and [meta] sections",
+    "non_interactive": "All commands must support --non-interactive for CI/scripting",
+    "ci_detection": "Skip welcome banner when CI env vars are detected",
+    "offline_support": "Templates are embedded in binary, no network required"
+  },
+  "non_goals": [
+    "Video tutorials or external media",
+    "Web-based learning platform",
+    "Certification or progress tracking",
+    "Multi-language (i18n) support",
+    "IDE/editor integrations"
+  ],
+  "files_to_create": [
+    "src/commands/init.rs",
+    "src/commands/quickstart.rs",
+    "src/commands/explain.rs",
+    "src/commands/templates.rs",
+    "src/onboarding/mod.rs",
+    "src/onboarding/welcome.rs",
+    "src/onboarding/detection.rs",
+    "src/templates/mod.rs",
+    "src/templates/builtin.rs",
+    "src/templates/schema.rs",
+    "data/templates/react.toml",
+    "data/templates/vue.toml",
+    "data/templates/nextjs.toml",
+    "data/templates/angular.toml",
+    "data/templates/svelte.toml",
+    "data/templates/node-api.toml",
+    "data/templates/go-api.toml",
+    "data/templates/rust-cli.toml",
+    "data/templates/python-api.toml",
+    "data/templates/java-spring.toml",
+    "data/templates/python-ml.toml",
+    "data/templates/jupyter.toml",
+    "data/templates/k8s-admin.toml",
+    "data/templates/terraform.toml",
+    "data/templates/docker-dev.toml",
+    "data/templates/cicd.toml",
+    "data/templates/flutter.toml",
+    "data/templates/react-native.toml",
+    "data/templates/essential.toml",
+    "data/templates/shell-power.toml",
+    "data/explain/jarvy-toml.md",
+    "data/explain/versions.md",
+    "data/explain/hooks.md",
+    "data/explain/tools.md",
+    "data/explain/platforms.md",
+    "data/explain/services.md",
+    "tests/init_integration.rs",
+    "tests/templates_integration.rs"
+  ],
+  "files_to_modify": [
+    "src/main.rs",
+    "src/commands/mod.rs",
+    "CLAUDE.md"
+  ],
+  "risks": [
+    {
+      "description": "Interactive prompt compatibility - not all terminals support rich prompts",
+      "mitigation": "Fallback to simple prompts, --non-interactive flag"
+    },
+    {
+      "description": "Template maintenance - templates become outdated as tools evolve",
+      "mitigation": "Version templates, automated testing"
+    },
+    {
+      "description": "Project detection accuracy - may misdetect project types",
+      "mitigation": "Always allow user override, show what was detected"
+    },
+    {
+      "description": "Overwhelming for experts - experienced users may find onboarding annoying",
+      "mitigation": "One-time welcome, --quiet flag, direct command access"
+    }
+  ],
+  "effort_estimate": {
+    "onboarding_module": "0.5 days",
+    "project_detection": "1 day",
+    "init_command": "2 days",
+    "template_schema": "1 day",
+    "templates_20": "2 days",
+    "templates_command": "1 day",
+    "explain_command": "1 day",
+    "explain_content": "1.5 days",
+    "quickstart_command": "1 day",
+    "first_run_detection": "0.5 days",
+    "testing": "2 days",
+    "documentation": "1 day",
+    "total": "14.5 days"
+  }
+}

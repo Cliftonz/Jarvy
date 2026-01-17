@@ -3,7 +3,7 @@
   "parent_prd": "PRD-021",
   "title": "Jarvy MCP Server for Safe Tool Installation",
   "description": "Expose Jarvy as a Model Context Protocol (MCP) server, enabling LLMs (Claude, GPT, etc.) to safely discover, verify, and install development tools with mandatory user confirmation",
-  "status": "pending",
+  "status": "in_progress",
   "priority": "high",
   "dependencies": [],
   "estimated_complexity": "high",
@@ -26,7 +26,7 @@
       "id": "T1",
       "title": "Create MCP module structure",
       "description": "Set up src/mcp/ module with core files",
-      "passed": false,
+      "passed": true,
       "priority": "high",
       "files": ["src/mcp/mod.rs", "src/mcp/error.rs", "src/mcp/config.rs"],
       "subtasks": [
@@ -41,7 +41,7 @@
       "id": "T2",
       "title": "Implement MCP server core",
       "description": "Create JSON-RPC server with stdio transport",
-      "passed": false,
+      "passed": true,
       "priority": "high",
       "files": ["src/mcp/server.rs", "src/mcp/transport.rs"],
       "subtasks": [
@@ -57,7 +57,7 @@
       "id": "T3",
       "title": "Implement MCP tool handlers",
       "description": "Create handlers for jarvy_* tools",
-      "passed": false,
+      "passed": true,
       "priority": "high",
       "files": ["src/mcp/tools.rs"],
       "subtasks": [
@@ -74,7 +74,7 @@
       "id": "T4",
       "title": "Implement safety mechanisms",
       "description": "Add rate limiting, allowlist/denylist, and confirmation",
-      "passed": false,
+      "passed": true,
       "priority": "high",
       "files": ["src/mcp/safety.rs"],
       "subtasks": [
@@ -89,7 +89,7 @@
       "id": "T5",
       "title": "Implement audit logging",
       "description": "Log all MCP requests to audit file",
-      "passed": false,
+      "passed": true,
       "priority": "medium",
       "files": ["src/mcp/audit.rs"],
       "subtasks": [
@@ -103,7 +103,7 @@
       "id": "T6",
       "title": "Implement MCP resources",
       "description": "Add resource handlers for tool index and platform info",
-      "passed": false,
+      "passed": true,
       "priority": "medium",
       "files": ["src/mcp/resources.rs"],
       "subtasks": [
@@ -117,7 +117,7 @@
       "id": "T7",
       "title": "Implement MCP prompts",
       "description": "Add prompt handlers for guided workflows",
-      "passed": false,
+      "passed": true,
       "priority": "low",
       "files": ["src/mcp/prompts.rs"],
       "subtasks": [
@@ -130,7 +130,7 @@
       "id": "T8",
       "title": "Add CLI subcommand",
       "description": "Add 'jarvy mcp' command to start server",
-      "passed": false,
+      "passed": true,
       "priority": "high",
       "files": ["src/main.rs"],
       "subtasks": [
@@ -144,7 +144,7 @@
       "id": "T9",
       "title": "Write unit tests",
       "description": "Test MCP handlers and safety mechanisms",
-      "passed": false,
+      "passed": true,
       "priority": "medium",
       "files": ["src/mcp/tools.rs", "src/mcp/safety.rs"],
       "subtasks": [

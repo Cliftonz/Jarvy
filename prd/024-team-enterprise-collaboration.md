@@ -2,53 +2,48 @@
 
 ## Overview
 
-Add features that enable teams and enterprises to standardize developer environments across organizations, including shared configuration templates, role-based requirements, configuration inheritance, and SSO integration.
+Add features that enable teams to standardize developer environments across organizations, including shared configuration templates, configuration inheritance, and version lock files for reproducibility.
 
 ## Problem Statement
 
 Jarvy currently works well for individual developers, but lacks features for team-wide adoption:
-- No way to share and enforce team-standard configurations
-- No role-based tool requirements (different needs for different roles)
+- No way to share team-standard configurations
 - No configuration inheritance (DRY principle violations)
-- No enterprise authentication for private config servers
 - Teams manually copy configs, leading to drift and inconsistency
+- No way to lock versions for reproducible environments
 
-Enterprises need governance over developer tools without creating rigidity that blocks individual productivity.
+Teams need standardization without creating rigidity that blocks individual productivity.
 
 ## Evidence
 
 - Enterprise customers ask: "How do I ensure all devs have the same tools?"
 - Teams duplicate configs manually → config drift
-- Different roles need different tools (frontend vs backend vs DevOps)
-- Security teams want approved tool versions
-- Large organizations use SSO for everything
+- Different projects need consistent base configurations
+- CI/CD pipelines need reproducible tool versions
 
 ## Requirements
 
 ### Functional Requirements
 
 1. **Config inheritance**: `extends` field to compose configurations
-2. **Role-based configs**: Tool profiles for different team roles
-3. **Team config registry**: Centralized config management
-4. **SSO/SAML integration**: Enterprise authentication for private configs
-5. **Config validation against team policies**: Ensure compliance
-6. **Version pinning enforcement**: Lock down tool versions
+2. **Team config registry**: Centralized config discovery and sharing
+3. **Version pinning**: Lock down tool versions with lock files
+4. **Remote config support**: Fetch configs from URLs
 
 ### Non-Functional Requirements
 
 1. Works with existing jarvy.toml format (backward compatible)
-2. SSO supports common providers (Okta, Azure AD, Google Workspace)
-3. Inheritance resolution is fast (< 100ms)
-4. Clear error messages for policy violations
-5. Graceful degradation when team server unavailable
+2. Inheritance resolution is fast (< 100ms)
+3. Graceful degradation when remote configs unavailable
+4. Clear error messages for inheritance issues
 
 ## Non-Goals
 
 - Multi-tenancy or SaaS platform
-- Billing or subscription management
-- User management UI (use existing identity providers)
+- User management UI
 - Real-time config synchronization
-- Mobile device management
+- Authentication/SSO for config servers
+- Policy enforcement or compliance checking
 
 ## Feature Specifications
 
@@ -69,10 +64,10 @@ script = "git config --global core.autocrlf input"
 ---
 
 # jarvy.toml (individual developer)
-extends = "https://config.company.com/team-base.toml"
+extends = "https://raw.githubusercontent.com/company/configs/main/team-base.toml"
 
 [tools]
-# Add role-specific tools
+# Add project-specific tools
 node = "20"
 rust = "1.75"
 
@@ -90,6 +85,136 @@ script = "echo 'Project-specific setup'"
 - Circular dependency detection
 - Maximum inheritance depth: 10 levels
 
+### Recursive Extending Resolution
+
+When configs extend other configs that also use `extends`, Jarvy resolves them using **depth-first, left-to-right** traversal with **last-write-wins** merging.
+
+**Resolution Algorithm:**
+
+```
+Given: A extends [B, C], B extends [D], C extends [D, E]
+
+Resolution order (depth-first):
+1. Load D (B's parent)
+2. Load B, merge with D → B'
+3. Load D (C's parent, cached from step 1)
+4. Load E (C's parent)
+5. Merge D + E → DE
+6. Load C, merge with DE → C'
+7. Merge B' + C' → BC
+8. Load A, merge with BC → Final
+
+Traversal tree:
+        A
+       / \
+      B   C
+      |  / \
+      D D   E
+
+Visit order: D → B → D(cached) → E → C → A
+```
+
+**Merge Rules:**
+
+| Section | Behavior | Example |
+|---------|----------|---------|
+| `[tools]` | Deep merge, child overrides parent | Parent: `git = "latest"`, Child: `git = "2.40"` → `git = "2.40"` |
+| `[hooks.{tool}]` | Append (both run) | Parent hook + Child hook = Both execute in order |
+| `[hooks.pre_setup]` | Append (both run) | All pre_setup hooks run, parent first |
+| `[hooks.post_setup]` | Append (both run) | All post_setup hooks run, parent first |
+| `[env.vars]` | Deep merge, child overrides | Child values override parent on conflict |
+| `[env.secrets]` | Deep merge, child overrides | Child values override parent on conflict |
+| `[services]` | Deep merge, child overrides | Child service config overrides parent |
+
+**Diamond Dependency Handling:**
+
+When multiple paths lead to the same config (diamond pattern), the config is:
+1. Loaded only once (cached after first load)
+2. Applied only once in the merge chain (at its first occurrence)
+
+```
+# Diamond: A extends [B, C], both B and C extend D
+# D is processed once, not twice
+
+A
+├── B ── D    ← D processed here
+└── C ── D    ← D skipped (already in visited set)
+
+Final merge: D → B → C → A
+```
+
+**Hook Execution Order:**
+
+For recursive extends, hooks execute in **ancestor-first, left-to-right** order:
+
+```toml
+# Given: project.toml extends [team.toml, frontend.toml]
+#        team.toml extends [company-base.toml]
+
+# Hook execution order for pre_setup:
+# 1. company-base.toml pre_setup
+# 2. team.toml pre_setup
+# 3. frontend.toml pre_setup
+# 4. project.toml pre_setup
+
+# Tool-specific hook order for [hooks.node]:
+# 1. company-base.toml hooks.node (if exists)
+# 2. team.toml hooks.node (if exists)
+# 3. frontend.toml hooks.node (if exists)
+# 4. project.toml hooks.node (if exists)
+```
+
+**Error Handling:**
+
+| Error | Detection | Message |
+|-------|-----------|---------|
+| Circular dependency | `visited` set check | `Circular dependency detected: A → B → C → A` |
+| Max depth exceeded | Depth counter > 10 | `Maximum inheritance depth (10) exceeded at: {path}` |
+| Missing parent config | HTTP 404 / file not found | `Could not load parent config: {url}. Use --offline to use cached version.` |
+| Invalid TOML in parent | Parse error | `Invalid TOML in parent config {url}: {error}` |
+| Conflicting extends types | Type check | `Cannot mix URL and local extends in same array` |
+
+**Caching Behavior for Recursive Extends:**
+
+```
+Cache key: SHA256(normalized_url)
+Cache TTL: 1 hour (configurable)
+Cache location: ~/.jarvy/cache/configs/
+
+On resolve:
+1. Check cache for each URL in extends chain
+2. If cache hit and fresh → use cached
+3. If cache miss or stale → fetch, validate TOML, cache
+4. If fetch fails and cache exists → use stale cache with warning
+5. If fetch fails and no cache → error (unless --offline)
+```
+
+**Debug/Inspect Commands:**
+
+```bash
+# Show full inheritance chain
+jarvy config show --extends-chain
+
+# Output:
+# Inheritance Chain
+# =================
+# 1. https://company.com/configs/base.toml
+#    └── (no parents)
+# 2. https://company.com/configs/team.toml
+#    └── extends: https://company.com/configs/base.toml
+# 3. ./jarvy.toml
+#    └── extends: https://company.com/configs/team.toml
+#
+# Resolution order: base.toml → team.toml → jarvy.toml
+# Total depth: 3 levels
+
+# Validate extends chain without running setup
+jarvy config validate --check-extends
+
+# Force refresh all cached parent configs
+jarvy config refresh --recursive
+```
+
 ```bash
 # View resolved configuration
 jarvy config show --resolved
@@ -99,8 +224,8 @@ jarvy config show --resolved
 # ==================================
 #
 # Source chain:
-#   1. https://config.company.com/team-base.toml
-#   2. https://config.company.com/frontend.toml
+#   1. https://raw.githubusercontent.com/company/configs/main/team-base.toml
+#   2. https://raw.githubusercontent.com/company/configs/main/frontend.toml
 #   3. ./jarvy.toml (local)
 #
 # [tools]
@@ -115,281 +240,102 @@ jarvy config show --resolved
 # custom: jarvy.toml
 
 # Validate inheritance chain
-jarvy validate --check-extends
+jarvy config validate --check-extends
 ```
 
-### 2. Role-Based Configurations
-
-Define different tool sets for different roles.
+**Local file inheritance:**
 
 ```toml
-# team-config.toml
-[roles.frontend]
-description = "Frontend developers"
-tools = ["node", "git", "docker", "jq"]
+# jarvy.toml
+extends = "./configs/base.toml"
 
-[roles.backend]
-description = "Backend developers"
-tools = ["go", "docker", "kubectl", "git", "postgresql"]
-
-[roles.devops]
-description = "DevOps engineers"
-tools = ["terraform", "kubectl", "helm", "docker", "aws-cli"]
-
-[roles.all]
-description = "All team members"
-tools = ["git", "docker", "jq"]
-
-# Tool versions (shared across roles)
-[tools]
-node = "20"
-go = "1.21"
-docker = "latest"
-kubectl = "1.29"
-terraform = "1.6"
-git = "latest"
-jq = "latest"
-
----
-
-# Individual jarvy.toml
-extends = "https://config.company.com/team-config.toml"
-role = "frontend"
-
-# Additional personal tools
-[tools]
-neovim = "latest"
+# Or relative to project root
+extends = "configs/team-base.toml"
 ```
 
-```bash
-# Setup with specific role
-jarvy setup --role frontend
+### 2. Team Config Registry
 
-# View available roles
-jarvy roles list
-
-# Output:
-# Available Roles
-# ===============
-#
-# frontend     Frontend developers (4 tools)
-#              node, git, docker, jq
-#
-# backend      Backend developers (5 tools)
-#              go, docker, kubectl, git, postgresql
-#
-# devops       DevOps engineers (5 tools)
-#              terraform, kubectl, helm, docker, aws-cli
-#
-# all          All team members (3 tools)
-#              git, docker, jq
-
-# Show what a role would install
-jarvy roles show frontend
-
-# Compare your setup to a role
-jarvy roles diff frontend
-```
-
-**Role features:**
-- Roles defined in team config
-- Individual config selects role
-- Roles can inherit from other roles
-- CLI can override config role
-- Role diff shows missing/extra tools
-
-### 3. Team Config Registry
-
-Centralized configuration management for teams.
+Discover and use shared configurations.
 
 ```bash
-# Register a team config source
-jarvy team add mycompany https://config.company.com/jarvy/
+# Register a config source
+jarvy team add company https://raw.githubusercontent.com/company/jarvy-configs/main/
 
 # Output:
-# Added team config source: mycompany
-#   URL: https://config.company.com/jarvy/
-#   Authentication: None (add with --auth)
+# Added config source: company
+#   URL: https://raw.githubusercontent.com/company/jarvy-configs/main/
 #
-# Available configs:
-#   mycompany/base        - Base tools for all developers
-#   mycompany/frontend    - Frontend development stack
-#   mycompany/backend     - Backend development stack
-#   mycompany/ml          - Machine learning stack
+# Discovered configs:
+#   company/base          - Base tools for all developers
+#   company/frontend      - Frontend development stack
+#   company/backend       - Backend development stack
+#   company/ml            - Machine learning stack
 
-# List registered team sources
+# List registered sources
 jarvy team list
 
 # Output:
-# Registered Team Sources
-# =======================
+# Registered Config Sources
+# =========================
 #
-# mycompany
-#   URL: https://config.company.com/jarvy/
-#   Auth: Bearer token
+# company
+#   URL: https://raw.githubusercontent.com/company/jarvy-configs/main/
 #   Configs: 4 available
 #   Last sync: 2 hours ago
 #
-# opensource
+# community
 #   URL: https://jarvy.dev/community/
-#   Auth: None
 #   Configs: 25 available
 #   Last sync: 1 day ago
 
-# Browse team configs
-jarvy team browse mycompany
+# Browse configs from a source
+jarvy team browse company
 
-# Use a team config
-jarvy init --from mycompany/frontend
+# Use a config to create jarvy.toml
+jarvy init --from company/frontend
 
-# Sync/update team configs
+# Sync/update cached configs
 jarvy team sync
 
-# Remove team source
-jarvy team remove mycompany
+# Remove a source
+jarvy team remove company
+```
+
+**Registry index format:**
+
+```toml
+# index.toml (at registry root)
+[registry]
+name = "Company Configs"
+description = "Standard configurations for Company developers"
+version = "1.0"
+
+[[configs]]
+name = "base"
+path = "base.toml"
+description = "Base tools for all developers"
+tags = ["essential"]
+
+[[configs]]
+name = "frontend"
+path = "frontend.toml"
+description = "Frontend development stack"
+tags = ["web", "javascript"]
+
+[[configs]]
+name = "backend"
+path = "backend.toml"
+description = "Backend development stack"
+tags = ["api", "server"]
 ```
 
 **Registry features:**
-- Multiple team sources
-- Config discovery (list available)
+- Multiple sources
+- Config discovery via index.toml
 - Caching with TTL
-- Version pinning for configs
-- Offline fallback to cached
+- Offline fallback to cached configs
 
-### 4. SSO/SAML Integration
-
-Enterprise authentication for private config servers.
-
-```bash
-# Configure SSO authentication
-jarvy auth login --sso
-
-# Output:
-# Opening browser for SSO authentication...
-# Waiting for authentication... (press Ctrl+C to cancel)
-#
-# ✓ Authenticated as alice@company.com
-# ✓ Token stored securely in system keychain
-#
-# Organization: Acme Corp
-# Roles: developer, frontend-team
-# Config access: team-base, frontend, shared-hooks
-
-# Login with specific provider
-jarvy auth login --provider okta --domain company.okta.com
-jarvy auth login --provider azure --tenant company.onmicrosoft.com
-jarvy auth login --provider google --domain company.com
-
-# Check auth status
-jarvy auth status
-
-# Output:
-# Authentication Status
-# =====================
-#
-# Authenticated: Yes
-# User: alice@company.com
-# Provider: Okta (company.okta.com)
-# Token expires: 2024-01-20 15:30:00
-#
-# Accessible configs:
-#   ✓ https://config.company.com/team-base.toml
-#   ✓ https://config.company.com/frontend.toml
-#   ✓ https://config.company.com/hooks/shared.toml
-
-# Logout
-jarvy auth logout
-
-# Use auth with setup
-jarvy setup --from https://config.company.com/frontend.toml
-# (automatically uses stored credentials)
-```
-
-**SSO features:**
-- Browser-based OAuth2/OIDC flow
-- Support for Okta, Azure AD, Google Workspace
-- Secure token storage (system keychain)
-- Token refresh before expiry
-- Graceful fallback when auth fails
-
-### 5. Policy Enforcement
-
-Validate configs against team policies.
-
-```toml
-# team-policy.toml (managed by team leads/security)
-[policy]
-name = "Acme Corp Developer Policy"
-version = "1.0"
-
-[policy.required_tools]
-# These tools must be present
-tools = ["git", "docker"]
-message = "All developers must have git and docker installed"
-
-[policy.allowed_versions]
-# Version constraints for security
-docker = ">=24.0"    # CVE fix in 24.0
-node = ">=18, <21"   # LTS versions only
-python = ">=3.9"     # End of life versions blocked
-
-[policy.blocked_tools]
-# Tools not allowed (security reasons)
-tools = ["telnet", "ftp"]
-message = "Insecure protocols are not allowed"
-
-[policy.required_hooks]
-# Hooks that must be configured
-tools = ["git"]
-message = "Git must have standard hooks configured"
-```
-
-```bash
-# Validate against team policy
-jarvy policy check
-
-# Output:
-# Policy Check: Acme Corp Developer Policy v1.0
-# =============================================
-#
-# Required Tools:
-#   ✓ git - present
-#   ✓ docker - present
-#
-# Version Compliance:
-#   ✓ docker 24.0 - satisfies >=24.0
-#   ✗ node 16.0 - requires >=18, <21
-#     → Update to node 18 or higher
-#
-# Blocked Tools:
-#   ✓ No blocked tools present
-#
-# Required Hooks:
-#   ✓ git hooks configured
-#
-# Result: FAILED (1 violation)
-#
-# Run 'jarvy setup' to fix violations automatically.
-
-# Check policy before setup
-jarvy setup --check-policy
-
-# Enforce policy (fail if violations)
-jarvy policy enforce --strict
-
-# Show what policy applies
-jarvy policy show
-```
-
-**Policy features:**
-- Required tool checks
-- Version range enforcement
-- Blocked tool detection
-- Required hook validation
-- Clear violation messages
-- Auto-fix suggestions
-
-### 6. Version Pinning & Lock Files
+### 3. Version Pinning & Lock Files
 
 Lock tool versions for reproducibility.
 
@@ -485,15 +431,7 @@ checksum = "sha256:ghi789..."
 - [ ] Maximum depth enforcement (10 levels)
 - [ ] `jarvy config show --resolved` displays merged config
 - [ ] Cache for remote configs with TTL
-
-### Role-Based Configurations
-- [ ] Roles defined in `[roles.name]` sections
-- [ ] `role` field in jarvy.toml selects active role
-- [ ] `--role` flag overrides config role
-- [ ] `jarvy roles list` shows available roles
-- [ ] `jarvy roles show <name>` displays role details
-- [ ] `jarvy roles diff <name>` compares to current setup
-- [ ] Roles can inherit from base roles
+- [ ] Graceful fallback when remote unavailable
 
 ### Team Config Registry
 - [ ] `jarvy team add` registers config source
@@ -501,26 +439,8 @@ checksum = "sha256:ghi789..."
 - [ ] `jarvy team browse` discovers available configs
 - [ ] `jarvy team sync` updates cached configs
 - [ ] `jarvy team remove` unregisters source
+- [ ] Index.toml format for config discovery
 - [ ] Offline fallback to cached configs
-- [ ] Config versioning support
-
-### SSO/SAML Integration
-- [ ] `jarvy auth login --sso` opens browser flow
-- [ ] Support for Okta, Azure AD, Google Workspace
-- [ ] Token stored in system keychain
-- [ ] Automatic token refresh
-- [ ] `jarvy auth status` shows current auth
-- [ ] `jarvy auth logout` clears credentials
-- [ ] Graceful degradation when auth unavailable
-
-### Policy Enforcement
-- [ ] Policy file format with required/blocked/versions
-- [ ] `jarvy policy check` validates current config
-- [ ] `jarvy policy show` displays active policy
-- [ ] `jarvy policy enforce` fails on violations
-- [ ] Clear violation messages with fix suggestions
-- [ ] Policy inheritance from team configs
-- [ ] `--check-policy` flag on setup
 
 ### Version Lock Files
 - [ ] `jarvy lock` generates jarvy.lock
@@ -540,112 +460,332 @@ src/
   team/
     mod.rs            # Team features
     inheritance.rs    # Config inheritance resolution
-    roles.rs          # Role-based configuration
     registry.rs       # Team config registry
-    policy.rs         # Policy enforcement
-  auth/
-    mod.rs            # Authentication
-    sso.rs            # SSO/OIDC implementation
-    keychain.rs       # Secure token storage
-    providers/
-      okta.rs
-      azure.rs
-      google.rs
+    cache.rs          # Config caching
   lock/
     mod.rs            # Lock file management
     generate.rs       # Lock file generation
     verify.rs         # Lock verification
+  commands/
+    team.rs           # jarvy team command
+    lock.rs           # jarvy lock command
 ```
 
 ### Inheritance Resolution
 
 ```rust
 // src/team/inheritance.rs
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 
 const MAX_DEPTH: usize = 10;
 
 pub struct InheritanceResolver {
     cache: ConfigCache,
-    visited: HashSet<String>,
+    /// Tracks configs currently in the resolution stack (for cycle detection)
+    in_progress: HashSet<String>,
+    /// Caches already-resolved configs (for diamond dependency handling)
+    resolved_cache: HashMap<String, Config>,
     depth: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct ResolutionTrace {
+    pub chain: Vec<String>,
+    pub total_depth: usize,
+}
+
 impl InheritanceResolver {
+    pub fn new(cache: ConfigCache) -> Self {
+        Self {
+            cache,
+            in_progress: HashSet::new(),
+            resolved_cache: HashMap::new(),
+            depth: 0,
+        }
+    }
+
+    /// Resolve a config and all its ancestors recursively.
+    /// Uses depth-first, left-to-right traversal with last-write-wins merging.
     pub fn resolve(&mut self, config_path: &str) -> Result<Config, Error> {
+        self.resolve_with_trace(config_path).map(|(config, _)| config)
+    }
+
+    /// Resolve with trace for debugging/display
+    pub fn resolve_with_trace(&mut self, config_path: &str) -> Result<(Config, ResolutionTrace), Error> {
+        let mut trace = ResolutionTrace {
+            chain: Vec::new(),
+            total_depth: 0,
+        };
+        let config = self.resolve_internal(config_path, &mut trace)?;
+        Ok((config, trace))
+    }
+
+    fn resolve_internal(&mut self, config_path: &str, trace: &mut ResolutionTrace) -> Result<Config, Error> {
+        // Check max depth
         if self.depth > MAX_DEPTH {
-            return Err(Error::MaxDepthExceeded);
+            return Err(Error::MaxDepthExceeded {
+                path: config_path.to_string(),
+                depth: self.depth,
+            });
         }
 
-        if self.visited.contains(config_path) {
-            return Err(Error::CircularDependency(config_path.to_string()));
+        // Check for circular dependency (config is currently being resolved)
+        if self.in_progress.contains(config_path) {
+            let cycle = self.build_cycle_path(config_path);
+            return Err(Error::CircularDependency(cycle));
         }
 
-        self.visited.insert(config_path.to_string());
+        // Check if already fully resolved (diamond dependency optimization)
+        if let Some(cached) = self.resolved_cache.get(config_path) {
+            return Ok(cached.clone());
+        }
+
+        // Mark as in-progress for cycle detection
+        self.in_progress.insert(config_path.to_string());
         self.depth += 1;
+        trace.chain.push(config_path.to_string());
+        trace.total_depth = trace.total_depth.max(self.depth);
 
+        // Load the config (from cache or fetch)
         let config = self.load_config(config_path)?;
 
-        if let Some(extends) = &config.extends {
+        // Resolve parents first (depth-first)
+        let resolved = if let Some(extends) = &config.extends {
             let parents = match extends {
                 Extends::Single(path) => vec![path.clone()],
                 Extends::Multiple(paths) => paths.clone(),
             };
 
+            // Resolve all parents left-to-right, merge incrementally
             let mut merged = Config::default();
             for parent_path in parents {
-                let parent = self.resolve(&parent_path)?;
-                merged = merged.merge(parent);
+                let parent = self.resolve_internal(&parent_path, trace)?;
+                merged = self.merge_configs(merged, parent);
             }
-            merged = merged.merge(config);
-            Ok(merged)
+
+            // Child overrides merged parents
+            self.merge_configs(merged, config)
         } else {
-            Ok(config)
+            config
+        };
+
+        // Mark as fully resolved (for diamond dependency reuse)
+        self.in_progress.remove(config_path);
+        self.resolved_cache.insert(config_path.to_string(), resolved.clone());
+        self.depth -= 1;
+
+        Ok(resolved)
+    }
+
+    /// Merge two configs: base + overlay (overlay wins on conflicts)
+    fn merge_configs(&self, base: Config, overlay: Config) -> Config {
+        Config {
+            extends: overlay.extends.or(base.extends),
+            tools: self.merge_tools(base.tools, overlay.tools),
+            hooks: self.merge_hooks(base.hooks, overlay.hooks),
+            env: self.merge_env(base.env, overlay.env),
+            services: overlay.services.or(base.services),
+        }
+    }
+
+    /// Deep merge tools: overlay values override base on key conflict
+    fn merge_tools(&self, base: HashMap<String, ToolConfig>, overlay: HashMap<String, ToolConfig>) -> HashMap<String, ToolConfig> {
+        let mut merged = base;
+        for (key, value) in overlay {
+            merged.insert(key, value); // Overlay wins
+        }
+        merged
+    }
+
+    /// Merge hooks: append (both run), overlay hooks come after base hooks
+    fn merge_hooks(&self, base: HooksConfig, overlay: HooksConfig) -> HooksConfig {
+        HooksConfig {
+            pre_setup: self.append_hooks(base.pre_setup, overlay.pre_setup),
+            post_setup: self.append_hooks(base.post_setup, overlay.post_setup),
+            tool_hooks: self.merge_tool_hooks(base.tool_hooks, overlay.tool_hooks),
+        }
+    }
+
+    /// Append hook lists (base first, then overlay)
+    fn append_hooks(&self, base: Option<Vec<Hook>>, overlay: Option<Vec<Hook>>) -> Option<Vec<Hook>> {
+        match (base, overlay) {
+            (None, None) => None,
+            (Some(b), None) => Some(b),
+            (None, Some(o)) => Some(o),
+            (Some(mut b), Some(o)) => {
+                b.extend(o);
+                Some(b)
+            }
+        }
+    }
+
+    /// Merge per-tool hooks (append for same tool)
+    fn merge_tool_hooks(&self, base: HashMap<String, Vec<Hook>>, overlay: HashMap<String, Vec<Hook>>) -> HashMap<String, Vec<Hook>> {
+        let mut merged = base;
+        for (tool, hooks) in overlay {
+            merged.entry(tool).or_default().extend(hooks);
+        }
+        merged
+    }
+
+    fn build_cycle_path(&self, config_path: &str) -> String {
+        // Build readable cycle path: A → B → C → A
+        let mut path_parts: Vec<&str> = self.in_progress.iter().map(|s| s.as_str()).collect();
+        path_parts.push(config_path);
+        path_parts.join(" → ")
+    }
+
+    fn load_config(&self, path: &str) -> Result<Config, Error> {
+        if path.starts_with("http://") || path.starts_with("https://") {
+            self.load_remote_config(path)
+        } else {
+            self.load_local_config(path)
+        }
+    }
+
+    fn load_remote_config(&self, url: &str) -> Result<Config, Error> {
+        // Try cache first
+        if let Some(cached) = self.cache.get(url) {
+            return toml::from_str(&cached.content)
+                .map_err(|e| Error::InvalidToml { url: url.to_string(), error: e.to_string() });
+        }
+
+        // Fetch and cache
+        let content = self.fetch_url(url)?;
+        let config: Config = toml::from_str(&content)
+            .map_err(|e| Error::InvalidToml { url: url.to_string(), error: e.to_string() })?;
+
+        self.cache.set(url, &content)?;
+        Ok(config)
+    }
+
+    fn load_local_config(&self, path: &str) -> Result<Config, Error> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| Error::FileNotFound { path: path.to_string(), error: e.to_string() })?;
+
+        toml::from_str(&content)
+            .map_err(|e| Error::InvalidToml { url: path.to_string(), error: e.to_string() })
+    }
+
+    fn fetch_url(&self, url: &str) -> Result<String, Error> {
+        let response = ureq::Agent::new_with_defaults()
+            .get(url)
+            .call()
+            .map_err(|e| Error::FetchFailed { url: url.to_string(), error: e.to_string() })?;
+
+        response.into_body().read_to_string()
+            .map_err(|e| Error::FetchFailed { url: url.to_string(), error: e.to_string() })
+    }
+}
+
+#[derive(Debug)]
+pub enum Error {
+    MaxDepthExceeded { path: String, depth: usize },
+    CircularDependency(String),
+    FileNotFound { path: String, error: String },
+    FetchFailed { url: String, error: String },
+    InvalidToml { url: String, error: String },
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::MaxDepthExceeded { path, depth } =>
+                write!(f, "Maximum inheritance depth ({}) exceeded at: {}", depth, path),
+            Error::CircularDependency(cycle) =>
+                write!(f, "Circular dependency detected: {}", cycle),
+            Error::FileNotFound { path, error } =>
+                write!(f, "Could not load config '{}': {}", path, error),
+            Error::FetchFailed { url, error } =>
+                write!(f, "Could not fetch config '{}': {}. Use --offline to use cached version.", url, error),
+            Error::InvalidToml { url, error } =>
+                write!(f, "Invalid TOML in config '{}': {}", url, error),
         }
     }
 }
 ```
 
-### SSO Implementation
+### Config Cache
 
 ```rust
-// src/auth/sso.rs
-use oauth2::{AuthorizationCode, CsrfToken, PkceCodeChallenge};
+// src/team/cache.rs
+use std::time::{Duration, SystemTime};
 
-pub struct SsoAuth {
-    provider: Box<dyn OidcProvider>,
-    keychain: Keychain,
+const DEFAULT_TTL: Duration = Duration::from_secs(3600); // 1 hour
+
+pub struct ConfigCache {
+    cache_dir: PathBuf,
+    ttl: Duration,
 }
 
-impl SsoAuth {
-    pub async fn login(&self) -> Result<Token, Error> {
-        // Generate PKCE challenge
-        let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+impl ConfigCache {
+    pub fn get(&self, url: &str) -> Option<CachedConfig> {
+        let cache_path = self.cache_path(url);
+        if !cache_path.exists() {
+            return None;
+        }
 
-        // Build authorization URL
-        let (auth_url, csrf_token) = self.provider
-            .authorize_url(CsrfToken::new_random)
-            .set_pkce_challenge(pkce_challenge)
-            .url();
+        let metadata = fs::metadata(&cache_path).ok()?;
+        let modified = metadata.modified().ok()?;
 
-        // Open browser
-        webbrowser::open(auth_url.as_str())?;
+        if SystemTime::now().duration_since(modified).ok()? > self.ttl {
+            return None; // Expired
+        }
 
-        // Start local callback server
-        let code = self.wait_for_callback(csrf_token).await?;
-
-        // Exchange code for token
-        let token = self.provider
-            .exchange_code(AuthorizationCode::new(code))
-            .set_pkce_verifier(pkce_verifier)
-            .request_async()
-            .await?;
-
-        // Store in keychain
-        self.keychain.store("jarvy_token", &token)?;
-
-        Ok(token)
+        let content = fs::read_to_string(&cache_path).ok()?;
+        Some(CachedConfig { content, path: cache_path })
     }
+
+    pub fn set(&self, url: &str, content: &str) -> Result<(), Error> {
+        let cache_path = self.cache_path(url);
+        fs::create_dir_all(cache_path.parent().unwrap())?;
+        fs::write(cache_path, content)?;
+        Ok(())
+    }
+
+    fn cache_path(&self, url: &str) -> PathBuf {
+        let hash = sha256::digest(url);
+        self.cache_dir.join(&hash[..16]).with_extension("toml")
+    }
+}
+```
+
+### Lock File Generation
+
+```rust
+// src/lock/generate.rs
+use sha2::{Sha256, Digest};
+
+pub fn generate_lock(config: &Config) -> Result<LockFile, Error> {
+    let mut lock = LockFile {
+        meta: LockMeta {
+            generated: chrono::Utc::now(),
+            jarvy_version: env!("CARGO_PKG_VERSION").to_string(),
+            platform: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+        },
+        tools: HashMap::new(),
+    };
+
+    for (name, _spec) in &config.tools {
+        let installed = get_installed_version(name)?;
+        let source = get_install_source(name)?;
+
+        lock.tools.insert(name.clone(), LockedTool {
+            version: installed,
+            source,
+            checksum: compute_checksum(name)?,
+        });
+    }
+
+    Ok(lock)
+}
+
+fn compute_checksum(tool: &str) -> Result<String, Error> {
+    let binary_path = which::which(tool)?;
+    let content = fs::read(&binary_path)?;
+    let mut hasher = Sha256::new();
+    hasher.update(&content);
+    Ok(format!("sha256:{:x}", hasher.finalize()))
 }
 ```
 
@@ -654,24 +794,21 @@ impl SsoAuth {
 1. Create team module structure
 2. Implement config inheritance resolver
 3. Add remote config fetching with caching
-4. Implement role-based configuration
-5. Build team config registry
-6. Create policy enforcement system
-7. Implement SSO authentication flow
-8. Add keychain integration for secure storage
-9. Implement lock file generation
-10. Add lock verification and status
+4. Implement config cache with TTL
+5. Build team config registry with index.toml
+6. Implement `jarvy team` commands
+7. Implement lock file generation
+8. Add lock verification and status
+9. Implement `jarvy lock` commands
+10. Add `--locked` flag to setup
 11. Write unit tests for inheritance
-12. Write integration tests for SSO
-13. Write policy validation tests
-14. Update documentation
+12. Write integration tests
+13. Update documentation
 
 ## Dependencies
 
-- `oauth2` - OAuth2/OIDC client
-- `webbrowser` - Open browser for SSO
-- `keyring` - Secure credential storage
 - `sha2` - Checksum verification
+- `reqwest` - HTTP client for remote configs (already present)
 
 ## Effort Estimate
 
@@ -680,43 +817,34 @@ impl SsoAuth {
 | Team module structure | 0.5 days |
 | Config inheritance | 2 days |
 | Remote config caching | 1 day |
-| Role-based configuration | 1.5 days |
 | Team config registry | 2 days |
-| Policy enforcement | 2 days |
-| SSO authentication | 3 days |
-| Keychain integration | 1 day |
+| Team commands | 1 day |
 | Lock file generation | 1.5 days |
 | Lock verification | 1 day |
-| Testing | 3 days |
+| Lock commands | 1 day |
+| Testing | 2 days |
 | Documentation | 1 day |
-| **Total** | **19.5 days** |
+| **Total** | **13 days** |
 
 ## Files to Create/Modify
 
 ### New Files
 - `src/team/mod.rs`
 - `src/team/inheritance.rs`
-- `src/team/roles.rs`
 - `src/team/registry.rs`
-- `src/team/policy.rs`
-- `src/auth/mod.rs`
-- `src/auth/sso.rs`
-- `src/auth/keychain.rs`
-- `src/auth/providers/okta.rs`
-- `src/auth/providers/azure.rs`
-- `src/auth/providers/google.rs`
+- `src/team/cache.rs`
 - `src/lock/mod.rs`
 - `src/lock/generate.rs`
 - `src/lock/verify.rs`
+- `src/commands/team.rs`
+- `src/commands/lock.rs`
 - `tests/inheritance_integration.rs`
-- `tests/sso_integration.rs`
-- `tests/policy_integration.rs`
 - `tests/lock_integration.rs`
 
 ### Modified Files
-- `src/main.rs` - Add team, auth, lock commands
-- `src/config.rs` - Add extends, role fields
-- `Cargo.toml` - Add oauth2, keyring dependencies
+- `src/main.rs` - Add team, lock commands
+- `src/config.rs` - Add extends field
+- `Cargo.toml` - Add sha2 dependency
 - `CLAUDE.md` - Document team features
 
 ## Success Metrics
@@ -724,28 +852,24 @@ impl SsoAuth {
 | Metric | Current | Target |
 |--------|---------|--------|
 | Config sharing | Manual copy | Inheritance |
-| Role management | None | Built-in |
 | Team config discovery | None | Registry |
-| Enterprise auth | None | SSO |
-| Policy enforcement | None | Automated |
 | Version reproducibility | None | Lock files |
+| Remote config support | None | URL extends |
 
 ## Risks
 
-1. **SSO complexity**: OAuth2/OIDC flows vary by provider
-   - Mitigation: Start with top 3 providers, abstract differences
-
-2. **Inheritance conflicts**: Deep merge can have unexpected results
+1. **Inheritance conflicts**: Deep merge can have unexpected results
    - Mitigation: Clear precedence rules, `--resolved` flag to inspect
 
-3. **Offline team configs**: Network issues block setup
+2. **Offline remote configs**: Network issues block setup
    - Mitigation: Aggressive caching, offline fallback
 
-4. **Policy friction**: Strict policies frustrate developers
-   - Mitigation: Clear explanations, auto-fix suggestions
-
-5. **Lock file drift**: Easy to forget to update lock
+3. **Lock file drift**: Easy to forget to update lock
    - Mitigation: CI integration, warnings on mismatch
 
-6. **Keychain compatibility**: Different per OS
-   - Mitigation: Use `keyring` crate with fallback
+4. **Cache invalidation**: Stale configs cause issues
+   - Mitigation: Configurable TTL, manual sync command
+
+---
+
+*PRD-024 v1.1 | Team & Enterprise Collaboration | Priority: High*

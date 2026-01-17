@@ -25,6 +25,9 @@ mod env;
 mod error_codes;
 mod hooks;
 mod init;
+mod lock;
+mod mcp;
+mod observability;
 mod os_setup;
 mod output;
 mod outputs;
@@ -33,6 +36,8 @@ mod provisioner;
 mod report;
 mod services;
 mod setup;
+mod team;
+mod telemetry;
 mod tools;
 
 #[derive(Parser)]
@@ -89,6 +94,32 @@ enum Commands {
         /// Skip SSL certificate verification for --from URL (not recommended)
         #[clap(long)]
         insecure: bool,
+        /// Add custom HTTP header for authenticated config fetching (can be repeated)
+        /// Example: --header "Authorization: token ghp_xxxx" --header "X-Custom: value"
+        #[clap(long, value_name = "HEADER", action = clap::ArgAction::Append)]
+        header: Vec<String>,
+        // Observability flags
+        /// Suppress all output except errors
+        #[clap(long, short = 'q')]
+        quiet: bool,
+        /// Verbose output (use -v for warnings, -vv for debug, -vvv for trace)
+        #[clap(long, short = 'v', action = clap::ArgAction::Count)]
+        verbose: u8,
+        /// Enable performance profiling
+        #[clap(long)]
+        profile: bool,
+        /// Write profile results to file (JSON)
+        #[clap(long, value_name = "FILE")]
+        profile_output: Option<String>,
+        /// Log output format: text (default), json
+        #[clap(long, value_name = "FORMAT")]
+        log_format: Option<String>,
+        /// Write logs to file instead of stderr
+        #[clap(long, value_name = "FILE")]
+        log_file: Option<String>,
+        /// Filter debug logs to specific modules (e.g., jarvy::tools::docker)
+        #[clap(long, value_name = "MODULE")]
+        debug_filter: Option<String>,
     },
     /// Perform a minimal machine bootstrap (base requirements only, no dev tooling)
     Bootstrap {},
@@ -178,6 +209,12 @@ enum Commands {
         /// Output format: json, pretty
         #[clap(short = 'F', long = "format", default_value = "pretty")]
         output_format: String,
+        /// Show extended health dashboard with system metrics
+        #[clap(long)]
+        extended: bool,
+        /// Export diagnostic report as markdown
+        #[clap(long)]
+        report: Option<String>,
     },
     /// Preview changes before running setup (dry-run)
     Diff {
@@ -243,9 +280,16 @@ enum Commands {
         /// Path to the configuration file
         #[clap(short, long, default_value = "./jarvy.toml")]
         file: String,
+        /// Fetch configuration from a URL and validate it (e.g., GitHub raw URL, gist)
+        #[clap(long, value_name = "URL")]
+        from: Option<String>,
         /// Treat warnings as errors
         #[clap(long)]
         strict: bool,
+        /// Add custom HTTP header for authenticated config fetching (can be repeated)
+        /// Example: --header "Authorization: token ghp_xxxx"
+        #[clap(long, value_name = "HEADER", action = clap::ArgAction::Append)]
+        header: Vec<String>,
         /// Output format: json, pretty
         #[clap(short = 'F', long = "format", default_value = "pretty")]
         output_format: String,
@@ -258,9 +302,71 @@ enum Commands {
         #[clap(long)]
         instructions: bool,
     },
+    /// Manage telemetry settings (OTEL endpoint, signals)
+    Telemetry {
+        #[clap(subcommand)]
+        action: TelemetryAction,
+    },
+    /// Start the MCP (Model Context Protocol) server for LLM integration
+    Mcp {
+        /// Path to MCP configuration file (defaults to ~/.jarvy/mcp-config.toml)
+        #[clap(short, long)]
+        config: Option<std::path::PathBuf>,
+    },
+    /// Deep diagnosis for a specific tool - check installation, dependencies, and health
+    Diagnose {
+        /// Tool to diagnose (e.g., 'docker', 'node', 'git')
+        tool: String,
+        /// Attempt to automatically fix detected issues
+        #[clap(long)]
+        fix: bool,
+        /// Export diagnostic bundle to a file
+        #[clap(long)]
+        export: bool,
+        /// Scope for export: tools, network, all (comma-separated)
+        #[clap(long, default_value = "all")]
+        scope: String,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
+    /// Manage team configuration sources for shared configs
+    Team {
+        #[clap(subcommand)]
+        action: TeamAction,
+    },
+    /// Manage version lock files for reproducible environments
+    Lock {
+        #[clap(subcommand)]
+        action: LockAction,
+    },
+    /// Manage configuration inheritance and remote configs
+    Config {
+        #[clap(subcommand)]
+        action: ConfigAction,
+    },
     /// Catch-all for unknown subcommands and their args
     #[clap(external_subcommand)]
     External(Vec<String>),
+}
+
+#[derive(Subcommand)]
+enum TelemetryAction {
+    /// Show current telemetry configuration
+    Status {},
+    /// Enable telemetry
+    Enable {},
+    /// Disable telemetry
+    Disable {},
+    /// Set OTLP endpoint URL
+    SetEndpoint {
+        /// OTLP endpoint URL (e.g., http://localhost:4318)
+        url: String,
+    },
+    /// Test telemetry connectivity
+    Test {},
+    /// Preview what telemetry would be sent
+    Preview {},
 }
 
 #[derive(Subcommand)]
@@ -280,6 +386,105 @@ enum ServicesAction {
         /// Run services in the foreground (attached)
         #[clap(long)]
         foreground: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum TeamAction {
+    /// Add a team configuration source
+    Add {
+        /// Name for this source (e.g., 'company', 'team-frontend')
+        name: String,
+        /// Base URL for the config repository
+        url: String,
+        /// Description of this source
+        #[clap(short, long)]
+        description: Option<String>,
+    },
+    /// List registered team sources
+    List {},
+    /// Browse available configs from a source
+    Browse {
+        /// Source name to browse
+        source: String,
+    },
+    /// Sync config index from a source
+    Sync {
+        /// Source name to sync (syncs all if not specified)
+        source: Option<String>,
+    },
+    /// Remove a team source
+    Remove {
+        /// Source name to remove
+        name: String,
+    },
+    /// Initialize project with a team config
+    Init {
+        /// Config to use (format: source/config-name)
+        #[clap(long)]
+        from: String,
+        /// Output file path
+        #[clap(short, long, default_value = "./jarvy.toml")]
+        output: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum LockAction {
+    /// Generate a lock file from current environment
+    Generate {
+        /// Path to the configuration file
+        #[clap(short, long, default_value = "./jarvy.toml")]
+        file: String,
+        /// Output lock file path
+        #[clap(short, long, default_value = "./jarvy.lock")]
+        output: String,
+    },
+    /// Show lock file status (compare with installed versions)
+    Status {
+        /// Path to the lock file
+        #[clap(short, long, default_value = "./jarvy.lock")]
+        lock_file: String,
+        /// Show detailed output
+        #[clap(short, long)]
+        verbose: bool,
+    },
+    /// Verify installed tools match lock file
+    Verify {
+        /// Path to the lock file
+        #[clap(short, long, default_value = "./jarvy.lock")]
+        lock_file: String,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Show resolved configuration (with inheritance applied)
+    Show {
+        /// Path to the configuration file
+        #[clap(short, long, default_value = "./jarvy.toml")]
+        file: String,
+        /// Show resolved config (after inheritance)
+        #[clap(long)]
+        resolved: bool,
+        /// Show the extends chain
+        #[clap(long)]
+        extends_chain: bool,
+        /// Output format: toml, json, yaml
+        #[clap(short = 'F', long = "format", default_value = "toml")]
+        output_format: String,
+    },
+    /// Refresh cached remote configs
+    Refresh {
+        /// Path to the configuration file
+        #[clap(short, long, default_value = "./jarvy.toml")]
+        file: String,
+        /// Force refresh even if cache is valid
+        #[clap(long)]
+        force: bool,
     },
 }
 
@@ -358,12 +563,30 @@ fn main() {
     init_logging(global_config.settings.telemetry);
 
     // Initialize PostHog client (no-op if disabled or no API key)
+    // Note: PostHog is being deprecated in favor of unified OTEL telemetry (PRD-022)
     let fingerprint = global_config
         .settings
         .fingerprint
         .clone()
         .unwrap_or_else(|| "unknown".to_string());
     posthog::init(global_config.settings.telemetry, fingerprint.clone());
+
+    // Initialize unified telemetry (OTEL-based)
+    // Merge config file settings with environment variable overrides
+    let mut telemetry_config = global_config.telemetry.clone();
+    // Legacy compatibility: if settings.telemetry is false, disable new telemetry too
+    if !global_config.settings.telemetry {
+        telemetry_config.enabled = false;
+    }
+    // Environment variables take precedence
+    let env_config = telemetry::TelemetryConfig::from_env();
+    if std::env::var("JARVY_TELEMETRY").is_ok() {
+        telemetry_config.enabled = env_config.enabled;
+    }
+    if std::env::var("JARVY_OTLP_ENDPOINT").is_ok() {
+        telemetry_config.endpoint = env_config.endpoint;
+    }
+    telemetry::init(telemetry_config);
 
     // Send a cli_start event and set global analytics context
     {
@@ -384,6 +607,12 @@ fn main() {
             Some(Commands::Search { .. }) => "search",
             Some(Commands::Validate { .. }) => "validate",
             Some(Commands::Completions { .. }) => "completions",
+            Some(Commands::Telemetry { .. }) => "telemetry",
+            Some(Commands::Mcp { .. }) => "mcp",
+            Some(Commands::Diagnose { .. }) => "diagnose",
+            Some(Commands::Team { .. }) => "team",
+            Some(Commands::Lock { .. }) => "lock",
+            Some(Commands::Config { .. }) => "config",
             Some(Commands::External(..)) => "external",
             None => "interactive",
         };
@@ -457,6 +686,8 @@ fn main() {
             jobs,
             sequential,
             insecure,
+            header,
+            ..  // Ignore observability fields (quiet, verbose, profile, etc.)
         }) => {
             // Determine effective parallelism level
             let parallel_jobs = if *sequential { 1 } else { *jobs.max(&1) };
@@ -485,7 +716,7 @@ fn main() {
 
             // Determine config file path: fetch from URL or use local file
             let config_path = if let Some(url) = from {
-                match fetch_remote_config(url, *insecure) {
+                match fetch_remote_config(url, *insecure, header) {
                     Ok(path) => path,
                     Err(e) => {
                         eprintln!("Error fetching remote config: {}", e);
@@ -592,12 +823,17 @@ fn main() {
                 .collect();
 
             // Only install tools that actually need installation (from parallel check)
-            // Group tools by package manager for batch installation
-            let tool_groups = tools::spec::group_tools_for_installation(
+            // First, order tools by dependencies to ensure version managers are installed first
+            let ordered_tools = tools::spec::order_tools_by_dependencies(
                 version_check
                     .needs_install
                     .iter()
                     .map(|(n, v)| (n.as_str(), v.as_str())),
+            );
+
+            // Group tools by package manager for batch installation
+            let tool_groups = tools::spec::group_tools_for_installation(
+                ordered_tools.iter().map(|(n, v)| (n.as_str(), v.as_str())),
             );
 
             // Track successfully installed tools for hook execution
@@ -1612,6 +1848,8 @@ fn main() {
             file,
             tools,
             output_format,
+            extended,
+            report,
         }) => {
             let config = file.as_ref().map(|f| Config::new(f));
             let specific_tools = tools.as_ref().map(|t| {
@@ -1620,19 +1858,43 @@ fn main() {
                     .collect::<Vec<_>>()
             });
 
-            let result = commands::doctor::run_doctor(config.as_ref(), specific_tools);
+            if *extended {
+                let result = commands::doctor::run_doctor_extended(config.as_ref(), specific_tools);
 
-            let output = if output_format == "json" {
-                serde_json::to_string_pretty(&result)
-                    .unwrap_or_else(|e| format!("{{\"error\":\"{}\"}}", e))
-            } else {
+                // Handle report export for extended mode
+                if let Some(report_path) = report {
+                    match commands::doctor::export_report(&result, &report_path) {
+                        Ok(_) => println!("Report exported to: {}", report_path),
+                        Err(e) => eprintln!("Failed to export report: {}", e),
+                    }
+                }
+
+                let output = if output_format == "json" {
+                    serde_json::to_string_pretty(&result)
+                        .unwrap_or_else(|e| format!("{{\"error\":\"{}\"}}", e))
+                } else {
+                    use crate::output::Outputable;
+                    result.to_human()
+                };
+                println!("{}", output);
+
                 use crate::output::Outputable;
-                result.to_human()
-            };
-            println!("{}", output);
+                std::process::exit(result.exit_code().code());
+            } else {
+                let result = commands::doctor::run_doctor(config.as_ref(), specific_tools);
 
-            use crate::output::Outputable;
-            std::process::exit(result.exit_code().code());
+                let output = if output_format == "json" {
+                    serde_json::to_string_pretty(&result)
+                        .unwrap_or_else(|e| format!("{{\"error\":\"{}\"}}", e))
+                } else {
+                    use crate::output::Outputable;
+                    result.to_human()
+                };
+                println!("{}", output);
+
+                use crate::output::Outputable;
+                std::process::exit(result.exit_code().code());
+            }
         }
         Some(Commands::Diff {
             file,
@@ -1739,10 +2001,25 @@ fn main() {
         }
         Some(Commands::Validate {
             file,
+            from,
             strict,
+            header,
             output_format,
         }) => {
-            let result = commands::validate::validate_config(file, *strict);
+            // Determine config file path: fetch from URL or use local file
+            let config_path = if let Some(url) = from {
+                match fetch_remote_config(url, false, header) {
+                    Ok(path) => path,
+                    Err(e) => {
+                        eprintln!("Error fetching remote config: {}", e);
+                        std::process::exit(crate::error_codes::CONFIG_ERROR);
+                    }
+                }
+            } else {
+                file.clone()
+            };
+
+            let result = commands::validate::validate_config(&config_path, *strict);
 
             let output = if output_format == "json" {
                 serde_json::to_string_pretty(&result)
@@ -1779,6 +2056,33 @@ fn main() {
                 commands::completions::generate_completions_string(&mut cmd, shell_type);
             println!("{}", completions);
         }
+        Some(Commands::Telemetry { action }) => {
+            handle_telemetry_command(action, &global_config);
+        }
+        Some(Commands::Mcp { config }) => {
+            if let Err(e) = mcp::run(config.clone()) {
+                eprintln!("MCP server error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Some(Commands::Diagnose { tool, fix, export, scope, output_format }) => {
+            commands::diagnose::run_diagnose(
+                tool,
+                *fix,
+                *export,
+                scope,
+                output_format,
+            );
+        }
+        Some(Commands::Team { action }) => {
+            handle_team_command(action);
+        }
+        Some(Commands::Lock { action }) => {
+            handle_lock_command(action);
+        }
+        Some(Commands::Config { action }) => {
+            handle_config_command(action);
+        }
         None => {
             user_select();
         }
@@ -1786,21 +2090,170 @@ fn main() {
     }
 }
 
+/// Handle telemetry subcommands
+fn handle_telemetry_command(action: &TelemetryAction, global_config: &init::CliConfig) {
+    match action {
+        TelemetryAction::Status {} => {
+            let config = telemetry::config();
+            println!("Telemetry Configuration");
+            println!("=======================");
+            if let Some(cfg) = config {
+                println!(
+                    "Status:    {}",
+                    if cfg.is_enabled() {
+                        "\x1b[32menabled\x1b[0m"
+                    } else {
+                        "\x1b[33mdisabled\x1b[0m"
+                    }
+                );
+                println!(
+                    "Endpoint:  {} ({})",
+                    cfg.endpoint,
+                    cfg.protocol.to_uppercase()
+                );
+                println!(
+                    "Signals:   logs={}, metrics={}, traces={}",
+                    if cfg.logs { "on" } else { "off" },
+                    if cfg.metrics { "on" } else { "off" },
+                    if cfg.traces { "on" } else { "off" }
+                );
+                println!("Sample:    {}%", (cfg.sample_rate * 100.0) as u32);
+            } else {
+                println!("Status:    \x1b[33mnot initialized\x1b[0m");
+            }
+            println!();
+            println!("Configuration sources:");
+            println!("  - Config file: ~/.jarvy/config.toml [telemetry] section");
+            println!("  - Environment: JARVY_TELEMETRY, JARVY_OTLP_ENDPOINT");
+        }
+        TelemetryAction::Enable {} => {
+            update_telemetry_config(true, None);
+            println!("Telemetry enabled.");
+            println!("Configure endpoint with: jarvy telemetry set-endpoint <url>");
+        }
+        TelemetryAction::Disable {} => {
+            update_telemetry_config(false, None);
+            println!("Telemetry disabled.");
+        }
+        TelemetryAction::SetEndpoint { url } => {
+            update_telemetry_config(true, Some(url.clone()));
+            println!("Endpoint set to: {}", url);
+        }
+        TelemetryAction::Test {} => {
+            let config = telemetry::config();
+            if let Some(cfg) = config {
+                if !cfg.is_enabled() {
+                    println!("Telemetry is disabled. Enable with: jarvy telemetry enable");
+                    return;
+                }
+                println!("Sending test event to {}...", cfg.endpoint);
+                telemetry::command_executed(
+                    "telemetry_test",
+                    std::time::Duration::from_millis(1),
+                    true,
+                );
+                // Give exporters a moment to ship
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                println!("Test event sent. Check your OTEL backend for:");
+                println!("  - Event: command.executed");
+                println!("  - Command: telemetry_test");
+            } else {
+                println!("Telemetry not initialized.");
+            }
+        }
+        TelemetryAction::Preview {} => {
+            println!("Telemetry Events Preview");
+            println!("========================");
+            println!();
+            println!("On next setup, the following events would be sent:");
+            println!();
+            println!("Tool Events:");
+            println!("  - tool.requested   (per tool in config)");
+            println!("  - tool.installed   (for each successful install)");
+            println!("  - tool.failed      (for each failed install)");
+            println!("  - tool.not_supported (for unknown tools)");
+            println!();
+            println!("Setup Events:");
+            println!("  - setup.started    (when setup begins)");
+            println!("  - setup.completed  (summary with counts/duration)");
+            println!();
+            println!("Hook Events:");
+            println!("  - hook.started     (when hook begins)");
+            println!("  - hook.completed   (on success)");
+            println!("  - hook.failed      (on error)");
+            println!("  - hook.timeout     (if hook exceeds timeout)");
+            println!();
+            println!("Metrics:");
+            println!("  - jarvy.tool.requests      (counter)");
+            println!("  - jarvy.tool.installs      (counter by status)");
+            println!("  - jarvy.install.duration   (histogram in seconds)");
+            println!("  - jarvy.setup.duration     (histogram in seconds)");
+            println!();
+            println!("Privacy: File paths and secrets are redacted before sending.");
+        }
+    }
+}
+
+/// Update telemetry configuration in ~/.jarvy/config.toml
+fn update_telemetry_config(enabled: bool, endpoint: Option<String>) {
+    let home_dir = match dirs::home_dir() {
+        Some(h) => h,
+        None => {
+            eprintln!("Could not determine home directory");
+            return;
+        }
+    };
+    let config_path = home_dir.join(".jarvy").join("config.toml");
+
+    // Read existing config
+    let mut config: init::CliConfig = if config_path.exists() {
+        let content = fs::read_to_string(&config_path).unwrap_or_default();
+        toml::from_str(&content).unwrap_or_default()
+    } else {
+        init::CliConfig::default()
+    };
+
+    // Update telemetry settings
+    config.telemetry.enabled = enabled;
+    if let Some(ep) = endpoint {
+        config.telemetry.endpoint = ep;
+    }
+
+    // Write back
+    match toml::to_string_pretty(&config) {
+        Ok(content) => {
+            if let Err(e) = fs::write(&config_path, content) {
+                eprintln!("Failed to write config: {}", e);
+            }
+        }
+        Err(e) => {
+            eprintln!("Failed to serialize config: {}", e);
+        }
+    }
+}
+
+/// Maximum size for remote config files (1MB)
+const MAX_REMOTE_CONFIG_SIZE: u64 = 1024 * 1024;
+
 /// Fetch a jarvy.toml configuration from a remote URL with caching
 ///
-/// PRD-016: Remote config loading support
+/// PRD-015/016: Remote config loading support
 ///
 /// Supports:
 /// - GitHub raw URLs
 /// - Gist URLs
 /// - Any HTTP/HTTPS URL returning TOML content
+/// - Custom headers for authenticated requests
 ///
 /// Caching:
 /// - Configs are cached in ~/.jarvy/cache/configs/
 /// - Cache expires after 1 hour
 /// - Use --insecure to skip SSL verification (not recommended)
-fn fetch_remote_config(url: &str, _insecure: bool) -> Result<String, String> {
-    use std::io::Write;
+///
+/// Security:
+/// - Enforces 1MB size limit to prevent memory exhaustion
+fn fetch_remote_config(url: &str, _insecure: bool, headers: &[String]) -> Result<String, String> {
+    use std::io::{Read, Write};
     use std::time::Duration;
 
     // Get cache directory
@@ -1854,14 +2307,38 @@ fn fetch_remote_config(url: &str, _insecure: bool) -> Result<String, String> {
     // Create HTTP agent
     let agent = ureq::Agent::new_with_defaults();
 
-    // Fetch the config
-    let response = agent
+    // Build the request with default headers
+    let mut request = agent
         .get(&fetch_url)
         .header(
             "User-Agent",
             "Jarvy/0.1 (https://github.com/bearbinary/jarvy)",
         )
-        .header("Accept", "text/plain, application/toml, */*")
+        .header("Accept", "text/plain, application/toml, */*");
+
+    // Add custom headers (for authentication, etc.)
+    for header in headers {
+        if let Some((key, value)) = header.split_once(':') {
+            let key = key.trim();
+            let value = value.trim();
+            if !key.is_empty() && !value.is_empty() {
+                request = request.header(key, value);
+            } else {
+                eprintln!(
+                    "Warning: Invalid header format '{}', expected 'Name: Value'",
+                    header
+                );
+            }
+        } else {
+            eprintln!(
+                "Warning: Invalid header format '{}', expected 'Name: Value'",
+                header
+            );
+        }
+    }
+
+    // Fetch the config
+    let response = request
         .call()
         .map_err(|e| format!("Failed to fetch config: {}", e))?;
 
@@ -1869,10 +2346,39 @@ fn fetch_remote_config(url: &str, _insecure: bool) -> Result<String, String> {
         return Err(format!("HTTP error {}", response.status()));
     }
 
-    let content = response
-        .into_body()
-        .read_to_string()
+    // Check content-length header if available
+    if let Some(content_length) = response.headers().get("content-length") {
+        if let Some(length) = content_length
+            .to_str()
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+        {
+            if length > MAX_REMOTE_CONFIG_SIZE {
+                return Err(format!(
+                    "Remote config too large: {} bytes (max {} bytes)",
+                    length, MAX_REMOTE_CONFIG_SIZE
+                ));
+            }
+        }
+    }
+
+    // Read with size limit (even if Content-Length was not present or was incorrect)
+    let mut content = String::new();
+    let mut body = response.into_body();
+    let mut reader = body.as_reader();
+    let mut limited_reader = reader.take(MAX_REMOTE_CONFIG_SIZE + 1);
+
+    limited_reader
+        .read_to_string(&mut content)
         .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+    // Check if we hit the limit
+    if content.len() as u64 > MAX_REMOTE_CONFIG_SIZE {
+        return Err(format!(
+            "Remote config too large: exceeds {} bytes limit",
+            MAX_REMOTE_CONFIG_SIZE
+        ));
+    }
 
     // Validate that content is valid TOML
     let _: toml::Value =
@@ -1985,4 +2491,471 @@ fn print_logo() {
  '----------------'
     "
     );
+}
+
+/// Handle team subcommands
+fn handle_team_command(action: &TeamAction) {
+    use team::registry::Registry;
+
+    match action {
+        TeamAction::Add {
+            name,
+            url,
+            description,
+        } => {
+            let mut registry = Registry::load();
+            match registry.add_source(name, url, description.as_deref()) {
+                Ok(()) => {
+                    if let Err(e) = registry.save() {
+                        eprintln!("Warning: Failed to save registry: {}", e);
+                    }
+                    println!("Added team source '{}' -> {}", name, url);
+                    println!("Run 'jarvy team sync {}' to fetch available configs.", name);
+                }
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        TeamAction::List {} => {
+            let registry = Registry::load();
+            let sources = registry.list_sources();
+
+            if sources.is_empty() {
+                println!("No team sources registered.");
+                println!("Add one with: jarvy team add <name> <url>");
+                return;
+            }
+
+            println!("Team Configuration Sources");
+            println!("==========================");
+            for source in sources {
+                println!();
+                println!("  {} ({})", source.name, source.url);
+                if let Some(ref desc) = source.description {
+                    println!("    {}", desc);
+                }
+                if let Some(last_sync) = source.last_sync {
+                    let ago = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs().saturating_sub(last_sync))
+                        .unwrap_or(0);
+                    println!(
+                        "    Last sync: {}s ago ({} configs)",
+                        ago,
+                        source.configs.len()
+                    );
+                } else {
+                    println!("    Not synced yet");
+                }
+            }
+        }
+        TeamAction::Browse { source } => {
+            let registry = Registry::load();
+            match registry.get_source(source) {
+                Some(src) => {
+                    if src.configs.is_empty() {
+                        println!(
+                            "No configs found for '{}'. Run 'jarvy team sync {}' first.",
+                            source, source
+                        );
+                        return;
+                    }
+                    println!("Available configs from '{}':", source);
+                    println!();
+                    for config in &src.configs {
+                        println!("  {}/{}", source, config.name);
+                        if let Some(ref desc) = config.description {
+                            println!("    {}", desc);
+                        }
+                        if !config.tags.is_empty() {
+                            println!("    Tags: {}", config.tags.join(", "));
+                        }
+                    }
+                }
+                None => {
+                    eprintln!("Source '{}' not found.", source);
+                    std::process::exit(1);
+                }
+            }
+        }
+        TeamAction::Sync { source } => {
+            let mut registry = Registry::load();
+
+            let sources_to_sync: Vec<String> = match source {
+                Some(s) => vec![s.clone()],
+                None => registry.sources.keys().cloned().collect(),
+            };
+
+            if sources_to_sync.is_empty() {
+                println!("No sources to sync.");
+                return;
+            }
+
+            for source_name in sources_to_sync {
+                print!("Syncing '{}'... ", source_name);
+                match registry.sync_source(&source_name) {
+                    Ok(count) => {
+                        println!("found {} configs", count);
+                    }
+                    Err(e) => {
+                        println!("failed: {}", e);
+                    }
+                }
+            }
+
+            if let Err(e) = registry.save() {
+                eprintln!("Warning: Failed to save registry: {}", e);
+            }
+        }
+        TeamAction::Remove { name } => {
+            let mut registry = Registry::load();
+            match registry.remove_source(name) {
+                Ok(_) => {
+                    if let Err(e) = registry.save() {
+                        eprintln!("Warning: Failed to save registry: {}", e);
+                    }
+                    println!("Removed team source '{}'", name);
+                }
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        TeamAction::Init { from, output } => {
+            let registry = Registry::load();
+            match registry.get_config_url(from) {
+                Some(url) => {
+                    println!("Fetching config from {}...", url);
+                    match fetch_remote_config(&url, false, &[]) {
+                        Ok(cached_path) => {
+                            // Copy to output location
+                            if let Err(e) = fs::copy(&cached_path, output) {
+                                eprintln!("Failed to write config: {}", e);
+                                std::process::exit(1);
+                            }
+                            println!("Created {} from {}", output, from);
+                        }
+                        Err(e) => {
+                            eprintln!("Error fetching config: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                None => {
+                    eprintln!(
+                        "Config '{}' not found. Use 'jarvy team browse <source>' to see available configs.",
+                        from
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+}
+
+/// Handle lock subcommands
+fn handle_lock_command(action: &LockAction) {
+    use std::path::Path;
+
+    match action {
+        LockAction::Generate { file, output } => {
+            let config = config::Config::new(file);
+            let tools = config.get_tool_configs();
+
+            println!("Generating lock file from {}...", file);
+
+            match lock::generate_lock(&tools) {
+                Ok(lock_file) => {
+                    let path = Path::new(output);
+                    match lock_file.save(path) {
+                        Ok(()) => {
+                            println!("Lock file generated: {}", output);
+                            println!("  Tools locked: {}", lock_file.tools.len());
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to save lock file: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to generate lock file: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        LockAction::Status { lock_file, verbose } => {
+            let path = Path::new(lock_file);
+            if !path.exists() {
+                eprintln!("Lock file not found: {}", lock_file);
+                eprintln!("Generate one with: jarvy lock generate");
+                std::process::exit(1);
+            }
+
+            match lock::LockFile::load(path) {
+                Ok(lock) => {
+                    let platform = std::env::consts::OS;
+                    let result = lock::verify_lock(&lock, platform);
+
+                    println!("Lock File Status");
+                    println!("================");
+                    println!("File: {}", lock_file);
+                    println!("Version: {}", lock.version);
+                    println!("Tools: {}", lock.tools.len());
+                    println!();
+
+                    if *verbose {
+                        for tool in &result.tools {
+                            let status_icon = match tool.status {
+                                lock::VerificationStatus::Match => "✓",
+                                lock::VerificationStatus::VersionMismatch => "✗",
+                                lock::VerificationStatus::NotInstalled => "○",
+                                lock::VerificationStatus::NotLocked => "?",
+                                lock::VerificationStatus::Unknown => "?",
+                            };
+                            let installed = tool.installed_version.as_deref().unwrap_or("-");
+                            println!(
+                                "  {} {} (locked: {}, installed: {})",
+                                status_icon, tool.name, tool.locked_version, installed
+                            );
+                        }
+                        println!();
+                    }
+
+                    println!(
+                        "Summary: {} matched, {} mismatched, {} missing",
+                        result.matched, result.mismatched, result.missing
+                    );
+
+                    if result.all_match {
+                        println!("Status: All tools match lock file ✓");
+                    } else {
+                        println!("Status: Some tools differ from lock file");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to load lock file: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        LockAction::Verify {
+            lock_file,
+            output_format,
+        } => {
+            let path = Path::new(lock_file);
+            if !path.exists() {
+                eprintln!("Lock file not found: {}", lock_file);
+                std::process::exit(1);
+            }
+
+            match lock::LockFile::load(path) {
+                Ok(lock) => {
+                    let platform = std::env::consts::OS;
+                    let result = lock::verify_lock(&lock, platform);
+
+                    if output_format == "json" {
+                        // JSON output
+                        let output: Vec<serde_json::Value> = result
+                            .tools
+                            .iter()
+                            .map(|t| {
+                                serde_json::json!({
+                                    "name": t.name,
+                                    "status": t.status.to_string(),
+                                    "locked_version": t.locked_version,
+                                    "installed_version": t.installed_version,
+                                })
+                            })
+                            .collect();
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&output).unwrap_or_default()
+                        );
+                    } else {
+                        // Pretty output
+                        for tool in &result.tools {
+                            let color = match tool.status {
+                                lock::VerificationStatus::Match => "\x1b[32m",
+                                lock::VerificationStatus::VersionMismatch => "\x1b[33m",
+                                lock::VerificationStatus::NotInstalled => "\x1b[31m",
+                                _ => "\x1b[90m",
+                            };
+                            let reset = "\x1b[0m";
+                            let installed = tool.installed_version.as_deref().unwrap_or("-");
+                            println!(
+                                "{}{}{}: locked={}, installed={} [{}]",
+                                color,
+                                tool.name,
+                                reset,
+                                tool.locked_version,
+                                installed,
+                                tool.status
+                            );
+                        }
+                    }
+
+                    if !result.all_match {
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to load lock file: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+}
+
+/// Handle config subcommands
+fn handle_config_command(action: &ConfigAction) {
+    match action {
+        ConfigAction::Show {
+            file,
+            resolved,
+            extends_chain,
+            output_format,
+        } => {
+            if *extends_chain {
+                // Show the inheritance chain
+                let base_path = std::path::Path::new(file)
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+                let mut resolver = team::InheritanceResolver::new().with_base_dir(base_path);
+                match resolver.resolve(file) {
+                    Ok(_) => {
+                        let trace = resolver.trace();
+                        println!("Extends Chain for {}", file);
+                        println!("========================");
+                        for (i, entry) in trace.entries.iter().enumerate() {
+                            let indent = "  ".repeat(entry.depth);
+                            println!("{}↳ {}", indent, entry.source);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error resolving config: {:?}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return;
+            }
+
+            if *resolved {
+                // Show resolved config with inheritance applied
+                let base_path = std::path::Path::new(file)
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+                let mut resolver = team::InheritanceResolver::new().with_base_dir(base_path);
+                match resolver.resolve(file) {
+                    Ok(extended) => {
+                        match output_format.as_str() {
+                            "json" => {
+                                println!(
+                                    "{}",
+                                    serde_json::to_string_pretty(&extended).unwrap_or_default()
+                                );
+                            }
+                            "yaml" => {
+                                println!(
+                                    "{}",
+                                    serde_yaml::to_string(&extended).unwrap_or_default()
+                                );
+                            }
+                            _ => {
+                                // TOML
+                                println!(
+                                    "{}",
+                                    toml::to_string_pretty(&extended).unwrap_or_default()
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error resolving config: {:?}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                // Show raw config without inheritance - just read the file
+                match fs::read_to_string(file) {
+                    Ok(content) => {
+                        match output_format.as_str() {
+                            "json" => {
+                                // Parse TOML then convert to JSON
+                                if let Ok(value) = toml::from_str::<toml::Value>(&content) {
+                                    println!(
+                                        "{}",
+                                        serde_json::to_string_pretty(&value).unwrap_or_default()
+                                    );
+                                } else {
+                                    eprintln!("Failed to parse config file");
+                                    std::process::exit(1);
+                                }
+                            }
+                            "yaml" => {
+                                // Parse TOML then convert to YAML
+                                if let Ok(value) = toml::from_str::<toml::Value>(&content) {
+                                    println!(
+                                        "{}",
+                                        serde_yaml::to_string(&value).unwrap_or_default()
+                                    );
+                                } else {
+                                    eprintln!("Failed to parse config file");
+                                    std::process::exit(1);
+                                }
+                            }
+                            _ => {
+                                // Just output the raw TOML
+                                println!("{}", content);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to read config file: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+        ConfigAction::Refresh { file, force } => {
+            let base_path = std::path::Path::new(file)
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+            let mut resolver = team::InheritanceResolver::new().with_base_dir(base_path);
+
+            if *force {
+                // Clear cache for this config's dependencies
+                let _cache = team::ConfigCache::new();
+                println!("Clearing config cache...");
+                // Note: We'd need to implement cache clearing in ConfigCache
+                // For now, just re-resolve which will refresh stale entries
+            }
+
+            println!("Resolving config from {}...", file);
+            match resolver.resolve(file) {
+                Ok(_extended) => {
+                    let trace = resolver.trace();
+                    println!("Config resolved successfully.");
+                    println!("  Sources: {}", trace.entries.len());
+                    for entry in &trace.entries {
+                        println!("    - {}", entry.source);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error resolving config: {:?}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
 }

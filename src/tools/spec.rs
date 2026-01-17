@@ -261,6 +261,11 @@ pub struct ToolSpec {
     /// Used for shell integration, PATH setup, config generation, etc.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_hook: Option<DefaultHook>,
+
+    /// Optional list of tool names that must be installed before this tool.
+    /// Used for dependency ordering (e.g., node depends on nvm, python depends on pyenv).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depends_on: Option<&'static [&'static str]>,
 }
 
 impl ToolSpec {
@@ -418,6 +423,15 @@ impl ToolSpec {
 ///     linux: { uniform: "git" },
 ///     windows: { winget: "Git.Git" },
 /// });
+///
+/// // With dependencies:
+/// define_tool!(node, {
+///     command: "node",
+///     macos: { brew: "node" },
+///     linux: { uniform: "nodejs" },
+///     windows: { winget: "OpenJS.NodeJS" },
+///     depends_on: &["nvm"],  // nvm must be installed before node
+/// });
 /// ```
 #[macro_export]
 macro_rules! define_tool {
@@ -429,6 +443,7 @@ macro_rules! define_tool {
         $(windows: { $($windows_key:ident: $windows_val:expr),* $(,)? },)?
         $(custom_install: $custom:expr,)?
         $(default_hook: { description: $hook_desc:expr, script: $hook_script:expr $(, platform: $hook_platform:expr)? },)?
+        $(depends_on: $deps:expr,)?
     }) => {
         pub static $name: $crate::tools::spec::ToolSpec = $crate::tools::spec::ToolSpec {
             name: stringify!($name),
@@ -438,6 +453,7 @@ macro_rules! define_tool {
             windows: define_tool!(@windows $($($windows_key: $windows_val),*)?),
             custom_install: define_tool!(@custom $($custom)?),
             default_hook: define_tool!(@default_hook $($hook_desc, $hook_script $(, $hook_platform)?)?),
+            depends_on: define_tool!(@depends_on $($deps)?),
         };
 
         pub fn ensure(min_hint: &str) -> Result<(), $crate::tools::common::InstallError> {
@@ -525,6 +541,10 @@ macro_rules! define_tool {
     (@default_hook $desc:expr, $script:expr, $platform:expr) => {
         Some($crate::tools::spec::DefaultHook::for_platform($desc, $script, $platform))
     };
+
+    // Dependency helpers
+    (@depends_on) => { None };
+    (@depends_on $deps:expr) => { Some($deps) };
 }
 
 pub use define_tool;
@@ -1019,6 +1039,110 @@ where
     groups
 }
 
+// ============================================================================
+// Dependency Ordering
+// ============================================================================
+
+/// Get the dependencies of a tool by name.
+/// Returns an empty slice if the tool has no dependencies or is not found.
+pub fn get_tool_dependencies(tool_name: &str) -> &'static [&'static str] {
+    get_tool_spec(tool_name)
+        .and_then(|spec| spec.depends_on)
+        .unwrap_or(&[])
+}
+
+/// Order tools by their dependencies using topological sort.
+///
+/// Tools with dependencies will be placed after their dependencies.
+/// If tool A depends on tool B, then B will appear before A in the result.
+///
+/// # Arguments
+/// * `tools` - Iterator of (tool_name, version) tuples
+///
+/// # Returns
+/// A Vec of (tool_name, version) tuples ordered by dependencies.
+/// If dependencies are missing from the input, they are NOT automatically added.
+pub fn order_tools_by_dependencies<'a, I>(tools: I) -> Vec<(String, String)>
+where
+    I: Iterator<Item = (&'a str, &'a str)>,
+{
+    use std::collections::{HashMap, HashSet, VecDeque};
+
+    let tool_list: Vec<(String, String)> = tools
+        .map(|(n, v)| (n.to_lowercase(), v.to_string()))
+        .collect();
+
+    // Build a set of tools we're installing (for dependency filtering)
+    let tool_set: HashSet<&str> = tool_list.iter().map(|(n, _)| n.as_str()).collect();
+
+    // Build adjacency list (tool -> tools that depend on it)
+    // and in-degree map (tool -> count of dependencies within our set)
+    let mut dependents: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut in_degree: HashMap<&str, usize> = HashMap::new();
+
+    for (name, _) in &tool_list {
+        in_degree.entry(name.as_str()).or_insert(0);
+
+        let deps = get_tool_dependencies(name);
+        for dep in deps {
+            let dep_lower = dep.to_lowercase();
+            // Only count dependencies that are in our tool set
+            if tool_set.contains(dep_lower.as_str()) {
+                *in_degree.entry(name.as_str()).or_insert(0) += 1;
+                dependents
+                    .entry(dep_lower.leak()) // leak is safe for static strings
+                    .or_default()
+                    .push(name.as_str());
+            }
+        }
+    }
+
+    // Create a map from tool name to version for lookup
+    let version_map: HashMap<&str, &str> = tool_list
+        .iter()
+        .map(|(n, v)| (n.as_str(), v.as_str()))
+        .collect();
+
+    // Kahn's algorithm for topological sort
+    let mut queue: VecDeque<&str> = in_degree
+        .iter()
+        .filter(|(_, deg)| **deg == 0)
+        .map(|(name, _)| *name)
+        .collect();
+
+    let mut result: Vec<(String, String)> = Vec::with_capacity(tool_list.len());
+
+    while let Some(tool) = queue.pop_front() {
+        if let Some(&version) = version_map.get(tool) {
+            result.push((tool.to_string(), version.to_string()));
+        }
+
+        if let Some(deps) = dependents.get(tool) {
+            for &dependent in deps {
+                if let Some(deg) = in_degree.get_mut(dependent) {
+                    *deg = deg.saturating_sub(1);
+                    if *deg == 0 {
+                        queue.push_back(dependent);
+                    }
+                }
+            }
+        }
+    }
+
+    // If result is shorter than input, there's a cycle - return original order
+    if result.len() != tool_list.len() {
+        eprintln!("Warning: Circular dependency detected. Installing tools in original order.");
+        return tool_list;
+    }
+
+    result
+}
+
+/// Check if a tool has any dependencies.
+pub fn tool_has_dependencies(tool_name: &str) -> bool {
+    !get_tool_dependencies(tool_name).is_empty()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1038,6 +1162,7 @@ mod tests {
         }),
         custom_install: None,
         default_hook: None,
+        depends_on: None,
     };
 
     // Test ToolSpec with a default hook
@@ -1052,6 +1177,7 @@ mod tests {
             "Configure test tool",
             "echo 'test hook executed'",
         )),
+        depends_on: None,
     };
 
     #[test]
@@ -1120,6 +1246,7 @@ mod tests {
             windows: None,
             custom_install: None,
             default_hook: None,
+            depends_on: None,
         };
         assert!(!tool.is_satisfied("1.0"));
     }
@@ -1149,6 +1276,7 @@ mod tests {
             windows: None,
             custom_install: Some(|_| Ok(())),
             default_hook: None,
+            depends_on: None,
         };
         let entry = ToolIndexEntry::from(&custom_tool);
         assert!(entry.custom_install.has_custom_installer);
@@ -1350,6 +1478,7 @@ mod tests {
                 "winget info",
                 "windows",
             )),
+            depends_on: None,
         };
 
         // Hook should be available on current platform
@@ -1430,5 +1559,75 @@ mod tests {
         assert!(!has_custom_installer("jq"));
         // git does not have a custom installer
         assert!(!has_custom_installer("git"));
+    }
+
+    // ========================================================================
+    // Dependency Ordering Tests
+    // ========================================================================
+
+    #[test]
+    fn test_get_tool_dependencies_no_deps() {
+        // Tools without dependencies should return empty slice
+        let deps = get_tool_dependencies("nonexistent");
+        assert!(deps.is_empty());
+    }
+
+    #[test]
+    fn test_tool_has_dependencies() {
+        // Unknown tools have no dependencies
+        assert!(!tool_has_dependencies("nonexistent"));
+        // Most standard tools have no dependencies
+        assert!(!tool_has_dependencies("git"));
+    }
+
+    #[test]
+    fn test_order_tools_no_dependencies() {
+        // Tools without dependencies should maintain relative order
+        let tools = vec![("git", "2.0"), ("jq", "1.6"), ("curl", "7.0")];
+        let ordered = order_tools_by_dependencies(tools.into_iter());
+        assert_eq!(ordered.len(), 3);
+        // Names should be lowercase
+        assert!(ordered.iter().any(|(n, _)| n == "git"));
+        assert!(ordered.iter().any(|(n, _)| n == "jq"));
+        assert!(ordered.iter().any(|(n, _)| n == "curl"));
+    }
+
+    #[test]
+    fn test_order_tools_empty_input() {
+        let tools: Vec<(&str, &str)> = vec![];
+        let ordered = order_tools_by_dependencies(tools.into_iter());
+        assert!(ordered.is_empty());
+    }
+
+    #[test]
+    fn test_order_tools_single_tool() {
+        let tools = vec![("git", "2.0")];
+        let ordered = order_tools_by_dependencies(tools.into_iter());
+        assert_eq!(ordered.len(), 1);
+        assert_eq!(ordered[0].0, "git");
+        assert_eq!(ordered[0].1, "2.0");
+    }
+
+    #[test]
+    fn test_order_tools_preserves_versions() {
+        let tools = vec![("git", "2.40.0"), ("jq", "1.7")];
+        let ordered = order_tools_by_dependencies(tools.into_iter());
+
+        let git_entry = ordered.iter().find(|(n, _)| n == "git").unwrap();
+        let jq_entry = ordered.iter().find(|(n, _)| n == "jq").unwrap();
+
+        assert_eq!(git_entry.1, "2.40.0");
+        assert_eq!(jq_entry.1, "1.7");
+    }
+
+    #[test]
+    fn test_order_tools_case_insensitive() {
+        let tools = vec![("GIT", "2.0"), ("JQ", "1.6")];
+        let ordered = order_tools_by_dependencies(tools.into_iter());
+
+        // All names should be lowercase in output
+        for (name, _) in &ordered {
+            assert_eq!(name, &name.to_lowercase());
+        }
     }
 }

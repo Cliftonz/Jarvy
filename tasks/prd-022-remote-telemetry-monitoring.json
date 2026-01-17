@@ -3,7 +3,7 @@
   "parent_prd": "PRD-022",
   "title": "Remote Telemetry and Monitoring",
   "description": "Consolidate telemetry to OTEL-only, removing PostHog dependency, adding proper metrics and traces for operational visibility across all Jarvy modules",
-  "status": "pending",
+  "status": "in_progress",
   "priority": "medium",
   "dependencies": [],
   "estimated_complexity": "high",
@@ -29,7 +29,7 @@
       "id": "T1",
       "title": "Create unified telemetry module",
       "description": "Create src/telemetry.rs as single telemetry API",
-      "passed": false,
+      "passed": true,
       "priority": "high",
       "files": ["src/telemetry.rs"],
       "subtasks": [
@@ -45,7 +45,7 @@
       "id": "T2",
       "title": "Define structured log events",
       "description": "Create event functions for tool operations",
-      "passed": false,
+      "passed": true,
       "priority": "high",
       "files": ["src/telemetry.rs"],
       "subtasks": [
@@ -61,7 +61,7 @@
       "id": "T3",
       "title": "Add metrics instrumentation",
       "description": "Create OTEL metrics for monitoring",
-      "passed": false,
+      "passed": true,
       "priority": "high",
       "files": ["src/telemetry.rs"],
       "subtasks": [
@@ -78,7 +78,7 @@
       "id": "T4",
       "title": "Add configuration support",
       "description": "Extend config for telemetry settings",
-      "passed": false,
+      "passed": true,
       "priority": "high",
       "files": ["src/config.rs"],
       "subtasks": [
@@ -109,7 +109,7 @@
       "id": "T6",
       "title": "Add jarvy telemetry subcommand",
       "description": "Create CLI for telemetry management",
-      "passed": false,
+      "passed": true,
       "priority": "medium",
       "files": ["src/main.rs"],
       "subtasks": [

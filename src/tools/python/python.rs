@@ -31,6 +31,8 @@ if [ -n "$USER_SITE" ] && [ -f "$HOME/.zshrc" ] && ! grep -q 'python.*user-base'
 fi
 "#
     },
+    // Install pyenv before python if both are in the config
+    depends_on: &["pyenv"],
 });
 
 #[cfg(test)]

@@ -1,6 +1,14 @@
 //! Environment health diagnostics
 //!
 //! Diagnose environment issues, check tool health, and verify PATH configuration.
+//!
+//! ## Extended Dashboard (PRD-027 T11)
+//!
+//! The `--extended` flag adds comprehensive system metrics:
+//! - System overview (OS, shell, uptime, load, memory, disk)
+//! - Package manager status with package counts
+//! - Performance metrics and trends
+//! - Detailed tool version comparison
 
 use crate::config::Config;
 use crate::output::{ExitCode, Format, Outputable, colors, header, icons, subheader};
@@ -9,6 +17,7 @@ use crate::tools::spec::{get_tool_default_hook, get_tool_spec, list_tool_names};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::env;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// System information
@@ -677,6 +686,683 @@ fn generate_recommendations(
     }
 
     recommendations
+}
+
+// =============================================================================
+// Extended Dashboard (PRD-027 T11)
+// =============================================================================
+
+/// Extended system metrics for --extended flag
+#[derive(Debug, Clone, Serialize)]
+pub struct ExtendedMetrics {
+    /// System uptime in seconds
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uptime_secs: Option<u64>,
+    /// Load averages (1, 5, 15 minutes)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub load_avg: Option<(f64, f64, f64)>,
+    /// Total memory in bytes
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_total: Option<u64>,
+    /// Used memory in bytes
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_used: Option<u64>,
+    /// Disk total in bytes
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk_total: Option<u64>,
+    /// Disk available in bytes
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk_available: Option<u64>,
+    /// Package manager package count
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package_count: Option<usize>,
+    /// Outdated packages count
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outdated_count: Option<usize>,
+}
+
+impl Default for ExtendedMetrics {
+    fn default() -> Self {
+        Self {
+            uptime_secs: None,
+            load_avg: None,
+            memory_total: None,
+            memory_used: None,
+            disk_total: None,
+            disk_available: None,
+            package_count: None,
+            outdated_count: None,
+        }
+    }
+}
+
+/// Complete doctor result with extended metrics
+#[derive(Debug, Clone, Serialize)]
+pub struct DoctorResultExtended {
+    #[serde(flatten)]
+    pub base: DoctorResult,
+    /// Extended system metrics (only with --extended)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extended: Option<ExtendedMetrics>,
+    /// Tool status summary
+    pub summary: ToolSummary,
+}
+
+/// Tool status summary counts
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolSummary {
+    pub total: usize,
+    pub healthy: usize,
+    pub outdated: usize,
+    pub missing: usize,
+    pub unknown: usize,
+}
+
+impl Outputable for DoctorResultExtended {
+    fn to_human(&self) -> String {
+        let mut output = String::new();
+
+        output.push_str(&header("Jarvy Doctor (Extended)"));
+        output.push('\n');
+
+        // System Information
+        output.push_str(&subheader("System Information"));
+        output.push_str(&format!(
+            "  OS: {} {} ({})\n",
+            self.base.system.os, self.base.system.os_version, self.base.system.arch
+        ));
+        output.push_str(&format!("  Shell: {}\n", self.base.system.shell));
+        if let Some(ref pm) = self.base.system.package_manager {
+            output.push_str(&format!("  Package Manager: {}\n", pm));
+        }
+
+        // Extended metrics if available
+        if let Some(ref ext) = self.extended {
+            output.push_str(&subheader("System Metrics"));
+
+            if let Some(uptime) = ext.uptime_secs {
+                let days = uptime / 86400;
+                let hours = (uptime % 86400) / 3600;
+                let mins = (uptime % 3600) / 60;
+                output.push_str(&format!("  Uptime: {}d {}h {}m\n", days, hours, mins));
+            }
+
+            if let Some((l1, l5, l15)) = ext.load_avg {
+                output.push_str(&format!(
+                    "  Load Average: {:.2}, {:.2}, {:.2}\n",
+                    l1, l5, l15
+                ));
+            }
+
+            if let (Some(total), Some(used)) = (ext.memory_total, ext.memory_used) {
+                let pct = (used as f64 / total as f64) * 100.0;
+                output.push_str(&format!(
+                    "  Memory: {:.1} GB / {:.1} GB ({:.0}%)\n",
+                    used as f64 / 1_000_000_000.0,
+                    total as f64 / 1_000_000_000.0,
+                    pct
+                ));
+            }
+
+            if let (Some(total), Some(avail)) = (ext.disk_total, ext.disk_available) {
+                let used = total - avail;
+                let pct = (used as f64 / total as f64) * 100.0;
+                output.push_str(&format!(
+                    "  Disk: {:.1} GB / {:.1} GB ({:.0}%)\n",
+                    used as f64 / 1_000_000_000.0,
+                    total as f64 / 1_000_000_000.0,
+                    pct
+                ));
+            }
+
+            if let Some(pkg_count) = ext.package_count {
+                output.push_str(&format!("  Packages Installed: {}\n", pkg_count));
+            }
+        }
+
+        // Tool Summary
+        output.push_str(&subheader("Tool Summary"));
+        output.push_str(&format!(
+            "  {}✓{} Healthy: {}  ",
+            colors::GREEN,
+            colors::RESET,
+            self.summary.healthy
+        ));
+        output.push_str(&format!(
+            "{}⚠{} Outdated: {}  ",
+            colors::YELLOW,
+            colors::RESET,
+            self.summary.outdated
+        ));
+        output.push_str(&format!(
+            "{}✗{} Missing: {}  ",
+            colors::RED,
+            colors::RESET,
+            self.summary.missing
+        ));
+        output.push_str(&format!(
+            "{}?{} Unknown: {}\n",
+            colors::CYAN,
+            colors::RESET,
+            self.summary.unknown
+        ));
+
+        // PATH Analysis
+        if !self.base.path_checks.is_empty() {
+            output.push_str(&subheader("PATH Analysis"));
+            for check in &self.base.path_checks {
+                let (icon, color) = match check.status {
+                    PathStatus::Ok => (icons::OK, colors::GREEN),
+                    PathStatus::Missing => (icons::ERROR, colors::RED),
+                    PathStatus::NotInPath => (icons::WARN, colors::YELLOW),
+                };
+                let status_msg = if check.in_path {
+                    "in PATH"
+                } else {
+                    "not in PATH"
+                };
+                output.push_str(&format!(
+                    "  {}{}{} {} - {}\n",
+                    color,
+                    icon,
+                    colors::RESET,
+                    check.path,
+                    status_msg
+                ));
+            }
+        }
+
+        // Tool Health
+        if !self.base.tools.is_empty() {
+            output.push_str(&subheader("Tool Health"));
+            for tool in &self.base.tools {
+                let (icon, color) = match tool.status {
+                    ToolStatus::Ok => (icons::OK, colors::GREEN),
+                    ToolStatus::Outdated => (icons::WARN, colors::YELLOW),
+                    ToolStatus::NotInstalled => (icons::ERROR, colors::RED),
+                    ToolStatus::Unknown => (icons::INFO, colors::CYAN),
+                };
+
+                let installed_str = tool
+                    .installed
+                    .as_ref()
+                    .map(|v| format!(" (installed: {})", v))
+                    .unwrap_or_else(|| " - not found".to_string());
+
+                let status_msg = match tool.status {
+                    ToolStatus::Ok => "satisfies requirement",
+                    ToolStatus::Outdated => "outdated",
+                    ToolStatus::NotInstalled => "not installed",
+                    ToolStatus::Unknown => "unknown tool",
+                };
+
+                output.push_str(&format!(
+                    "  {}{}{} {} {}{} - {}\n",
+                    color,
+                    icon,
+                    colors::RESET,
+                    tool.name,
+                    tool.required,
+                    installed_str,
+                    status_msg
+                ));
+            }
+        }
+
+        // Hooks Status
+        if !self.base.hooks.is_empty() {
+            output.push_str(&subheader("Hooks Status"));
+            for hook in &self.base.hooks {
+                let (icon, color) = if hook.active {
+                    (icons::OK, colors::GREEN)
+                } else {
+                    (icons::WARN, colors::YELLOW)
+                };
+                output.push_str(&format!(
+                    "  {}{}{} {}: {}\n",
+                    color,
+                    icon,
+                    colors::RESET,
+                    hook.name,
+                    hook.description
+                ));
+                if let Some(ref issue) = hook.issue {
+                    output.push_str(&format!(
+                        "      {}{}{}\n",
+                        colors::DIM,
+                        issue,
+                        colors::RESET
+                    ));
+                }
+            }
+        }
+
+        // Recommendations
+        if !self.base.recommendations.is_empty() {
+            output.push_str(&subheader("Recommendations"));
+            for (i, rec) in self.base.recommendations.iter().enumerate() {
+                let color = match rec.severity {
+                    RecommendationSeverity::Error => colors::RED,
+                    RecommendationSeverity::Warning => colors::YELLOW,
+                    RecommendationSeverity::Info => colors::CYAN,
+                };
+                output.push_str(&format!(
+                    "  {}{}. {}{}\n",
+                    color,
+                    i + 1,
+                    rec.message,
+                    colors::RESET
+                ));
+                if let Some(ref fix) = rec.fix {
+                    output.push_str(&format!("     Fix: {}\n", fix));
+                }
+            }
+        }
+
+        output
+    }
+
+    fn exit_code(&self) -> ExitCode {
+        self.base.exit_code()
+    }
+}
+
+/// Run the doctor command with extended metrics
+pub fn run_doctor_extended(
+    config: Option<&Config>,
+    specific_tools: Option<Vec<String>>,
+) -> DoctorResultExtended {
+    let base = run_doctor(config, specific_tools);
+
+    // Collect extended metrics
+    let extended = collect_extended_metrics();
+
+    // Calculate summary
+    let summary = ToolSummary {
+        total: base.tools.len(),
+        healthy: base
+            .tools
+            .iter()
+            .filter(|t| t.status == ToolStatus::Ok)
+            .count(),
+        outdated: base
+            .tools
+            .iter()
+            .filter(|t| t.status == ToolStatus::Outdated)
+            .count(),
+        missing: base
+            .tools
+            .iter()
+            .filter(|t| t.status == ToolStatus::NotInstalled)
+            .count(),
+        unknown: base
+            .tools
+            .iter()
+            .filter(|t| t.status == ToolStatus::Unknown)
+            .count(),
+    };
+
+    DoctorResultExtended {
+        base,
+        extended: Some(extended),
+        summary,
+    }
+}
+
+/// Collect extended system metrics
+fn collect_extended_metrics() -> ExtendedMetrics {
+    let mut metrics = ExtendedMetrics::default();
+
+    // Get uptime
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = std::process::Command::new("sysctl")
+            .args(["-n", "kern.boottime"])
+            .output()
+        {
+            if let Ok(text) = String::from_utf8(output.stdout) {
+                // Parse: { sec = 1234567890, usec = 0 }
+                if let Some(sec_str) = text.split("sec = ").nth(1) {
+                    if let Some(sec) = sec_str.split(',').next() {
+                        if let Ok(boot_time) = sec.trim().parse::<u64>() {
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0);
+                            metrics.uptime_secs = Some(now.saturating_sub(boot_time));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Get load averages
+        if let Ok(output) = std::process::Command::new("sysctl")
+            .args(["-n", "vm.loadavg"])
+            .output()
+        {
+            if let Ok(text) = String::from_utf8(output.stdout) {
+                // Parse: { 1.23 2.34 3.45 }
+                let parts: Vec<f64> = text
+                    .trim()
+                    .trim_start_matches('{')
+                    .trim_end_matches('}')
+                    .split_whitespace()
+                    .filter_map(|s| s.parse().ok())
+                    .collect();
+                if parts.len() >= 3 {
+                    metrics.load_avg = Some((parts[0], parts[1], parts[2]));
+                }
+            }
+        }
+
+        // Get memory info
+        if let Ok(output) = std::process::Command::new("sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+        {
+            if let Ok(text) = String::from_utf8(output.stdout) {
+                if let Ok(total) = text.trim().parse::<u64>() {
+                    metrics.memory_total = Some(total);
+
+                    // Get page size and memory stats
+                    if let (Ok(ps_output), Ok(vm_output)) = (
+                        std::process::Command::new("sysctl")
+                            .args(["-n", "hw.pagesize"])
+                            .output(),
+                        std::process::Command::new("vm_stat").output(),
+                    ) {
+                        if let (Ok(ps_text), Ok(vm_text)) = (
+                            String::from_utf8(ps_output.stdout),
+                            String::from_utf8(vm_output.stdout),
+                        ) {
+                            if let Ok(page_size) = ps_text.trim().parse::<u64>() {
+                                let mut free_pages = 0u64;
+                                let mut inactive_pages = 0u64;
+
+                                for line in vm_text.lines() {
+                                    if line.contains("Pages free") {
+                                        if let Some(num) = line.split(':').nth(1) {
+                                            free_pages = num
+                                                .trim()
+                                                .trim_end_matches('.')
+                                                .parse()
+                                                .unwrap_or(0);
+                                        }
+                                    } else if line.contains("Pages inactive") {
+                                        if let Some(num) = line.split(':').nth(1) {
+                                            inactive_pages = num
+                                                .trim()
+                                                .trim_end_matches('.')
+                                                .parse()
+                                                .unwrap_or(0);
+                                        }
+                                    }
+                                }
+
+                                let available = (free_pages + inactive_pages) * page_size;
+                                metrics.memory_used = Some(total.saturating_sub(available));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Get uptime
+        if let Ok(content) = std::fs::read_to_string("/proc/uptime") {
+            if let Some(uptime_str) = content.split_whitespace().next() {
+                if let Ok(uptime) = uptime_str.parse::<f64>() {
+                    metrics.uptime_secs = Some(uptime as u64);
+                }
+            }
+        }
+
+        // Get load averages
+        if let Ok(content) = std::fs::read_to_string("/proc/loadavg") {
+            let parts: Vec<f64> = content
+                .split_whitespace()
+                .take(3)
+                .filter_map(|s| s.parse().ok())
+                .collect();
+            if parts.len() >= 3 {
+                metrics.load_avg = Some((parts[0], parts[1], parts[2]));
+            }
+        }
+
+        // Get memory info
+        if let Ok(content) = std::fs::read_to_string("/proc/meminfo") {
+            let mut total = 0u64;
+            let mut available = 0u64;
+
+            for line in content.lines() {
+                if line.starts_with("MemTotal:") {
+                    if let Some(kb) = line.split_whitespace().nth(1) {
+                        total = kb.parse::<u64>().unwrap_or(0) * 1024;
+                    }
+                } else if line.starts_with("MemAvailable:") {
+                    if let Some(kb) = line.split_whitespace().nth(1) {
+                        available = kb.parse::<u64>().unwrap_or(0) * 1024;
+                    }
+                }
+            }
+
+            if total > 0 {
+                metrics.memory_total = Some(total);
+                metrics.memory_used = Some(total.saturating_sub(available));
+            }
+        }
+    }
+
+    // Get disk info (cross-platform)
+    if let Ok(output) = std::process::Command::new("df").args(["-k", "/"]).output() {
+        if let Ok(text) = String::from_utf8(output.stdout) {
+            if let Some(line) = text.lines().nth(1) {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 4 {
+                    if let (Ok(total), Ok(avail)) =
+                        (parts[1].parse::<u64>(), parts[3].parse::<u64>())
+                    {
+                        metrics.disk_total = Some(total * 1024);
+                        metrics.disk_available = Some(avail * 1024);
+                    }
+                }
+            }
+        }
+    }
+
+    // Get package count
+    #[cfg(target_os = "macos")]
+    {
+        if has("brew") {
+            if let Ok(output) = std::process::Command::new("brew")
+                .args(["list", "--formula"])
+                .output()
+            {
+                if let Ok(text) = String::from_utf8(output.stdout) {
+                    metrics.package_count = Some(text.lines().count());
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if has("dpkg") {
+            if let Ok(output) = std::process::Command::new("dpkg")
+                .args(["--get-selections"])
+                .output()
+            {
+                if let Ok(text) = String::from_utf8(output.stdout) {
+                    metrics.package_count =
+                        Some(text.lines().filter(|l| l.contains("install")).count());
+                }
+            }
+        } else if has("rpm") {
+            if let Ok(output) = std::process::Command::new("rpm").args(["-qa"]).output() {
+                if let Ok(text) = String::from_utf8(output.stdout) {
+                    metrics.package_count = Some(text.lines().count());
+                }
+            }
+        }
+    }
+
+    metrics
+}
+
+/// Export doctor result as markdown report
+pub fn export_report(result: &DoctorResultExtended, path: &str) -> std::io::Result<()> {
+    let mut file = std::fs::File::create(path)?;
+
+    writeln!(file, "# Jarvy Health Report")?;
+    writeln!(file)?;
+    writeln!(file, "Generated: {}", chrono_lite_now())?;
+    writeln!(file)?;
+
+    // System Information
+    writeln!(file, "## System Information")?;
+    writeln!(file)?;
+    writeln!(file, "| Property | Value |")?;
+    writeln!(file, "|----------|-------|")?;
+    writeln!(
+        file,
+        "| OS | {} {} |",
+        result.base.system.os, result.base.system.os_version
+    )?;
+    writeln!(file, "| Architecture | {} |", result.base.system.arch)?;
+    writeln!(file, "| Shell | {} |", result.base.system.shell)?;
+    if let Some(ref pm) = result.base.system.package_manager {
+        writeln!(file, "| Package Manager | {} |", pm)?;
+    }
+    writeln!(file)?;
+
+    // Extended metrics
+    if let Some(ref ext) = result.extended {
+        writeln!(file, "## System Metrics")?;
+        writeln!(file)?;
+        writeln!(file, "| Metric | Value |")?;
+        writeln!(file, "|--------|-------|")?;
+
+        if let Some(uptime) = ext.uptime_secs {
+            let days = uptime / 86400;
+            let hours = (uptime % 86400) / 3600;
+            writeln!(file, "| Uptime | {}d {}h |", days, hours)?;
+        }
+
+        if let Some((l1, l5, l15)) = ext.load_avg {
+            writeln!(file, "| Load Average | {:.2}, {:.2}, {:.2} |", l1, l5, l15)?;
+        }
+
+        if let (Some(total), Some(used)) = (ext.memory_total, ext.memory_used) {
+            let pct = (used as f64 / total as f64) * 100.0;
+            writeln!(
+                file,
+                "| Memory | {:.1} GB / {:.1} GB ({:.0}%) |",
+                used as f64 / 1_000_000_000.0,
+                total as f64 / 1_000_000_000.0,
+                pct
+            )?;
+        }
+
+        if let (Some(total), Some(avail)) = (ext.disk_total, ext.disk_available) {
+            let used = total - avail;
+            let pct = (used as f64 / total as f64) * 100.0;
+            writeln!(
+                file,
+                "| Disk | {:.1} GB / {:.1} GB ({:.0}%) |",
+                used as f64 / 1_000_000_000.0,
+                total as f64 / 1_000_000_000.0,
+                pct
+            )?;
+        }
+
+        if let Some(count) = ext.package_count {
+            writeln!(file, "| Packages | {} |", count)?;
+        }
+        writeln!(file)?;
+    }
+
+    // Tool Summary
+    writeln!(file, "## Tool Summary")?;
+    writeln!(file)?;
+    writeln!(file, "- **Total**: {}", result.summary.total)?;
+    writeln!(file, "- **Healthy**: {} ✅", result.summary.healthy)?;
+    writeln!(file, "- **Outdated**: {} ⚠️", result.summary.outdated)?;
+    writeln!(file, "- **Missing**: {} ❌", result.summary.missing)?;
+    writeln!(file, "- **Unknown**: {} ❓", result.summary.unknown)?;
+    writeln!(file)?;
+
+    // Tool Details
+    if !result.base.tools.is_empty() {
+        writeln!(file, "## Tool Details")?;
+        writeln!(file)?;
+        writeln!(file, "| Tool | Required | Installed | Status |")?;
+        writeln!(file, "|------|----------|-----------|--------|")?;
+
+        for tool in &result.base.tools {
+            let installed = tool.installed.as_deref().unwrap_or("-");
+            let status = match tool.status {
+                ToolStatus::Ok => "✅ OK",
+                ToolStatus::Outdated => "⚠️ Outdated",
+                ToolStatus::NotInstalled => "❌ Missing",
+                ToolStatus::Unknown => "❓ Unknown",
+            };
+            writeln!(
+                file,
+                "| {} | {} | {} | {} |",
+                tool.name, tool.required, installed, status
+            )?;
+        }
+        writeln!(file)?;
+    }
+
+    // Recommendations
+    if !result.base.recommendations.is_empty() {
+        writeln!(file, "## Recommendations")?;
+        writeln!(file)?;
+
+        for (i, rec) in result.base.recommendations.iter().enumerate() {
+            let severity = match rec.severity {
+                RecommendationSeverity::Error => "🔴",
+                RecommendationSeverity::Warning => "🟡",
+                RecommendationSeverity::Info => "🔵",
+            };
+            writeln!(file, "{}. {} {}", i + 1, severity, rec.message)?;
+            if let Some(ref fix) = rec.fix {
+                writeln!(file, "   - **Fix**: `{}`", fix)?;
+            }
+        }
+        writeln!(file)?;
+    }
+
+    Ok(())
+}
+
+/// Simple timestamp without chrono crate
+fn chrono_lite_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    // Convert to human-readable (simplified)
+    let days_since_1970 = secs / 86400;
+    // Approximate year calculation (not accounting for leap years precisely)
+    let years = 1970 + (days_since_1970 / 365);
+    let remaining_days = days_since_1970 % 365;
+    let month = remaining_days / 30 + 1;
+    let day = remaining_days % 30 + 1;
+    let hour = (secs % 86400) / 3600;
+    let min = (secs % 3600) / 60;
+
+    format!(
+        "{}-{:02}-{:02} {:02}:{:02} UTC",
+        years, month, day, hour, min
+    )
 }
 
 #[cfg(test)]

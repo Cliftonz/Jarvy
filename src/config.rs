@@ -1,10 +1,11 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 use std::{fs, process};
 
+use crate::team::Extends;
 use crate::tools::{Os, current_os};
 
 /// Default timeout for hooks in seconds (5 minutes)
@@ -15,7 +16,7 @@ pub const DEFAULT_HOOK_TIMEOUT: u64 = 300;
 // ============================================================================
 
 /// Environment variable value - can be simple string or complex with options
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum EnvValue {
     /// Complex value with additional options
@@ -55,7 +56,7 @@ impl EnvValue {
 }
 
 /// Secret variable configuration
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum SecretValue {
     /// Load secret from a file
@@ -84,7 +85,7 @@ fn default_true() -> bool {
 }
 
 /// Settings for environment variable generation
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct EnvSettings {
     /// Target shell for rc file updates (bash, zsh, fish)
     #[serde(default)]
@@ -124,7 +125,7 @@ impl Default for EnvSettings {
 }
 
 /// Environment configuration section in jarvy.toml
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct EnvConfig {
     /// Regular environment variables
     #[serde(default)]
@@ -141,7 +142,7 @@ pub struct EnvConfig {
 }
 
 /// Per-tool environment variables
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct ToolEnvConfig {
     /// Environment variables specific to this tool
     #[serde(default)]
@@ -149,7 +150,7 @@ pub struct ToolEnvConfig {
 }
 
 /// Configuration for a single hook
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct ToolHooks {
     /// Script to run after this tool is installed
     #[serde(default)]
@@ -157,7 +158,7 @@ pub struct ToolHooks {
 }
 
 /// Settings for hook execution
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct HookSettings {
     /// Shell to use for running hooks (bash, zsh, sh, powershell)
     #[serde(default = "default_shell")]
@@ -201,7 +202,7 @@ impl Default for HookSettings {
 // ============================================================================
 
 /// Services configuration section in jarvy.toml
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct ServicesConfig {
     /// Whether services feature is enabled
     #[serde(default)]
@@ -237,7 +238,7 @@ impl ServicesConfig {
 // Hooks Configuration
 // ============================================================================
 
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct HooksConfig {
     /// Script to run before any tool installation
     #[serde(default)]
@@ -255,6 +256,9 @@ pub struct HooksConfig {
 
 #[derive(Deserialize)]
 pub struct Config {
+    /// Parent configs to extend (URL or local path)
+    #[serde(default)]
+    pub extends: Option<Extends>,
     #[serde(rename = "provisioner")]
     tools: HashMap<String, ToolConfig>,
     #[serde(default)]
@@ -298,7 +302,7 @@ impl PrivilegeConfig {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 #[serde(untagged)]
 pub enum ToolConfig {
     Detailed {

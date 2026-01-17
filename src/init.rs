@@ -4,13 +4,20 @@ use std::fs;
 use std::io::Write;
 use uuid::Uuid;
 
+use crate::telemetry::TelemetryConfig;
+
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub(crate) struct CliConfig {
     pub settings: Settings,
+    /// Telemetry configuration (OTLP endpoint, signals, etc.)
+    #[serde(default)]
+    pub telemetry: TelemetryConfig,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct Settings {
+    /// Legacy telemetry switch (kept for backward compatibility)
+    /// Use [telemetry] section for full configuration
     #[serde(default = "default_true")]
     pub telemetry: bool,
     #[serde(default)]
@@ -70,6 +77,7 @@ pub(crate) fn initialize() -> CliConfig {
         // Write initial config
         let config = CliConfig {
             settings: Settings::default(),
+            telemetry: TelemetryConfig::default(),
         };
         let toml = toml::to_string(&config).expect("serialize default config");
         let mut file = fs::File::create(&config_file_path).expect("Unable to create config file");

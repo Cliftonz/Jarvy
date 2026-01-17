@@ -1,5 +1,17 @@
 # Jarvy Implementation Progress
 
+> **Note**: Jarvy is a **non-profit, open-source project**. It exists to help teams provision and standardize developer workstations without relying on VMs, virtualization, containers, or any of the commercial/proprietary solutions listed in `docs/competitors/`. The goal is simple: give developers a fast, native way to get their machines set up consistently across an organization.
+
+> **Scope Note**: Jarvy currently supports **online installations only**. Offline/air-gapped features (bundle mode, cache warming, portable mode) are not covered at this time. PRD-025 is scoped to local mirror support for organizations with internal package repositories—users still need network connectivity to those mirrors.
+>
+> **Not Implemented**: The following features are explicitly out of scope:
+> - **Programmatic/API Access** - No REST/GraphQL API, no embeddable library crate, no webhook integrations
+> - **Cost & Resource Visibility** - No bandwidth tracking, disk space reporting, or download analytics
+> - **Plugin/Extension Ecosystem** - No third-party tool definitions, plugin registry, or custom package manager extensions
+> - **Parallel/Group Downloads** - No parallel binary downloads or download batching. Package managers (brew, apt, etc.) handle their own download optimization, and custom installers (rustup, nvm) already use efficient strategies. Complexity not justified for marginal benefit.
+
+---
+
 ## Completed PRDs Summary
 
 | PRD | Title | Completed | Key Outcome |
@@ -14,11 +26,17 @@
 | PRD-009 | Service Management | 2026-01-15 | Docker Compose & Tilt backends |
 | PRD-001 | Optimized Tool Installation (P1) | 2026-01-15 | Batch install for all PMs, tool grouping |
 | PRD-001 | Optimized Tool Installation (P2) | 2026-01-15 | Parallel version checking with rayon |
+| PRD-001 | Optimized Tool Installation (P3) | 2026-01-17 | User-space parallelization, --jobs flag |
+| PRD-001 | Optimized Tool Installation (P6) | 2026-01-17 | Dependency ordering (nvm→node, pyenv→python) |
 | PRD-002 | Tool Post-Install Hooks | 2026-01-15 | Shell completions for just, flux, argocd, etc. |
 | HOOKS-003 | Additional Tool Hooks | 2026-01-15 | delta, eza, ripgrep, minikube, kind, fd hooks |
 | PRD-012 | Release Distribution | 2026-01-15 | Package managers, install scripts, GitHub releases |
 | PRD-020 | Security Scanning Infrastructure | 2026-01-16 | SAST, SBOM, Sigstore signing, OpenSSF Scorecard |
 | PRD-016 | Developer Experience Commands | 2026-01-16 | 7 new CLI commands, output formatting system |
+| PRD-022 | Remote Telemetry (Phase 1) | 2026-01-16 | Unified OTEL telemetry module, CLI subcommand |
+| PRD-021 | MCP Server for LLM Integration | 2026-01-16 | JSON-RPC 2.0 server, 5 tools, 3 resources, 2 prompts |
+| PRD-027 | Observability and Debugging | 2026-01-16 | Structured logging, profiler, sanitizer, diagnose command |
+| PRD-015 | Config Validation & Remote Loading | 2026-01-16 | jarvy validate, --from URL, --header auth, 1MB size limit |
 
 ---
 
@@ -233,7 +251,9 @@ Notable: fzf, bat, fd, eza, zoxide, delta, lazygit, starship, gh, direnv, kubect
 | CLI Tools | 14 |
 | Batch Install | 10 |
 | DX Commands | 37 |
-| **Total** | **322+** |
+| MCP Server (unit) | 44 |
+| MCP Server (integration) | 17 |
+| **Total** | **383+** |
 
 ---
 
@@ -956,3 +976,1024 @@ CLAUDE.md                    # Telemetry documentation
 3. All major flows need instrumentation: version checking, batch install, hooks, services, DX commands
 4. CI detection already exists in ci/mod.rs - just needs telemetry emission
 5. Package manager operations in tools/common.rs have BatchInstallResult for tracking success/failure
+
+---
+
+## PRD-022: Remote Telemetry and Monitoring (Phase 1 Implementation)
+
+**Date**: 2026-01-16
+**Status**: Core telemetry module implemented (T1-T6 complete)
+
+**Files Created**:
+```
+src/telemetry.rs               # 940+ lines - unified telemetry API
+```
+
+**Files Modified**:
+```
+src/main.rs                    # Added mod telemetry, Telemetry subcommand, initialization
+src/init.rs                    # Added TelemetryConfig to CliConfig struct
+Cargo.toml                     # Added opentelemetry 0.31.0 with metrics feature
+```
+
+**Dependencies Added**:
+```toml
+opentelemetry = { version = "0.31.0", features = ["metrics"] }
+opentelemetry-otlp = { version = "0.31.0", features = ["logs", "http-proto", "metrics"] }
+opentelemetry_sdk = { version = "0.31.0", features = ["metrics"] }
+```
+
+**Key Features Implemented**:
+
+### 1. TelemetryConfig Structure
+```rust
+pub struct TelemetryConfig {
+    pub enabled: bool,              // Master switch (default: false)
+    pub endpoint: String,           // OTLP endpoint (default: http://localhost:4318)
+    pub protocol: String,           // "http" or "grpc" (default: http)
+    pub logs: bool,                 // Enable log export (default: true)
+    pub metrics: bool,              // Enable metrics export (default: true)
+    pub traces: bool,               // Enable trace export (default: false)
+    pub sample_rate: f64,           // Trace sampling 0.0-1.0 (default: 1.0)
+    pub resource: HashMap<String, String>,  // Custom resource attributes
+}
+```
+
+### 2. Source Tracking
+```rust
+pub enum Source {
+    Config,     // From jarvy.toml
+    Mcp,        // From MCP server request
+    Cli,        // From CLI argument
+}
+```
+
+### 3. Event Functions
+| Event | Function | Purpose |
+|-------|----------|---------|
+| tool.requested | `tool_requested()` | Track tool installation requests |
+| tool.installed | `tool_installed()` | Track successful installations |
+| tool.failed | `tool_failed()` | Track installation failures |
+| tool.not_supported | `tool_not_supported()` | Track unsupported tool requests |
+| setup.started | `setup_started()` | Track setup initiation |
+| setup.completed | `setup_completed()` | Track setup completion with summary |
+| hook.started | `hook_started()` | Track hook execution start |
+| hook.completed | `hook_completed()` | Track hook success |
+| hook.failed | `hook_failed()` | Track hook failures |
+| hook.timeout | `hook_timeout()` | Track hook timeouts |
+| command.executed | `command_executed()` | Track CLI command execution |
+| config.loaded | `config_loaded()` | Track config file loading |
+| service.operation | `service_operation()` | Track service operations |
+
+### 4. Metrics Instrumentation
+```rust
+struct Metrics {
+    tool_requests: Counter<u64>,       // jarvy.tool.requests
+    tool_installs: Counter<u64>,       // jarvy.tool.installs (by status)
+    tool_not_supported: Counter<u64>,  // jarvy.tool.not_supported
+    errors: Counter<u64>,              // jarvy.errors
+    hooks_executions: Counter<u64>,    // jarvy.hooks.executions
+    commands: Counter<u64>,            // jarvy.commands
+    install_duration: Histogram<f64>,  // jarvy.install.duration
+    setup_duration: Histogram<f64>,    // jarvy.setup.duration
+    hooks_duration: Histogram<f64>,    // jarvy.hooks.duration
+    commands_duration: Histogram<f64>, // jarvy.commands.duration
+}
+```
+
+### 5. Privacy Protection
+```rust
+fn redact_sensitive(s: &str) -> String {
+    // Redact home directories: /home/user → [HOME]
+    // Redact credentials: API_KEY=secret → API_KEY=[REDACTED]
+}
+
+fn redact_path(path: &str) -> String {
+    // Replace home directory with ~
+}
+```
+
+### 6. CLI Subcommand
+```bash
+jarvy telemetry status      # Show current configuration
+jarvy telemetry enable      # Enable telemetry
+jarvy telemetry disable     # Disable telemetry
+jarvy telemetry set-endpoint <url>  # Set OTLP endpoint
+jarvy telemetry test        # Test connectivity
+jarvy telemetry preview     # Preview what events would be sent
+```
+
+### 7. Configuration Loading (Priority Order)
+1. Environment variables (highest priority)
+   - `JARVY_TELEMETRY=1` - Enable/disable
+   - `JARVY_OTLP_ENDPOINT=http://...` - OTLP endpoint
+   - `JARVY_OTLP_PROTOCOL=grpc` - Protocol selection
+   - `JARVY_OTLP_LOGS=1`, `JARVY_OTLP_METRICS=1`, `JARVY_OTLP_TRACES=1`
+   - `JARVY_OTLP_SAMPLE_RATE=0.1`
+2. Config file (`~/.jarvy/config.toml` [telemetry] section)
+3. Defaults (telemetry disabled)
+
+### 8. CI-Aware Behavior
+```rust
+// Auto-disable in CI unless explicitly enabled
+if env::var("CI").is_ok() || env::var("GITHUB_ACTIONS").is_ok() {
+    if env::var("JARVY_TELEMETRY").is_err() {
+        config.enabled = false;
+    }
+}
+```
+
+**Key Learnings**:
+
+1. **OpenTelemetry Crate Structure**: Need `opentelemetry` (core API), `opentelemetry_sdk` (implementation), and `opentelemetry-otlp` (exporter) as separate dependencies
+
+2. **Trait Import for MeterProvider**: The `meter()` method requires `MeterProvider` trait from `opentelemetry::metrics` to be in scope
+
+3. **KeyValue Import**: Use `opentelemetry::KeyValue` for metric attributes, not from SDK
+
+4. **Metric Initialization Pattern**: Metrics must be created during provider initialization and stored in static state for later use
+
+5. **OnceLock for Global State**: Use `OnceLock<TelemetryState>` for thread-safe, one-time initialization of telemetry infrastructure
+
+6. **CliConfig Extension**: Adding fields to serde structs requires explicit initialization in all construction sites
+
+7. **Backward Compatibility**: Legacy `settings.telemetry` boolean preserved alongside new `TelemetryConfig` struct
+
+**Config File Example** (`~/.jarvy/config.toml`):
+```toml
+[settings]
+telemetry = true  # Legacy switch
+
+[telemetry]
+enabled = true
+endpoint = "http://localhost:4318"
+protocol = "http"
+logs = true
+metrics = true
+traces = false
+sample_rate = 1.0
+```
+
+**Tests**: All 322 existing tests pass. Telemetry module has 6 unit tests.
+
+**Remaining Tasks** (T7-T18):
+- T7: Remove PostHog dependency (posthog.rs removal, ureq evaluation)
+- T8-T11: Add traces, write tests, documentation
+- T12-T18: Instrument all modules (hooks, services, commands, config, CI, env, package managers)
+
+---
+
+## PRD-021: MCP Server for LLM Integration
+
+**Date**: 2026-01-16
+**Status**: Complete (Core implementation)
+
+**Files Created**:
+```
+src/mcp/mod.rs                # Module root, exports, protocol constants
+src/mcp/error.rs              # McpError struct with JSON-RPC error codes
+src/mcp/config.rs             # McpConfig for ~/.jarvy/mcp-config.toml
+src/mcp/transport.rs          # JSON-RPC 2.0 stdio transport
+src/mcp/server.rs             # Main MCP server implementation
+src/mcp/tools.rs              # MCP tool handlers (5 tools)
+src/mcp/resources.rs          # MCP resource handlers (3 resources)
+src/mcp/prompts.rs            # MCP prompt handlers (2 prompts)
+src/mcp/safety.rs             # Rate limiting, allowlist/denylist
+src/mcp/audit.rs              # Audit logging to ~/.jarvy/mcp-audit.log
+```
+
+**Files Modified**:
+```
+src/main.rs                   # Added mod mcp, Commands::Mcp variant
+Cargo.toml                    # No new dependencies required
+```
+
+**Dependencies**: None added - uses existing serde, serde_json from project
+
+**Tests**: 44 new unit tests in mcp module (all passing)
+
+**Key Features Implemented**:
+
+### 1. MCP Protocol Implementation
+- Protocol version: 2024-11-05
+- Transport: JSON-RPC 2.0 over stdio
+- Full lifecycle: initialize, tools/list, tools/call, resources/list, resources/read, prompts/list, prompts/get
+
+### 2. MCP Tools (5 tools)
+| Tool | Purpose |
+|------|---------|
+| `jarvy_list_tools` | List all available tools with optional filtering |
+| `jarvy_get_tool` | Get detailed info about a specific tool |
+| `jarvy_check_tool` | Check if a tool is installed and get version |
+| `jarvy_check_multiple` | Check multiple tools in parallel |
+| `jarvy_install_tool` | Install a tool (with safety mechanisms) |
+
+### 3. MCP Resources (3 resources)
+| Resource URI | Content |
+|--------------|---------|
+| `jarvy://tools/index` | Complete tool index as JSON |
+| `jarvy://platform/info` | OS, arch, available package managers |
+| `jarvy://tools/{name}` | Detailed info for specific tool |
+
+### 4. MCP Prompts (2 prompts)
+| Prompt | Arguments | Purpose |
+|--------|-----------|---------|
+| `setup_dev_environment` | project_type | Guide setup for rust/node/python/go/etc |
+| `diagnose_missing_tools` | None | Check common dev tools, suggest installs |
+
+### 5. Safety Mechanisms
+```rust
+// Rate limiting (sliding window)
+pub struct RateLimiter {
+    check_timestamps: VecDeque<Instant>,   // 10 checks/minute
+    install_timestamps: VecDeque<Instant>, // 3 installs/minute
+}
+
+// Allowlist/Denylist
+pub struct McpConfig {
+    pub allowlist: Option<Vec<String>>,    // Only these tools allowed
+    pub denylist: Option<Vec<String>>,     // These tools blocked
+    pub require_confirmation: bool,         // Prompt before install
+}
+```
+
+### 6. Audit Logging
+```rust
+// Log format: JSON lines to ~/.jarvy/mcp-audit.log
+{
+    "timestamp": "2026-01-16T12:36:40Z",
+    "action": "install_tool",
+    "client": "claude-desktop",
+    "tool": "ripgrep",
+    "success": true,
+    "version": "14.1.0"
+}
+```
+
+### 7. JSON-RPC Error Codes
+| Code | Meaning |
+|------|---------|
+| -32700 | Parse error |
+| -32600 | Invalid request |
+| -32601 | Method not found |
+| -32602 | Invalid params |
+| -32603 | Internal error |
+| -32001 | Tool execution failed |
+| -32002 | Tool not found |
+| -32003 | Installation denied (denylist) |
+| -32004 | Rate limited |
+| -32005 | User declined |
+| -32006 | Sudo required |
+| -32007 | Timeout |
+
+### 8. CLI Integration
+```bash
+# Start MCP server (for LLM clients like Claude Desktop)
+jarvy mcp
+
+# With custom config
+jarvy mcp --config ~/.jarvy/custom-mcp.toml
+```
+
+**Configuration File** (`~/.jarvy/mcp-config.toml`):
+```toml
+[settings]
+require_confirmation = true
+dry_run = true
+
+[allowlist]
+tools = ["git", "node", "python", "rust", "docker"]
+
+# OR use denylist (mutually exclusive)
+# [denylist]
+# tools = ["dangerous-tool"]
+
+[rate_limits]
+checks_per_minute = 10
+installs_per_minute = 3
+
+[audit]
+enabled = true
+log_path = "~/.jarvy/mcp-audit.log"
+```
+
+**Key Code Patterns**:
+
+```rust
+// MCP Server main loop
+pub fn run(mut self) -> McpResult<()> {
+    let mut transport = StdioTransport::new();
+    loop {
+        match transport.read_request() {
+            Ok(Some(request)) => {
+                let response = self.handle_request(&request);
+                transport.write_response(&response)?;
+            }
+            Ok(None) => break, // EOF
+            Err(e) => {
+                transport.write_response(&JsonRpcResponse::error(None, e))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+// Tool definition pattern
+pub fn list_tools() -> Vec<McpToolDefinition> {
+    vec![
+        McpToolDefinition {
+            name: "jarvy_check_tool".to_string(),
+            description: "Check if a development tool is installed".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Tool name" }
+                },
+                "required": ["name"]
+            }),
+        },
+        // ...
+    ]
+}
+
+// Safety check before install
+fn handle_install_tool(...) -> McpResult<serde_json::Value> {
+    // 1. Check rate limit
+    rate_limiter.check_install_limit()?;
+
+    // 2. Check allowlist/denylist
+    safety::check_allowlist(&config, &tool_name)?;
+
+    // 3. Prompt for confirmation (unless skip_confirmation)
+    if config.require_confirmation && !params.skip_confirmation {
+        let result = safety::prompt_user_confirmation(&tool_name, &install_info)?;
+        if result != ConfirmationResult::Yes {
+            return Err(McpError::user_declined());
+        }
+    }
+
+    // 4. Perform install (or dry-run)
+    // ...
+}
+```
+
+**Key Learnings**:
+
+1. **LinuxInstall has no `uniform` field**: The `uniform()` is a constructor method, not a field. Access individual package manager fields (apt, dnf, pacman, etc.) directly.
+
+2. **Option<&'static str> chaining**: Use `.or()` directly without `.as_ref()` for chaining `Option<&'static str>` values:
+   ```rust
+   // Correct
+   l.apt.or(l.dnf).or(l.pacman).unwrap_or("unknown")
+
+   // Wrong (type mismatch)
+   l.apt.as_ref().or(l.dnf.as_ref()).unwrap_or(&"unknown".to_string())
+   ```
+
+3. **Sliding window rate limiting**: Use `VecDeque<Instant>` for efficient O(1) timestamp management:
+   ```rust
+   fn check_limit(&mut self, limit: usize) -> Result<(), McpError> {
+       let now = Instant::now();
+       let window = Duration::from_secs(60);
+
+       // Remove old timestamps
+       while self.timestamps.front().is_some_and(|t| now.duration_since(*t) > window) {
+           self.timestamps.pop_front();
+       }
+
+       if self.timestamps.len() >= limit {
+           return Err(McpError::rate_limited());
+       }
+
+       self.timestamps.push_back(now);
+       Ok(())
+   }
+   ```
+
+4. **Audit logging without chrono**: Implemented manual Unix timestamp to ISO 8601 conversion to avoid adding chrono dependency.
+
+5. **Confirmation via stderr**: MCP protocol uses stdout for JSON-RPC; user confirmation prompts must go to stderr to avoid corrupting the protocol stream.
+
+**Integration with Claude Desktop**:
+```json
+// ~/.config/claude-desktop/claude-desktop.json (macOS)
+// %APPDATA%\Claude\claude-desktop.json (Windows)
+{
+    "mcpServers": {
+        "jarvy": {
+            "command": "jarvy",
+            "args": ["mcp"]
+        }
+    }
+}
+```
+
+**Security Considerations**:
+- `dry_run = true` by default - LLMs must explicitly request installation
+- Rate limiting prevents abuse (3 installs/minute default)
+- Allowlist/denylist for organizational tool policies
+- User confirmation prompts via stderr
+- Full audit trail of all operations
+
+**Documentation Created**:
+- `/docs/mcp-server.md` - Comprehensive MCP server usage guide covering Claude Desktop, Cursor, and VS Code integration
+
+**Integration Tests**:
+- `tests/mcp_integration.rs` - 17 end-to-end tests for MCP server
+- Tests spawn `jarvy mcp` process and communicate via JSON-RPC
+- All 17 tests pass, covering:
+  - Protocol handshake (initialize)
+  - Tool operations (list, get, check, check_multiple, install)
+  - Resource operations (list, read tools/index, platform/info)
+  - Prompt operations (list, get setup_dev_environment, diagnose_missing_tools)
+  - Error handling (method not found, unknown tool)
+  - Rate limiting and dry-run behavior
+
+---
+
+## PRD-027: Observability and Debugging
+
+**Date**: 2026-01-16
+**Status**: Complete
+
+**Files Created**:
+```
+src/observability/mod.rs          # Module root, exports ObservabilityConfig
+src/observability/logging.rs      # Structured logging with tracing
+src/observability/profiler.rs     # Performance profiling
+src/observability/sanitizer.rs    # Sensitive data redaction
+src/observability/network_trace.rs # Network request tracing (T6)
+src/observability/bundle.rs       # Diagnostic bundle export (T13)
+src/commands/diagnose.rs          # Deep tool diagnosis command
+```
+
+**Files Modified**:
+```
+src/main.rs                     # Added mod observability, CLI flags, Diagnose command
+src/commands/mod.rs             # Added diagnose module export
+Cargo.toml                      # Added env-filter, json features to tracing-subscriber
+```
+
+**Dependencies Modified**:
+```toml
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
+zip = "2.2"       # For diagnostic bundle export (T13)
+hostname = "0.4"  # For system info in bundles (T13)
+```
+
+**Tests**: All 185 tests pass
+
+**Key Features Implemented**:
+
+### 1. Structured Logging System (`src/observability/logging.rs`)
+```rust
+pub enum LogLevel { Quiet, Normal, Verbose, Debug, Trace }
+pub enum LogFormat { Text, Json }
+
+pub struct LogConfig {
+    pub level: LogLevel,
+    pub format: LogFormat,
+    pub file: Option<PathBuf>,
+    pub filter: Option<String>,  // Module-level filtering
+}
+```
+
+- Log levels map to tracing levels (WARN, INFO, DEBUG, DEBUG, TRACE)
+- JSON output for machine parsing (`--log-format json`)
+- File output support (`--log-file path.log`)
+- Module-level filtering via `env-filter` feature (`--debug-filter "jarvy::hooks=trace"`)
+
+### 2. Performance Profiler (`src/observability/profiler.rs`)
+```rust
+pub struct Profiler {
+    phases: HashMap<String, Duration>,
+    tools: HashMap<String, Duration>,
+    current_phase: Option<(String, Instant)>,
+}
+
+pub struct ProfileReport {
+    pub total_duration: Duration,
+    pub phases: Vec<PhaseResult>,
+    pub tools: Vec<ToolResult>,
+    pub network: NetworkTiming,
+}
+```
+
+- Phase timing (config loading, version check, install, hooks)
+- Per-tool installation timing
+- Network request tracking
+- JSON export for CI integration
+
+### 3. Sensitive Data Sanitizer (`src/observability/sanitizer.rs`)
+```rust
+pub struct Sanitizer {
+    patterns: Vec<(LazyLock<Regex>, &'static str)>,
+}
+```
+
+**Patterns Sanitized**:
+| Pattern | Replacement |
+|---------|-------------|
+| API keys | `[API_KEY_REDACTED]` |
+| Bearer tokens | `[TOKEN_REDACTED]` |
+| Passwords | `password=[REDACTED]` |
+| Email addresses | `[EMAIL_REDACTED]` |
+| GitHub tokens | `[GITHUB_TOKEN_REDACTED]` |
+| SSH keys | `[SSH_KEY_REDACTED]` |
+| AWS credentials | `[AWS_CRED_REDACTED]` |
+
+**Methods**:
+- `sanitize(text)` - Sanitize arbitrary text
+- `sanitize_env()` - Sanitize environment variables
+- `sanitize_json(value)` - Recursively sanitize JSON values
+
+### 4. Diagnose Command (`jarvy diagnose <tool>`)
+```bash
+jarvy diagnose git              # Deep diagnosis of git
+jarvy diagnose docker           # Docker daemon status, socket, etc.
+jarvy diagnose --help           # All options
+```
+
+**Diagnosis Output**:
+- Installation status (installed/not installed)
+- Binary path and permissions
+- Version information
+- Configuration files (e.g., ~/.gitconfig, ~/.docker/config.json)
+- Environment variables affecting the tool
+- Health checks (daemon status, socket connectivity)
+- Recommendations for issues
+
+### 5. CLI Flags for Setup Command
+```bash
+jarvy setup -f jarvy.toml \
+    --quiet              # Minimal output
+    --verbose            # Detailed output
+    --profile            # Enable performance profiling
+    --log-format json    # JSON log output
+    --log-file out.log   # Write logs to file
+    --debug-filter "jarvy::hooks=trace"  # Module filtering
+```
+
+**CLI Integration** (added to Commands::Setup):
+```rust
+#[arg(short, long, conflicts_with = "verbose")]
+quiet: bool,
+
+#[arg(short, long, conflicts_with = "quiet")]
+verbose: bool,
+
+#[arg(long)]
+profile: bool,
+
+#[arg(long, value_enum, default_value = "text")]
+log_format: OutputFormat,
+
+#[arg(long)]
+log_file: Option<PathBuf>,
+
+#[arg(long)]
+debug_filter: Option<String>,
+```
+
+**Key Learnings**:
+
+1. **Registry Function Names**: The tool registry uses `get_tool()`, not `lookup_tool()`. Always check actual function exports in the registry module.
+
+2. **ToolSpec Limitations**: `ToolSpec` has `&'static str` fields and doesn't implement `Default`. Cannot create fallback instances dynamically; must exit early if tool not in spec registry.
+
+3. **ToolSpec Fields**: `ToolSpec` doesn't have a `version_arg` field. Tools use standard `--version` flag; handle variations in `get_tool_version()`.
+
+4. **Linter Behavior**: The project linter automatically:
+   - Comments out modules with compilation errors
+   - Renames files to `.wip` suffix
+   - This requires fixing all compilation errors before re-enabling modules
+
+5. **tracing-subscriber Features**:
+   - `env-filter` feature required for module-level log filtering
+   - `json` feature required for JSON log output
+   - Without these, filter/format options fail silently
+
+6. **LazyLock for Regex**: Use `std::sync::LazyLock` for compiled regex patterns:
+   ```rust
+   static PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+       Regex::new(r"pattern").unwrap()
+   });
+   ```
+
+7. **Diagnose Command Design**: Health checks should be:
+   - Non-destructive (read-only operations)
+   - Timeout-bounded (don't hang on unresponsive services)
+   - Graceful on missing tools (still show available info)
+
+**Configuration Example**:
+```toml
+# jarvy.toml
+[observability]
+log_level = "verbose"
+log_format = "json"
+profile = true
+```
+
+**Output Examples**:
+
+```bash
+$ jarvy diagnose git
+╭─────────────────────────────────────╮
+│ Diagnosing: git                     │
+╰─────────────────────────────────────╯
+
+Installation Status
+  ✓ Installed
+
+Binary Information
+  Path: /opt/homebrew/bin/git
+  Version: 2.47.1
+
+Configuration Files
+  ✓ ~/.gitconfig (exists)
+
+Health Checks
+  ✓ Git repository operations functional
+
+Environment
+  GIT_EDITOR: vim
+  GIT_PAGER: delta
+
+Recommendations
+  All checks passed!
+```
+
+```bash
+$ jarvy diagnose docker
+╭─────────────────────────────────────╮
+│ Diagnosing: docker                  │
+╰─────────────────────────────────────╯
+
+Installation Status
+  ✓ Installed
+
+Binary Information
+  Path: /usr/local/bin/docker
+  Version: Docker version 27.4.0
+
+Configuration Files
+  ✓ ~/.docker/config.json (exists)
+
+Health Checks
+  ✓ Docker daemon running
+  ✓ Socket accessible: /var/run/docker.sock
+  ✓ Can list containers
+
+Recommendations
+  All checks passed!
+```
+
+**PRD-027 Acceptance Criteria Met**:
+| Feature | Status |
+|---------|--------|
+| Structured logging with levels | ✓ |
+| JSON log format option | ✓ |
+| File output support | ✓ |
+| Module-level filtering | ✓ |
+| Performance profiler | ✓ |
+| Sensitive data sanitizer | ✓ |
+| Diagnose command | ✓ |
+| CLI flag integration | ✓ |
+| Network request tracing | ✓ |
+| Diagnostic bundle export | ✓ |
+| Doctor --extended dashboard | ✓ |
+| Markdown report export | ✓ |
+| Tests pass | ✓ (185+ tests) |
+
+### 6. Network Request Tracing (`src/observability/network_trace.rs`)
+
+**Date Added**: 2026-01-17
+
+```rust
+pub struct NetworkTiming {
+    pub url: String,
+    pub method: String,
+    pub status: u16,
+    pub duration: Duration,
+    pub dns_time: Option<Duration>,
+    pub connect_time: Option<Duration>,
+    pub tls_time: Option<Duration>,
+    pub ttfb: Option<Duration>,
+    pub bytes: u64,
+    pub speed_bps: Option<f64>,
+}
+
+pub struct NetworkTracer {
+    timings: Arc<Mutex<Vec<NetworkTiming>>>,
+    enabled: bool,
+    start: Instant,
+}
+
+pub struct DomainStats {
+    pub domain: String,
+    pub request_count: usize,
+    pub total_bytes: u64,
+    pub total_time: Duration,
+    pub avg_time: Duration,
+    pub failures: usize,
+}
+```
+
+**Features**:
+- Per-request timing with detailed breakdown (DNS, connect, TLS, transfer)
+- Thread-safe recording via `Arc<Mutex<Vec<>>>`
+- RAII `RequestGuard` pattern for automatic timing completion
+- Domain aggregation for summary statistics
+- JSON export for CI integration
+
+**Usage**:
+```bash
+jarvy setup --trace-network                    # Enable network tracing
+jarvy setup --trace-network --network-log network.json  # Export to file
+```
+
+### 7. Diagnostic Bundle Export (`src/observability/bundle.rs`)
+
+**Date Added**: 2026-01-17
+
+```rust
+pub enum BundleScope {
+    System,      // OS, arch, hostname
+    Config,      // jarvy.toml (sanitized)
+    Tools,       // Installed tool statuses
+    Environment, // Environment variables (sanitized)
+    Network,     // Connectivity tests
+    All,         // Everything
+}
+
+pub struct DiagnosticBundle {
+    pub created_at: String,
+    pub system: Option<SystemInfo>,
+    pub config: Option<serde_json::Value>,
+    pub tools: Option<Vec<ToolStatus>>,
+    pub environment: Option<Vec<EnvVar>>,
+    pub network: Option<Vec<ConnectivityTest>>,
+}
+```
+
+**Dependencies Added**:
+```toml
+zip = "2.2"
+hostname = "0.4"
+```
+
+**Features**:
+- Selective scope export with `--scope` flag
+- ZIP archive creation with Deflated compression
+- Automatic sensitive data sanitization
+- Network connectivity tests to common registries
+- JSON and ZIP export formats
+
+**Usage**:
+```bash
+jarvy diagnose --export bundle.zip             # Full diagnostic bundle
+jarvy diagnose --export bundle.zip --scope system,tools  # Selective scopes
+```
+
+### 8. Extended Doctor Dashboard (`src/commands/doctor.rs`)
+
+**Date Added**: 2026-01-17
+
+```rust
+pub struct ExtendedMetrics {
+    pub uptime_secs: Option<u64>,
+    pub load_avg: Option<(f64, f64, f64)>,
+    pub memory_total: Option<u64>,
+    pub memory_used: Option<u64>,
+    pub disk_total: Option<u64>,
+    pub disk_available: Option<u64>,
+    pub package_count: Option<usize>,
+}
+
+pub struct ToolSummary {
+    pub total: usize,
+    pub healthy: usize,
+    pub outdated: usize,
+    pub missing: usize,
+    pub unknown: usize,
+}
+```
+
+**Features**:
+- Extended system metrics (uptime, load, memory, disk)
+- Package manager package count
+- Tool status summary (healthy/outdated/missing/unknown)
+- Markdown report export with `--report`
+
+**Usage**:
+```bash
+jarvy doctor --extended                        # Full health dashboard
+jarvy doctor --extended --report health.md     # Export markdown report
+jarvy doctor --extended -F json                # JSON output
+```
+
+**Sample Extended Output**:
+```
+╭─────────────────────────────────────╮
+│ Jarvy Doctor (Extended)             │
+╰─────────────────────────────────────╯
+
+System Information
+  OS: macOS 15.2.0 (arm64)
+  Shell: /bin/zsh
+  Package Manager: Homebrew 4.4.19
+
+System Metrics
+  Uptime: 5d 12h 30m
+  Load Average: 1.23, 2.34, 1.89
+  Memory: 12.4 GB / 32.0 GB (39%)
+  Disk: 245.6 GB / 500.0 GB (49%)
+  Packages Installed: 247
+
+Tool Summary
+  ✓ Healthy: 8   ⚠ Outdated: 2   ✗ Missing: 1   ? Unknown: 0
+```
+
+---
+
+## PRD-024: Team & Enterprise Collaboration (Specification Update)
+
+**Date**: 2026-01-16
+**Status**: Specification expanded with recursive extending details
+
+**Added Section: Recursive Extending Resolution**
+
+The PRD now comprehensively defines how config inheritance works when configs extend other configs that also use `extends`:
+
+**Key Concepts Added:**
+
+1. **Resolution Algorithm**: Depth-first, left-to-right traversal with last-write-wins merging
+   ```
+   Given: A extends [B, C], B extends [D], C extends [D, E]
+   Visit order: D → B → D(cached) → E → C → A
+   ```
+
+2. **Merge Rules by Section**:
+   | Section | Behavior |
+   |---------|----------|
+   | `[tools]` | Deep merge, child overrides parent |
+   | `[hooks.*]` | Append (both run, parent first) |
+   | `[env.*]` | Deep merge, child overrides |
+   | `[services]` | Deep merge, child overrides |
+
+3. **Diamond Dependency Handling**: When multiple paths lead to same config:
+   - Loaded only once (cached after first load)
+   - Applied only once (first occurrence wins)
+
+4. **Hook Execution Order**: Ancestor-first, left-to-right
+   - Enables predictable layering of team → project → local hooks
+
+5. **Error Handling**: Clear error messages for:
+   - Circular dependencies: `A → B → C → A`
+   - Max depth exceeded (10 levels)
+   - Missing parent configs with offline fallback hint
+   - Invalid TOML in parent configs
+
+6. **Debug/Inspect Commands**:
+   ```bash
+   jarvy config show --extends-chain    # Show inheritance chain
+   jarvy config validate --check-extends # Validate without running
+   jarvy config refresh --recursive      # Force refresh cached parents
+   ```
+
+**Updated Technical Implementation**:
+- `InheritanceResolver` struct with `in_progress` set for cycle detection
+- `resolved_cache` HashMap for diamond dependency optimization
+- `ResolutionTrace` for debugging inheritance chains
+- Comprehensive merge functions for each config section type
+
+---
+
+## PRD-015: Config Validation and Remote Loading (Completed)
+
+**Completed**: 2026-01-16
+**Status**: 100% complete (all acceptance criteria met)
+
+**Files**:
+- `src/commands/validate.rs` (537 lines, 6 unit tests)
+- `src/main.rs` (updated with --from, --header flags, size limit)
+- `tests/remote_config.rs` (11 integration tests)
+
+**Dependencies**: strsim 0.11 (Jaro-Winkler fuzzy matching), ureq 3.1.2 (HTTP client)
+
+### US-001: Config Validation (100% Complete)
+
+**Features Implemented**:
+- `jarvy validate` command with comprehensive checks
+- TOML syntax validation with line/column error reporting
+- Unknown tool detection against registered tool registry
+- Typo suggestions using Jaro-Winkler algorithm (0.85 threshold)
+  - Example: "nodejs" → suggests "node"
+- Invalid version string detection
+- Hook reference validation (warns on unknown tool hooks)
+- `--file` flag for custom config path
+- `--strict` flag treats warnings as errors
+- Exit codes: 0=valid, 1=warnings, 2=errors
+- `--format json|pretty` output modes
+
+### US-002: Remote Config Loading (100% Complete)
+
+**Features Implemented**:
+- `jarvy setup --from <URL>` fetches and uses remote config
+- `jarvy validate --from <URL>` validates without installing
+- HTTPS URLs work with certificate validation
+- HTTP blocked in release builds (security)
+- `--header "Name: Value"` flag for authenticated requests
+  - Supports multiple headers via repeated flags
+  - Example: `--header "Authorization: token ghp_xxx"`
+- Clear error messages for network failures
+- Timeout handling via ureq (default 30s)
+- **Size limit enforcement (1MB)** to prevent memory exhaustion
+  - Checks Content-Length header when available
+  - Uses limited reader for chunked/unknown-length responses
+- Caching in `~/.jarvy/cache/configs/` with 1-hour TTL
+- GitHub URL transformation for raw content
+  - `github.com/.../blob/...` → `raw.githubusercontent.com/.../`
+  - Gist URLs transformed to raw format
+
+### Technical Details
+
+**Size Limit Implementation** (`src/main.rs`):
+```rust
+const MAX_REMOTE_CONFIG_SIZE: u64 = 1024 * 1024; // 1MB
+
+// Check Content-Length if available
+if let Some(content_length) = response.headers().get("content-length") {
+    if let Some(length) = content_length.to_str().ok().and_then(|s| s.parse::<u64>().ok()) {
+        if length > MAX_REMOTE_CONFIG_SIZE {
+            return Err(format!("Remote config too large: {} bytes (max {} bytes)", length, MAX_REMOTE_CONFIG_SIZE));
+        }
+    }
+}
+
+// Read with limit even if Content-Length missing
+let mut limited_reader = reader.take(MAX_REMOTE_CONFIG_SIZE + 1);
+```
+
+**Header Support** (`src/main.rs`):
+```rust
+// Add custom headers (for authentication, etc.)
+for header in headers {
+    if let Some((key, value)) = header.split_once(':') {
+        request = request.header(key.trim(), value.trim());
+    }
+}
+```
+
+### Integration Tests (11 passing)
+
+| Test | Description |
+|------|-------------|
+| `validate_valid_config_succeeds` | Valid TOML passes validation |
+| `validate_invalid_toml_fails` | Syntax errors caught |
+| `validate_unknown_tool_shows_suggestion` | Typo suggestions work |
+| `validate_strict_mode_treats_warnings_as_errors` | --strict flag works |
+| `validate_json_format_output` | JSON output format |
+| `validate_accepts_from_flag` | --from URL argument parses |
+| `validate_accepts_header_flag` | --header argument parses |
+| `setup_accepts_header_flag` | setup --header works |
+| `setup_from_url_accepts_header_flag` | setup --from --header works |
+| `validate_nonexistent_file_fails_gracefully` | Missing file error |
+| `validate_empty_config_warns_no_provisioner` | Empty config warning |
+
+### CLI Examples
+
+```bash
+# Validate local config
+jarvy validate --file jarvy.toml
+
+# Validate with strict mode (warnings = errors)
+jarvy validate --strict
+
+# Validate remote config without installing
+jarvy validate --from https://github.com/org/repo/raw/main/jarvy.toml
+
+# Validate private config with auth header
+jarvy validate --from https://github.com/org/private-repo/raw/main/jarvy.toml \
+  --header "Authorization: token ghp_xxxxxxxxxxxx"
+
+# Setup from remote config with auth
+jarvy setup --from https://config.company.com/team/frontend.toml \
+  --header "Authorization: Bearer $CONFIG_TOKEN" \
+  --header "X-Team-Id: frontend"
+```
+
+### Key Learnings
+
+1. **ureq 3.x API**: `headers().get()` returns `Option<&HeaderValue>`, use `to_str()` to convert
+2. **Size limits**: Essential for security - untrusted URLs could serve massive files
+3. **Header validation**: Split on first `:` only, trim whitespace from key and value
+4. **Fuzzy matching threshold**: 0.85 Jaro-Winkler works well for tool name typos
+5. **Exit codes matter**: Validate returning non-zero for warnings enables CI/CD integration
+
+### Task File Updated
+
+`tasks/prd-015-config-validation-remote-loading.json` reflects:
+- Status: 100% complete (was 85%)
+- All acceptance criteria marked as passed
+- Remaining work cleared
