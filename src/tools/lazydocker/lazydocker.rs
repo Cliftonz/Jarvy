@@ -11,6 +11,8 @@ define_tool!(LAZYDOCKER, {
     macos: { brew: "lazydocker" },
     linux: { brew: "lazydocker" },
     windows: { choco: "lazydocker" },
+    // Docker TUI requires Docker daemon to be installed
+    depends_on: &["docker"],
 });
 
 #[cfg(test)]

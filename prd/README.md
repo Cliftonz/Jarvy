@@ -19,6 +19,7 @@ This folder contains PRDs for improving Jarvy based on a comprehensive codebase 
 | 3 | [Post-Install Hooks](003-post-install-hooks.md) | +40% adoption | 4-5 days | Shell scripts after tool installs |
 | 8 | [Environment Variables](008-environment-variables-support.md) | +30% adoption | 5 days | .env generation, shell rc updates |
 | 10 | [CI Detection](010-ci-detection-integration.md) | CI support | 4-5 days | Auto-detect GitHub Actions, GitLab, etc. |
+| 34 | [Enhanced Dependency System](034-enhanced-dependency-system.md) | Accuracy | 5-7 days | Strict vs flexible tool dependencies |
 
 ### Tier 3: Quality & Stability
 
@@ -103,6 +104,7 @@ Phase 7: Ecosystem & Integrations (2+ weeks)
 | Only basic dependency scanning | [020](020-security-scanning-infrastructure.md) |
 | LLMs can't install tools safely | [021](021-mcp-server.md) |
 | No visibility into unsupported tool requests | [022](022-remote-telemetry-monitoring.md) |
+| Tool dependencies are too rigid | [034](034-enhanced-dependency-system.md) |
 
 ### Dependencies Between PRDs
 
@@ -134,6 +136,10 @@ Enables LLMs to safely install tools via Claude, Cursor, etc.
 PRD-022 (Telemetry) ←──────────────────────── PRD-021 (MCP Server) for unsupported tool feedback
        ↓
 Enables operational monitoring, OTEL metrics/traces, tool request tracking
+
+PRD-034 (Dependencies) ←─────────────────── PRD-001 (Parallel) for dependency ordering
+       ↓
+Enables flexible dependencies (kubectl needs any K8s cluster, not all of them)
 ```
 
 ## Analysis Sources

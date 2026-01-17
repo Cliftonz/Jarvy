@@ -28,6 +28,8 @@ if [ -f "$HOME/.zshrc" ]; then
 fi
 "#
     },
+    // Default driver uses Docker; install Docker first if both in config
+    depends_on: &["docker"],
 });
 
 #[cfg(test)]

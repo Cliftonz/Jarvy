@@ -1,8 +1,9 @@
 {
   "title": "Tool Dependency Update",
   "description": "List of tools that need their dependencies specified using the depends_on field in ToolSpec",
-  "status": "pending",
+  "status": "complete",
   "priority": "Medium",
+  "completedAt": "2026-01-17",
   "createdAt": "2026-01-17",
   "context": {
     "featureLocation": "src/tools/spec.rs - depends_on field in ToolSpec",
@@ -27,6 +28,34 @@
       "dependsOn": ["rbenv"],
       "file": "src/tools/ruby/ruby.rs",
       "reason": "If both are in config, install rbenv first so user can manage ruby versions"
+    },
+    {
+      "tool": "lazydocker",
+      "dependsOn": ["docker"],
+      "file": "src/tools/lazydocker/lazydocker.rs",
+      "reason": "Docker TUI requires Docker daemon to be installed",
+      "completedAt": "2026-01-17"
+    },
+    {
+      "tool": "kind",
+      "dependsOn": ["docker"],
+      "file": "src/tools/kind/kind.rs",
+      "reason": "Kubernetes-in-Docker requires Docker runtime",
+      "completedAt": "2026-01-17"
+    },
+    {
+      "tool": "minikube",
+      "dependsOn": ["docker"],
+      "file": "src/tools/minikube/minikube.rs",
+      "reason": "Default driver uses Docker; install Docker first if both in config",
+      "completedAt": "2026-01-17"
+    },
+    {
+      "tool": "kubectl",
+      "dependsOn": ["minikube", "kind"],
+      "file": "src/tools/kubectl/kubectl.rs",
+      "reason": "If K8s cluster tools are in config, install them before kubectl",
+      "completedAt": "2026-01-17"
     }
   ],
   "toolsNeedingDependencies": {
@@ -36,28 +65,32 @@
         "shouldDependOn": ["docker"],
         "file": "src/tools/lazydocker/lazydocker.rs",
         "reason": "Docker TUI requires Docker daemon to be installed",
-        "status": "pending"
+        "status": "completed",
+        "completedAt": "2026-01-17"
       },
       {
         "tool": "kind",
         "shouldDependOn": ["docker"],
         "file": "src/tools/kind/kind.rs",
         "reason": "Kubernetes-in-Docker requires Docker runtime",
-        "status": "pending"
+        "status": "completed",
+        "completedAt": "2026-01-17"
       },
       {
         "tool": "minikube",
         "shouldDependOn": ["docker"],
         "file": "src/tools/minikube/minikube.rs",
         "reason": "Default driver uses Docker; should install Docker first if both in config",
-        "status": "pending"
+        "status": "completed",
+        "completedAt": "2026-01-17"
       },
       {
         "tool": "kubectl",
         "shouldDependOn": ["minikube", "kind"],
         "file": "src/tools/kubectl/kubectl.rs",
         "reason": "If K8s cluster tools are in config, install them before kubectl",
-        "status": "pending"
+        "status": "completed",
+        "completedAt": "2026-01-17"
       }
     ],
     "mediumPriority": [
@@ -66,16 +99,16 @@
         "shouldDependOn": ["java"],
         "file": "src/tools/kotlin/kotlin.rs",
         "reason": "Kotlin runs on JVM, Java should be available first",
-        "status": "pending",
-        "notes": "Check if java tool exists"
+        "status": "blocked",
+        "notes": "Blocked: java tool does not exist in Jarvy. If java tool is added in the future, this dependency should be implemented."
       },
       {
         "tool": "scala",
         "shouldDependOn": ["java"],
         "file": "src/tools/scala/scala.rs",
         "reason": "Scala runs on JVM, Java should be available first",
-        "status": "pending",
-        "notes": "Check if java tool exists"
+        "status": "blocked",
+        "notes": "Blocked: java tool does not exist in Jarvy. If java tool is added in the future, this dependency should be implemented."
       },
       {
         "tool": "mongosh",
@@ -133,8 +166,8 @@
         "shouldDependOn": ["erlang"],
         "file": "src/tools/elixir/elixir.rs",
         "reason": "Elixir runs on BEAM VM, Erlang should be installed first",
-        "status": "pending",
-        "notes": "Check if erlang tool exists"
+        "status": "blocked",
+        "notes": "Blocked: erlang tool does not exist in Jarvy. If erlang tool is added in the future, this dependency should be implemented."
       }
     ],
     "versionManagers": {
@@ -151,27 +184,34 @@
     {
       "step": 1,
       "description": "Add depends_on: &[\"docker\"] to lazydocker tool",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "step": 2,
       "description": "Add depends_on: &[\"docker\"] to kind tool",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "step": 3,
       "description": "Add depends_on: &[\"docker\"] to minikube tool",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "step": 4,
       "description": "Add depends_on: &[\"minikube\", \"kind\"] to kubectl tool (if both K8s tools present)",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "step": 5,
       "description": "Review JVM-based tools (kotlin, scala) for java dependency",
-      "status": "pending"
+      "status": "blocked",
+      "notes": "java tool does not exist in Jarvy"
+    },
+    {
+      "step": 6,
+      "description": "Review elixir for erlang dependency",
+      "status": "blocked",
+      "notes": "erlang tool does not exist in Jarvy"
     }
   ],
   "testingGuidance": {

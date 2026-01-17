@@ -28,6 +28,8 @@ if [ -f "$HOME/.zshrc" ]; then
 fi
 "#
     },
+    // Kubernetes-in-Docker requires Docker runtime
+    depends_on: &["docker"],
 });
 
 #[cfg(test)]

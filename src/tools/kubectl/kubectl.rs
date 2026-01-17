@@ -39,6 +39,8 @@ if [ -f "$HOME/.zshrc" ] && ! grep -q 'kubectl completion zsh' "$HOME/.zshrc"; t
 fi
 "#
     },
+    // If K8s cluster tools are in config, install them before kubectl
+    depends_on: &["minikube", "kind"],
 });
 
 #[cfg(test)]
