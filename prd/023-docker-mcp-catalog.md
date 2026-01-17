@@ -2,8 +2,14 @@
 
 ## Status: Draft
 ## Priority: P1
-## Effort: Small (2-3 days)
+## Effort: Medium (1-2 weeks)
 ## Depends On: PRD-021 (MCP Server Implementation)
+
+---
+
+## Overview
+
+Containerize Jarvy's MCP server and submit it to Docker Desktop's MCP catalog, enabling one-click installation for developers using Claude Desktop, Cursor, and other MCP clients through Docker's secure distribution infrastructure.
 
 ---
 
@@ -11,10 +17,10 @@
 
 PRD-021 defines the Jarvy MCP server implementation, but doesn't address distribution via Docker Desktop's MCP catalog. Docker Desktop's MCP Toolkit provides:
 
-1. **One-click installation** for users discovering MCP servers
-2. **Automatic updates** when new versions are published
-3. **Enhanced security** - Docker-built images include signatures, provenance, SBOMs
-4. **Enterprise visibility** - IT can see/approve MCP servers used by developers
+1. **One-click installation** - Users discover and enable MCP servers without manual configuration
+2. **Automatic updates** - New versions are automatically rebuilt and distributed
+3. **Enhanced security** - Docker-built images include cryptographic signatures, provenance tracking, and SBOMs
+4. **Enterprise visibility** - IT teams can see/approve MCP servers used by developers
 5. **Discoverability** - Listed in Docker Hub's MCP catalog (hub.docker.com/mcp)
 
 To reach the largest audience of developers using Claude Desktop, Cursor, and other MCP clients, Jarvy needs to be in this catalog.
@@ -23,18 +29,31 @@ To reach the largest audience of developers using Claude Desktop, Cursor, and ot
 
 ## Goals
 
-1. **Containerize** the Jarvy MCP server for Docker-based distribution
+1. **Containerize** the Jarvy MCP server with secure, minimal Docker images
 2. **Submit to Docker MCP Registry** via pull request to `docker/mcp-registry`
-3. **Enable one-click install** via Docker Desktop MCP Toolkit
-4. **Automatic publishing** on new Jarvy releases
+3. **Enable secure host tool installation** - Container communicates with host package managers safely
+4. **Zero-config experience** - Works out-of-the-box via Docker Desktop MCP Toolkit
+5. **Automatic publishing** - New Jarvy releases trigger registry updates
 
 ---
 
 ## Non-Goals
 
-- Hosting our own Docker images (Docker will build and host in `mcp/jarvy`)
+- Hosting our own Docker images (Docker will build and host as `mcp/jarvy`)
 - SSE/HTTP transport (stdio only for Docker MCP catalog)
+- Installing tools inside the container (tools install on the host)
 - Remote server deployment (local containerized server only)
+
+---
+
+## Target Audience
+
+| User Type | Use Case |
+|-----------|----------|
+| Individual developers | One-click MCP server setup via Docker Desktop |
+| Enterprise teams | Approved MCP server from trusted Docker catalog |
+| AI-assisted developers | Claude/Cursor users needing tool installation |
+| DevOps engineers | Standardized dev environment provisioning |
 
 ---
 
@@ -44,80 +63,177 @@ To reach the largest audience of developers using Claude Desktop, Cursor, and ot
 
 Per [docker/mcp-registry CONTRIBUTING.md](https://github.com/docker/mcp-registry/blob/main/CONTRIBUTING.md):
 
-| Requirement | Status |
+| Requirement | Status | Notes |
+|-------------|--------|-------|
+| MIT or Apache 2.0 license | ✅ | Jarvy is MIT licensed |
+| Dockerfile in repo | ❌ | Create `Dockerfile.mcp` |
+| `server.yaml` manifest | ❌ | Create MCP registry metadata |
+| `tools.json` (tool definitions) | ❌ | Pre-define MCP tools for catalog |
+| `readme.md` documentation | ❌ | MCP-specific documentation |
+| MCP protocol compliance | ✅ | Implemented in PRD-021 |
+| No GPL dependencies | ✅ | Verify before submission |
+
+### Functional Requirements
+
+#### FR-1: Dockerfile for MCP Server
+
+Create a multi-stage Dockerfile that:
+- Builds Jarvy with MCP features enabled
+- Produces a minimal runtime image (< 20MB)
+- Runs as non-root user
+- Supports stdio transport for MCP communication
+
+#### FR-2: Host System Integration
+
+The containerized MCP server must:
+- Detect host operating system and available package managers
+- Execute tool checks via mounted host binaries
+- Request tool installations through host package manager communication
+- Support macOS, Linux, and Windows hosts
+
+#### FR-3: Security Model
+
+Implement secure container-to-host communication:
+- Read-only access to host binary paths for tool detection
+- Controlled execution channel for installations
+- Audit logging of all operations
+- User confirmation for destructive actions
+
+#### FR-4: Registry Metadata
+
+Create Docker MCP Registry manifest with:
+- Tool definitions matching PRD-021 MCP tools
+- Configuration parameters for enterprise environments
+- Clear documentation and usage examples
+
+### Non-Functional Requirements
+
+| Requirement | Target |
 |-------------|--------|
-| MIT or Apache 2.0 license | ✅ Jarvy is MIT |
-| Dockerfile in repo | ❌ Need to create |
-| `server.yaml` manifest | ❌ Need to create |
-| `tools.json` (optional) | ❌ Need to create |
-| MCP server lists tools on startup | ✅ Will be implemented in PRD-021 |
-
-### Deliverables
-
-1. **`Dockerfile.mcp`** - Multi-stage build for minimal MCP server image
-2. **`mcp/server.yaml`** - Docker MCP registry manifest
-3. **`mcp/tools.json`** - Pre-defined tool listing (avoids runtime tool listing)
-4. **GitHub Actions workflow** - Trigger Docker MCP registry rebuild on release
+| Image size | < 20MB (compressed) |
+| Startup time | < 200ms to first MCP response |
+| Memory usage | < 30MB RSS at idle |
+| MCP protocol version | 2024-11-05 or later |
+| Supported platforms | linux/amd64, linux/arm64 |
 
 ---
 
 ## Technical Design
 
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        MCP Client                                     │
+│              (Claude Desktop / Cursor / VS Code)                      │
+└─────────────────────────────────────────────────────────────────────┘
+                              │ stdio (JSON-RPC)
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Docker Container (mcp/jarvy)                       │
+├─────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────────────────┐ │
+│  │                    Jarvy MCP Server                              │ │
+│  │  • Handles MCP protocol (tools/list, tools/call, etc.)          │ │
+│  │  • Rate limiting, allowlist/denylist                            │ │
+│  │  • Audit logging                                                 │ │
+│  └─────────────────────────────────────────────────────────────────┘ │
+│                              │                                        │
+│                              ▼                                        │
+│  ┌─────────────────────────────────────────────────────────────────┐ │
+│  │                  Host Integration Layer                          │ │
+│  │  • Detect package managers via mounted paths                    │ │
+│  │  • Check tool versions via command execution                    │ │
+│  │  • Request installations via Docker socket/API                  │ │
+│  └─────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼ (volume mounts / Docker Desktop integration)
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Host System                                   │
+│  • /usr/local/bin, /opt/homebrew (macOS)                            │
+│  • /usr/bin, /usr/local/bin (Linux)                                 │
+│  • Package managers: brew, apt, dnf, winget                          │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
 ### 1. Dockerfile
 
 ```dockerfile
 # Dockerfile.mcp
-# Multi-stage build for minimal Jarvy MCP server image
+# Multi-stage build for Jarvy MCP Server
+# Optimized for Docker Desktop MCP Catalog distribution
 
 # ============================================================================
-# Stage 1: Build
+# Stage 1: Build Environment
 # ============================================================================
 FROM rust:1.83-alpine AS builder
 
-# Install build dependencies
-RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconf
+# Install build dependencies for static linking
+RUN apk add --no-cache \
+    musl-dev \
+    openssl-dev \
+    openssl-libs-static \
+    pkgconf
 
 WORKDIR /build
 
-# Cache dependencies
+# Cache dependency compilation
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir src && echo 'fn main() {}' > src/main.rs
-RUN cargo build --release && rm -rf src
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/target \
+    cargo build --release
 
-# Build actual binary
+# Build actual application
 COPY . .
-RUN cargo build --release --bin jarvy
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/target \
+    cargo build --release --bin jarvy && \
+    cp target/release/jarvy /jarvy
 
-# Verify binary
-RUN ./target/release/jarvy --version
+# Verify binary works
+RUN /jarvy --version
 
 # ============================================================================
-# Stage 2: Runtime
+# Stage 2: Runtime Environment
 # ============================================================================
-FROM alpine:3.21
+FROM alpine:3.21 AS runtime
 
-# Install runtime dependencies for package manager detection
-# (Jarvy needs to detect available package managers on the host)
-RUN apk add --no-cache ca-certificates
+# Install minimal runtime dependencies
+# ca-certificates: for HTTPS (telemetry, future features)
+# tini: proper signal handling for containers
+RUN apk add --no-cache ca-certificates tini
 
-# Create non-root user
-RUN addgroup -S jarvy && adduser -S jarvy -G jarvy
+# Create non-root user for security
+RUN addgroup -g 1000 jarvy && \
+    adduser -u 1000 -G jarvy -s /bin/sh -D jarvy
 
-# Copy binary
-COPY --from=builder /build/target/release/jarvy /usr/local/bin/jarvy
+# Copy binary from builder
+COPY --from=builder /jarvy /usr/local/bin/jarvy
+
+# Create directories for configuration and logs
+RUN mkdir -p /home/jarvy/.jarvy && \
+    chown -R jarvy:jarvy /home/jarvy
 
 # Switch to non-root user
 USER jarvy
+WORKDIR /home/jarvy
 
-# MCP servers use stdio transport
-ENTRYPOINT ["jarvy", "mcp"]
+# Environment defaults
+ENV JARVY_MCP_MODE=1
+ENV RUST_LOG=warn
 
-# Labels for container metadata
-LABEL org.opencontainers.image.title="Jarvy MCP Server"
-LABEL org.opencontainers.image.description="Safe cross-platform development tool installation for LLMs"
-LABEL org.opencontainers.image.vendor="Jarvy"
-LABEL org.opencontainers.image.source="https://github.com/jarvy-dev/jarvy"
-LABEL org.opencontainers.image.licenses="MIT"
+# Use tini as init system for proper signal handling
+ENTRYPOINT ["/sbin/tini", "--", "jarvy", "mcp"]
+
+# Container metadata (OCI labels)
+LABEL org.opencontainers.image.title="Jarvy MCP Server" \
+      org.opencontainers.image.description="Safe cross-platform development tool installation for LLMs" \
+      org.opencontainers.image.vendor="Jarvy" \
+      org.opencontainers.image.source="https://github.com/jarvy-dev/jarvy" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.documentation="https://github.com/jarvy-dev/jarvy/blob/main/docs/mcp/README.md"
 ```
 
 ### 2. server.yaml (MCP Registry Manifest)
@@ -125,10 +241,10 @@ LABEL org.opencontainers.image.licenses="MIT"
 ```yaml
 # mcp/server.yaml
 # Docker MCP Registry manifest for Jarvy
+# Reference: https://github.com/docker/mcp-registry/blob/main/CONTRIBUTING.md
 
 name: jarvy
-image: mcp/jarvy
-type: server
+type: local
 
 meta:
   category: devops
@@ -138,93 +254,117 @@ meta:
     - package-manager
     - cross-platform
     - developer-experience
+    - cli
 
 about:
   title: Jarvy - Safe Tool Installation
   description: |
     Install development tools safely across macOS, Linux, and Windows.
-    Jarvy provides LLMs with accurate, platform-specific installation
-    commands and verification, eliminating hallucinated package names.
 
-    Supports 100+ tools including: git, docker, node, python, rust, go,
-    kubectl, terraform, and more.
-  icon: https://raw.githubusercontent.com/jarvy-dev/jarvy/main/assets/icon.png
+    Jarvy provides LLMs with accurate, platform-specific installation
+    commands and verification, eliminating hallucinated package names
+    and incorrect installation instructions.
+
+    **Key Features:**
+    - 100+ supported tools (git, docker, node, python, rust, go, kubectl, etc.)
+    - Platform-aware installation (Homebrew, apt, dnf, winget)
+    - Safe by default - dry-run mode prevents accidental installations
+    - Version checking and verification
+    - Rate limiting and audit logging
+
+    **Safety:**
+    All installations default to dry-run mode. Actual installations
+    require explicit confirmation to prevent unintended changes.
+  icon: https://raw.githubusercontent.com/jarvy-dev/jarvy/main/assets/jarvy-icon.png
 
 source:
   project: https://github.com/jarvy-dev/jarvy
-  # branch and commit are auto-populated by Docker's build system
   dockerfile: Dockerfile.mcp
+  # branch and commit are auto-populated by Docker's build system
 
 config:
   description: |
-    Jarvy MCP server configuration. Most users don't need any configuration.
+    Configure Jarvy MCP server behavior. Most users need no configuration.
 
-    Optional: Set tool allowlist/denylist for enterprise environments.
+    **Enterprise Configuration:**
+    - Set allowlist to restrict which tools can be installed
+    - Set denylist to block specific tools
+    - Disable confirmation prompts for automated environments (not recommended)
 
-  # No secrets required - Jarvy uses local package managers
-  # Optional environment variables for enterprise configuration
+  # Environment variables for configuration
   env:
     - name: JARVY_MCP_ALLOWLIST
-      example: "git,docker,node,python"
-      description: "Comma-separated list of tools to allow (empty = all)"
+      description: "Comma-separated list of tools to allow (empty = all tools)"
+      example: "git,docker,node,python,rust"
+      required: false
     - name: JARVY_MCP_DENYLIST
-      example: "brew"
-      description: "Comma-separated list of tools to deny"
+      description: "Comma-separated list of tools to block"
+      example: "brew,apt"
+      required: false
     - name: JARVY_MCP_REQUIRE_CONFIRMATION
+      description: "Require user confirmation for installations"
       example: "true"
-      description: "Require user confirmation for installs (default: true)"
+      required: false
+    - name: JARVY_LOG_LEVEL
+      description: "Logging verbosity (error, warn, info, debug)"
+      example: "warn"
+      required: false
 
-# Optional: Define parameters that appear in Docker Desktop UI
+  # Parameters shown in Docker Desktop UI
   parameters:
     type: object
     properties:
       allowlist:
         type: string
+        title: "Tool Allowlist"
         description: "Comma-separated list of allowed tools (empty = all)"
+      denylist:
+        type: string
+        title: "Tool Denylist"
+        description: "Comma-separated list of blocked tools"
       require_confirmation:
         type: boolean
         default: true
-        description: "Require confirmation before installing tools"
+        title: "Require Confirmation"
+        description: "Prompt before installing tools"
 ```
 
-### 3. tools.json (Pre-defined Tool Listing)
-
-The `tools.json` file prevents build failures when the MCP server can't list tools at build time (e.g., when configuration is required).
+### 3. tools.json (MCP Tool Definitions)
 
 ```json
 [
   {
     "name": "jarvy_list_tools",
-    "description": "List all development tools Jarvy can install, with optional filtering by category or platform",
+    "description": "List all development tools Jarvy can install. Filter by category (language, database, container, cli, editor, kubernetes) or search by name. Returns tool names, descriptions, and platform support.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "category": {
           "type": "string",
-          "enum": ["language", "database", "container", "cli", "editor", "kubernetes", "all"],
-          "description": "Filter by tool category"
+          "enum": ["language", "database", "container", "cli", "editor", "kubernetes", "cloud", "all"],
+          "description": "Filter tools by category"
         },
         "platform": {
           "type": "string",
           "enum": ["macos", "linux", "windows", "current"],
-          "description": "Filter by platform support (default: current)"
+          "description": "Filter by platform support (default: current host platform)"
         },
         "search": {
           "type": "string",
-          "description": "Search tools by name"
+          "description": "Search tools by name or description"
         }
       }
     }
   },
   {
     "name": "jarvy_get_tool",
-    "description": "Get detailed information about a specific tool including installation methods for all platforms",
+    "description": "Get detailed information about a specific tool including installation methods for all platforms, package manager commands, and any post-install hooks.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "name": {
           "type": "string",
-          "description": "Tool name (e.g., 'git', 'docker', 'node')"
+          "description": "Tool name (e.g., 'git', 'docker', 'node', 'python', 'rust')"
         }
       },
       "required": ["name"]
@@ -232,13 +372,13 @@ The `tools.json` file prevents build failures when the MCP server can't list too
   },
   {
     "name": "jarvy_check_tool",
-    "description": "Check if a tool is installed and get its version",
+    "description": "Check if a specific tool is installed on the system and get its version. Returns installation status, version number, and binary path.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "name": {
           "type": "string",
-          "description": "Tool name to check"
+          "description": "Tool name to check (e.g., 'git', 'node')"
         }
       },
       "required": ["name"]
@@ -246,14 +386,15 @@ The `tools.json` file prevents build failures when the MCP server can't list too
   },
   {
     "name": "jarvy_check_multiple",
-    "description": "Check installation status of multiple tools at once",
+    "description": "Check installation status of multiple tools at once. Useful for verifying development environment setup or project dependencies.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "tools": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "List of tool names to check"
+          "description": "List of tool names to check",
+          "examples": [["git", "node", "docker"], ["python", "pip", "virtualenv"]]
         }
       },
       "required": ["tools"]
@@ -261,22 +402,22 @@ The `tools.json` file prevents build failures when the MCP server can't list too
   },
   {
     "name": "jarvy_install_tool",
-    "description": "Install a development tool. By default returns a preview (dry_run=true). Set dry_run=false to execute installation with user confirmation.",
+    "description": "Install a development tool. IMPORTANT: By default this returns a preview (dry_run=true) showing what command would be executed. Set dry_run=false to actually install, which will prompt for user confirmation.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "name": {
           "type": "string",
-          "description": "Tool name to install"
+          "description": "Tool name to install (e.g., 'ripgrep', 'jq', 'fzf')"
         },
         "version": {
           "type": "string",
-          "description": "Version hint (default: 'latest')"
+          "description": "Version to install (default: 'latest')"
         },
         "dry_run": {
           "type": "boolean",
-          "description": "Preview installation without executing (default: true)",
-          "default": true
+          "default": true,
+          "description": "If true (default), preview the installation command without executing. Set to false to actually install."
         }
       },
       "required": ["name"]
@@ -284,153 +425,413 @@ The `tools.json` file prevents build failures when the MCP server can't list too
   },
   {
     "name": "jarvy_platform_info",
-    "description": "Get information about the current platform, OS version, and available package managers",
+    "description": "Get information about the current platform including OS, version, architecture, and available package managers. Useful for understanding what installation methods are available.",
     "inputSchema": {
       "type": "object",
-      "properties": {}
+      "properties": {},
+      "additionalProperties": false
     }
   }
 ]
 ```
 
-### 4. GitHub Actions Workflow
+### 4. readme.md (MCP Documentation)
 
-```yaml
-# .github/workflows/mcp-registry.yml
-name: Update Docker MCP Registry
+```markdown
+# Jarvy MCP Server
 
-on:
-  release:
-    types: [published]
-  workflow_dispatch:
-    inputs:
-      trigger_rebuild:
-        description: 'Trigger MCP registry rebuild'
-        required: false
-        default: 'true'
+Safe cross-platform development tool installation for LLMs.
 
-jobs:
-  notify-mcp-registry:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+## Overview
 
-      - name: Get release info
-        id: release
-        run: |
-          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          echo "commit=${GITHUB_SHA}" >> $GITHUB_OUTPUT
+Jarvy enables AI assistants (Claude, GPT, etc.) to accurately install development
+tools across macOS, Linux, and Windows. Unlike LLMs that may hallucinate package
+names or installation commands, Jarvy provides verified, platform-specific
+installation instructions.
 
-      # Option 1: Create PR to docker/mcp-registry (manual review)
-      - name: Create MCP Registry PR
-        if: github.event_name == 'release'
-        env:
-          GH_TOKEN: ${{ secrets.MCP_REGISTRY_PAT }}
-        run: |
-          # Clone mcp-registry
-          git clone https://github.com/docker/mcp-registry.git
-          cd mcp-registry
+## Features
 
-          # Create branch
-          git checkout -b jarvy-${{ steps.release.outputs.version }}
+- **100+ supported tools**: git, docker, node, python, rust, go, kubectl, terraform, and more
+- **Platform-aware**: Uses the correct package manager (Homebrew, apt, dnf, winget)
+- **Safe by default**: Dry-run mode prevents accidental installations
+- **Version verification**: Check installed versions before and after installation
+- **Enterprise-ready**: Allowlist/denylist and audit logging
 
-          # Update server.yaml with new commit
-          mkdir -p servers/jarvy
-          cp ../mcp/server.yaml servers/jarvy/
-          cp ../mcp/tools.json servers/jarvy/
+## Quick Start
 
-          # Update commit reference
-          yq -i '.source.commit = "${{ steps.release.outputs.commit }}"' servers/jarvy/server.yaml
-          yq -i '.source.branch = "${{ steps.release.outputs.version }}"' servers/jarvy/server.yaml
+### Docker Desktop (Recommended)
 
-          # Commit and push
-          git add servers/jarvy/
-          git commit -m "Update jarvy to ${{ steps.release.outputs.version }}"
-          git push origin jarvy-${{ steps.release.outputs.version }}
+1. Open Docker Desktop
+2. Navigate to MCP Toolkit
+3. Find "Jarvy" in the catalog
+4. Click "Enable"
+5. Start using with Claude Desktop or Cursor
 
-          # Create PR
-          gh pr create \
-            --title "Update jarvy to ${{ steps.release.outputs.version }}" \
-            --body "Automated update for Jarvy release ${{ steps.release.outputs.version }}" \
-            --base main
+### Manual Configuration
 
-      # Option 2: Trigger rebuild via workflow dispatch (if Docker provides this)
-      - name: Trigger MCP rebuild
-        if: github.event.inputs.trigger_rebuild == 'true'
-        run: |
-          echo "Docker MCP registry rebuild would be triggered here"
-          # Future: Docker may provide an API or webhook for this
+For Claude Desktop (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "jarvy": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "mcp/jarvy"]
+    }
+  }
+}
 ```
 
----
+## Available Tools
 
-## Directory Structure
+### jarvy_list_tools
+List available tools with optional filtering.
 
+**Example:**
 ```
-jarvy/
-├── Dockerfile.mcp              # MCP server container build
-├── mcp/
-│   ├── server.yaml             # Docker MCP registry manifest
-│   ├── tools.json              # Pre-defined MCP tools
-│   └── README.md               # MCP-specific documentation
-├── .github/
-│   └── workflows/
-│       └── mcp-registry.yml    # Auto-update workflow
-└── docs/
-    └── mcp/
-        └── docker-desktop.md   # Docker Desktop setup guide
+List all CLI tools: jarvy_list_tools(category: "cli")
+Search for JSON tools: jarvy_list_tools(search: "json")
+```
+
+### jarvy_check_tool
+Check if a tool is installed.
+
+**Example:**
+```
+Is git installed? jarvy_check_tool(name: "git")
+→ { "installed": true, "version": "2.43.0", "path": "/usr/bin/git" }
+```
+
+### jarvy_install_tool
+Install a tool (dry-run by default).
+
+**Example:**
+```
+Preview: jarvy_install_tool(name: "ripgrep")
+→ { "dry_run": true, "command": "brew install ripgrep" }
+
+Install: jarvy_install_tool(name: "ripgrep", dry_run: false)
+→ [User confirmation prompt]
+→ { "success": true, "version": "14.1.0" }
+```
+
+## Security
+
+- **Dry-run default**: All installations preview first
+- **User confirmation**: Actual installs require explicit approval
+- **Rate limiting**: Prevents rapid-fire installations
+- **Audit logging**: All actions logged for review
+- **Non-root container**: Runs as unprivileged user
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `JARVY_MCP_ALLOWLIST` | Comma-separated allowed tools | (all) |
+| `JARVY_MCP_DENYLIST` | Comma-separated blocked tools | (none) |
+| `JARVY_MCP_REQUIRE_CONFIRMATION` | Require install confirmation | `true` |
+
+### Enterprise Example
+
+Restrict to approved tools only:
+
+```bash
+docker run -i --rm \
+  -e JARVY_MCP_ALLOWLIST="git,docker,node,python" \
+  -e JARVY_MCP_DENYLIST="brew" \
+  mcp/jarvy
+```
+
+## Supported Tools
+
+<details>
+<summary>Languages & Runtimes</summary>
+
+- node, deno, bun
+- python, pyenv
+- rust, rustup
+- go
+- java, gradle, maven
+- ruby, rbenv
+</details>
+
+<details>
+<summary>Containers & Kubernetes</summary>
+
+- docker
+- kubectl, helm
+- k9s, kind, minikube
+</details>
+
+<details>
+<summary>CLI Utilities</summary>
+
+- git, gh (GitHub CLI)
+- jq, yq
+- ripgrep, fd, fzf
+- curl, wget, httpie
+</details>
+
+<details>
+<summary>Databases</summary>
+
+- postgresql
+- mysql
+- redis
+- mongodb
+</details>
+
+## Links
+
+- [GitHub Repository](https://github.com/jarvy-dev/jarvy)
+- [Full Documentation](https://github.com/jarvy-dev/jarvy/blob/main/docs/mcp/README.md)
+- [Report Issues](https://github.com/jarvy-dev/jarvy/issues)
+```
+
+### 5. Rust Dependencies for MCP
+
+Add to `Cargo.toml`:
+
+```toml
+[dependencies]
+# MCP Server Implementation (choose one approach)
+
+# Option A: Use rust-mcp-sdk (recommended)
+rust-mcp-sdk = { version = "0.9", default-features = false, features = ["server", "macros", "stdio"] }
+
+# Option B: Manual implementation with lower-level crates
+# serde = { version = "1.0", features = ["derive"] }
+# serde_json = "1.0"
+# tokio = { version = "1", features = ["full"] }
+# async-trait = "0.1"
+
+# Rate limiting
+governor = "0.6"
+
+# Audit logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json"] }
+
+[features]
+mcp = ["rust-mcp-sdk"]  # Optional: compile MCP server support
 ```
 
 ---
 
 ## Implementation Plan
 
-### Phase 1: Create Container Assets (Day 1)
+### Phase 1: MCP Server Container (Days 1-3)
 
+**Tasks:**
 1. Create `Dockerfile.mcp` with multi-stage build
-2. Test local build: `docker build -f Dockerfile.mcp -t jarvy-mcp .`
-3. Test MCP server in container: `docker run -i jarvy-mcp`
-4. Verify tool listing works
+2. Add MCP feature flag to Cargo.toml
+3. Implement container-aware host detection
+4. Test local container build and MCP communication
 
 **Verification:**
 ```bash
 # Build image
-docker build -f Dockerfile.mcp -t jarvy-mcp .
+docker build -f Dockerfile.mcp -t jarvy-mcp:local .
 
 # Test MCP initialize
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | docker run -i jarvy-mcp
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | docker run -i jarvy-mcp:local
 
 # Test tool listing
-echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | docker run -i jarvy-mcp
+echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | docker run -i jarvy-mcp:local
 ```
 
-### Phase 2: Create Registry Manifest (Day 1)
+### Phase 2: Registry Metadata (Days 4-5)
 
-1. Create `mcp/server.yaml` with metadata
-2. Create `mcp/tools.json` with all MCP tools
-3. Validate YAML syntax
-4. Create icon asset if needed
+**Tasks:**
+1. Create `mcp/server.yaml` manifest
+2. Create `mcp/tools.json` definitions
+3. Create `mcp/readme.md` documentation
+4. Create Jarvy icon asset (256x256 PNG)
+5. Validate YAML syntax with Docker's tools
 
-### Phase 3: Submit to Docker MCP Registry (Day 2)
+**Validation:**
+```bash
+# Use Docker MCP registry tools to validate
+git clone https://github.com/docker/mcp-registry.git
+cd mcp-registry
+task validate -- --server /path/to/jarvy/mcp
+```
 
+### Phase 3: Docker MCP Registry Submission (Days 6-8)
+
+**Tasks:**
 1. Fork `docker/mcp-registry`
-2. Run `task wizard` or `task create` to validate
-3. Test locally with Docker Desktop:
-   ```bash
-   task build -- --tools jarvy
-   task catalog -- jarvy
-   docker mcp catalog import $PWD/catalogs/jarvy/catalog.yaml
-   ```
-4. Verify in Docker Desktop MCP Toolkit
-5. Submit PR to `docker/mcp-registry`
-6. Respond to review feedback
+2. Run registry wizard to generate configuration
+3. Test locally with Docker Desktop MCP Toolkit
+4. Submit pull request
+5. Address review feedback
 
-### Phase 4: Automate Updates (Day 3)
+**Submission Process:**
+```bash
+# Clone and setup
+git clone https://github.com/docker/mcp-registry.git
+cd mcp-registry
+git checkout -b add-jarvy
 
-1. Create GitHub Actions workflow
+# Use wizard or manual setup
+task wizard
+# OR
+task create -- --category devops https://github.com/jarvy-dev/jarvy
+
+# Test locally
+task build -- --tools jarvy
+task catalog -- jarvy
+
+# Import to Docker Desktop for testing
+docker mcp catalog import $PWD/catalogs/jarvy/catalog.yaml
+
+# Submit PR
+git add servers/jarvy/
+git commit -m "Add Jarvy MCP server for safe tool installation"
+git push origin add-jarvy
+gh pr create --title "Add Jarvy - Safe Tool Installation MCP Server"
+```
+
+### Phase 4: CI/CD Automation (Days 9-10)
+
+**Tasks:**
+1. Create GitHub Actions workflow for MCP registry updates
 2. Test workflow with manual dispatch
 3. Document release process
+
+**Workflow:** `.github/workflows/mcp-registry.yml`
+```yaml
+name: Update Docker MCP Registry
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  update-mcp-registry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get release info
+        id: release
+        run: |
+          echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          echo "commit=${GITHUB_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Create MCP Registry PR
+        env:
+          GH_TOKEN: ${{ secrets.MCP_REGISTRY_PAT }}
+        run: |
+          git clone https://github.com/docker/mcp-registry.git
+          cd mcp-registry
+          git checkout -b jarvy-v${{ steps.release.outputs.version }}
+
+          # Update commit reference in server.yaml
+          mkdir -p servers/jarvy
+          cp ../mcp/server.yaml servers/jarvy/
+          cp ../mcp/tools.json servers/jarvy/
+          cp ../mcp/readme.md servers/jarvy/
+
+          # Update source reference
+          sed -i 's/commit:.*/commit: ${{ steps.release.outputs.commit }}/' servers/jarvy/server.yaml
+
+          git add servers/jarvy/
+          git commit -m "Update jarvy to v${{ steps.release.outputs.version }}"
+          git push origin jarvy-v${{ steps.release.outputs.version }}
+
+          gh pr create \
+            --repo docker/mcp-registry \
+            --title "Update jarvy to v${{ steps.release.outputs.version }}" \
+            --body "Automated update for Jarvy release v${{ steps.release.outputs.version }}"
+```
+
+---
+
+## Security Considerations
+
+### Container Security Model
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     Security Layers                                   │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                       │
+│  1. Container Isolation                                               │
+│     ├── Non-root user (uid 1000)                                     │
+│     ├── Read-only filesystem (--read-only supported)                 │
+│     ├── No network access required                                   │
+│     └── Minimal attack surface (Alpine base)                         │
+│                                                                       │
+│  2. MCP Protocol Safety                                               │
+│     ├── Dry-run by default for all installs                         │
+│     ├── Rate limiting (3 installs/minute max)                       │
+│     ├── Allowlist/denylist configuration                            │
+│     └── Audit logging of all operations                             │
+│                                                                       │
+│  3. Host Interaction Safety                                           │
+│     ├── Tool checks: read-only path inspection                      │
+│     ├── Installations: user confirmation required                   │
+│     ├── Package managers: delegated to host                         │
+│     └── No direct host filesystem modification                      │
+│                                                                       │
+│  4. Docker-Built Image Benefits                                       │
+│     ├── Cryptographic signatures (image signing)                    │
+│     ├── Provenance attestation (build verification)                 │
+│     ├── SBOM generation (dependency tracking)                       │
+│     └── Automatic security updates (base image rebuilds)            │
+│                                                                       │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Host Access Strategy
+
+The containerized MCP server needs to interact with the host system. Docker Desktop's MCP integration handles this through:
+
+1. **Tool Detection**: Docker Desktop mounts necessary host paths for tool detection
+2. **Installation Execution**: Install commands are communicated back to the MCP client, which executes them on the host
+3. **No Direct Host Access**: Container never directly modifies host filesystem
+
+```
+MCP Client (Claude Desktop)
+    │
+    │ 1. "Install ripgrep"
+    ▼
+Jarvy Container
+    │
+    │ 2. Generates: "brew install ripgrep"
+    │    Returns as tool result
+    ▼
+MCP Client
+    │
+    │ 3. Shows to user, requests confirmation
+    │ 4. Executes on HOST (not in container)
+    ▼
+Host System
+    │
+    │ 5. Homebrew installs ripgrep
+    ▼
+Success response to user
+```
+
+### Audit Logging
+
+All MCP operations are logged:
+
+```json
+{
+  "timestamp": "2025-01-17T10:30:00Z",
+  "event": "tool_call",
+  "tool": "jarvy_install_tool",
+  "params": {"name": "ripgrep", "dry_run": false},
+  "result": "success",
+  "client": "claude-desktop",
+  "duration_ms": 45
+}
+```
 
 ---
 
@@ -442,8 +843,12 @@ echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | docker run -
 # 1. Build the image
 docker build -f Dockerfile.mcp -t jarvy-mcp:local .
 
-# 2. Test basic MCP communication
-docker run -i jarvy-mcp:local < test-requests.jsonl
+# 2. Test MCP protocol compliance
+cat <<EOF | docker run -i jarvy-mcp:local
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"jarvy_list_tools","arguments":{}}}
+EOF
 
 # 3. Test with MCP Inspector
 npx @anthropic-ai/mcp-inspector docker run -i jarvy-mcp:local
@@ -452,84 +857,53 @@ npx @anthropic-ai/mcp-inspector docker run -i jarvy-mcp:local
 ### Docker MCP Registry Testing
 
 ```bash
-# Clone and set up mcp-registry
+# Clone registry and validate
 git clone https://github.com/docker/mcp-registry.git
 cd mcp-registry
 
 # Copy Jarvy files
 mkdir -p servers/jarvy
-cp /path/to/jarvy/mcp/server.yaml servers/jarvy/
-cp /path/to/jarvy/mcp/tools.json servers/jarvy/
+cp /path/to/jarvy/mcp/* servers/jarvy/
 
-# Build and test
+# Build and generate catalog
 task build -- --tools jarvy
 task catalog -- jarvy
 
-# Import into Docker Desktop
+# Import to Docker Desktop for testing
 docker mcp catalog import $PWD/catalogs/jarvy/catalog.yaml
-
-# Test in Docker Desktop MCP Toolkit UI
-# 1. Open Docker Desktop
-# 2. Go to MCP Toolkit
-# 3. Find "jarvy" in catalog
-# 4. Enable and configure
-# 5. Test with Claude Desktop
 ```
 
-### Integration Testing with Claude Desktop
+### Integration Testing
 
-```json
-// Test configuration in Claude Desktop
-{
-  "mcpServers": {
-    "jarvy": {
-      "command": "docker",
-      "args": ["run", "-i", "--rm", "mcp/jarvy"]
-    }
-  }
-}
-```
+Test with actual MCP clients:
 
-Test prompts:
-1. "What tools can Jarvy install?"
-2. "Is git installed on my system?"
-3. "Install ripgrep for me" (should show dry-run first)
+1. **Claude Desktop**: Add to `claude_desktop_config.json`, test tool discovery and installation
+2. **Cursor**: Add to MCP settings, verify tool suggestions work
+3. **MCP Inspector**: Comprehensive protocol testing
 
 ---
 
-## Security Considerations
+## Directory Structure
 
-### Container Security
-
-1. **Non-root user**: Container runs as `jarvy` user, not root
-2. **Minimal base image**: Alpine Linux (~5MB)
-3. **No network access needed**: MCP uses stdio, not network
-4. **Read-only filesystem**: Can run with `--read-only` flag
-
-### Docker-Built Image Benefits
-
-When Docker builds the image (vs self-hosted):
-- **Cryptographic signatures**: Image is signed by Docker
-- **Provenance tracking**: Build provenance attestation
-- **SBOM generation**: Software Bill of Materials included
-- **Automatic security updates**: Rebuilt on base image updates
-
-### Host Access Considerations
-
-The MCP server needs to:
-1. **Execute package manager commands** on the host (brew, apt, etc.)
-2. **Check installed tool versions** via command execution
-
-This means the container needs:
-```bash
-# Mount host package managers (example for macOS)
-docker run -i \
-  -v /usr/local/bin:/usr/local/bin:ro \
-  -v /opt/homebrew:/opt/homebrew:ro \
-  mcp/jarvy
 ```
-
-**Important**: Document this clearly - the container can't install tools inside itself; it installs on the host system.
+jarvy/
+├── Dockerfile.mcp                    # MCP server container build
+├── mcp/
+│   ├── server.yaml                   # Docker MCP registry manifest
+│   ├── tools.json                    # MCP tool definitions
+│   └── readme.md                     # MCP-specific documentation
+├── assets/
+│   └── jarvy-icon.png               # 256x256 icon for MCP catalog
+├── src/
+│   └── mcp/                         # MCP server implementation (PRD-021)
+├── .github/
+│   └── workflows/
+│       └── mcp-registry.yml         # Auto-update workflow
+└── docs/
+    └── mcp/
+        ├── README.md                # Full MCP documentation
+        └── docker-desktop.md        # Docker Desktop setup guide
+```
 
 ---
 
@@ -538,10 +912,12 @@ docker run -i \
 | Metric | Target | Measurement |
 |--------|--------|-------------|
 | Listed in Docker Hub MCP catalog | Yes | hub.docker.com/mcp shows jarvy |
-| Docker Desktop install works | Yes | One-click enable in MCP Toolkit |
-| Image size | < 15MB | `docker images mcp/jarvy` |
-| Startup time | < 500ms | Time to first MCP response |
-| PR approval time | < 1 week | Docker team review |
+| Docker Desktop one-click install | Yes | MCP Toolkit enables jarvy |
+| Image size | < 20MB | `docker images mcp/jarvy` |
+| Startup time | < 200ms | Time to first MCP response |
+| MCP protocol compliance | 100% | MCP Inspector tests pass |
+| PR approval time | < 2 weeks | Docker team review completion |
+| Zero security vulnerabilities | 0 critical/high | Trivy/Snyk scan |
 
 ---
 
@@ -549,34 +925,37 @@ docker run -i \
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
-| Docker rejects PR | Low | High | Follow contributing guide exactly, test locally first |
-| Container can't access host tools | Medium | High | Document volume mounts clearly, test on all platforms |
-| MCP protocol version mismatch | Low | Medium | Pin to stable protocol version |
-| Large image size | Low | Low | Multi-stage build, Alpine base |
+| Docker rejects PR | Low | High | Follow contributing guide exactly, test thoroughly |
+| Host tool detection fails in container | Medium | High | Document supported configurations, test all platforms |
+| MCP protocol version changes | Low | Medium | Pin to stable version, monitor spec updates |
+| Large image size | Low | Low | Multi-stage build, Alpine base, strip binary |
+| Rate limiting in Docker builds | Low | Low | Cache layers, minimal dependencies |
 
 ---
 
 ## Open Questions
 
-1. **Volume mounts**: How should users mount their package managers into the container?
-   - Option A: Document manual mounts
-   - Option B: Docker Desktop handles this automatically for MCP servers
+1. **Host Integration Method**: How does Docker Desktop's MCP Toolkit handle host tool execution?
+   - Need to test with actual Docker Desktop integration
+   - May require special documentation for manual setups
 
-2. **Host tool execution**: Can containerized MCP server run `brew install` on host?
-   - Need to test with Docker Desktop's MCP integration
-   - May need special handling or documentation
+2. **Update Frequency**: How often does Docker rebuild MCP catalog images?
+   - On merge to main?
+   - On schedule (daily/weekly)?
+   - Need to confirm with Docker team
 
-3. **Update frequency**: How often does Docker rebuild MCP images?
-   - On every commit to `docker/mcp-registry`?
-   - On schedule?
+3. **Platform Support**: Can single container support all host platforms?
+   - Linux container detecting macOS/Windows host tools
+   - May need platform-specific handling
 
 ---
 
 ## References
 
 - [Docker MCP Registry](https://github.com/docker/mcp-registry)
-- [Docker MCP Registry Contributing Guide](https://github.com/docker/mcp-registry/blob/main/CONTRIBUTING.md)
+- [Docker MCP Registry CONTRIBUTING.md](https://github.com/docker/mcp-registry/blob/main/CONTRIBUTING.md)
 - [Docker Hub MCP Catalog](https://hub.docker.com/mcp)
 - [MCP Protocol Specification](https://spec.modelcontextprotocol.io/)
-- [PRD-021: Jarvy MCP Server](./021-mcp-server.md)
-- [Example: GitHub MCP Server](https://github.com/docker/mcp-registry/tree/main/servers/github)
+- [rust-mcp-sdk](https://github.com/rust-mcp-stack/rust-mcp-sdk) - Rust MCP SDK
+- [PRD-021: Jarvy MCP Server](./021-mcp-server.md) - MCP implementation details
+- [modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers) - Example MCP servers
