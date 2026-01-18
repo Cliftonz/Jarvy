@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: FAQ / Documentation
+    url: https://github.com/jarvy-dev/jarvy#faq
+    about: Check the FAQ and documentation before opening an issue
+  - name: GitHub Discussions
+    url: https://github.com/jarvy-dev/jarvy/discussions
+    about: Ask questions and discuss Jarvy with the community
+  - name: Security Issues
+    url: https://github.com/jarvy-dev/jarvy/security/advisories/new
+    about: Report security vulnerabilities privately

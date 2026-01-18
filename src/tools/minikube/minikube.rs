@@ -28,8 +28,9 @@ if [ -f "$HOME/.zshrc" ]; then
 fi
 "#
     },
-    // Default driver uses Docker; install Docker first if both in config
-    depends_on: &["docker"],
+    // minikube needs a container runtime (docker or podman)
+    // If either is in config, install it first
+    depends_on_one_of: &["docker", "podman"],
 });
 
 #[cfg(test)]

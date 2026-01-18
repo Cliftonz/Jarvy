@@ -85,6 +85,9 @@ define_tool!(NAME, {
     linux: { ... },                // Optional: Linux install options
     windows: { ... },              // Optional: Windows install options
     custom_install: Some(fn),      // Optional: custom install function
+    default_hook: { ... },         // Optional: post-install hook
+    depends_on: &[...],            // Optional: strict dependencies (ALL required)
+    depends_on_one_of: &[...],     // Optional: flexible dependencies (ONE OF required)
 });
 ```
 
@@ -236,6 +239,129 @@ define_tool!(ITERM2, {
     command: "iTerm",
     macos: { cask: "iterm2" },
 });
+```
+
+## Tool Dependencies
+
+Jarvy supports two types of tool dependencies to ensure proper installation order and prerequisite checking.
+
+### Strict Dependencies (`depends_on`)
+
+Use `depends_on` when a tool **absolutely requires** ALL listed dependencies to function. The tool cannot work without them.
+
+```rust
+//! lazydocker - Docker TUI that requires Docker daemon
+
+use crate::define_tool;
+
+define_tool!(LAZYDOCKER, {
+    command: "lazydocker",
+    macos: { brew: "lazydocker" },
+    linux: { brew: "lazydocker" },
+    windows: { choco: "lazydocker" },
+    // Docker TUI directly calls Docker APIs - Docker is required
+    depends_on: &["docker"],
+});
+```
+
+**When to use `depends_on`:**
+- The tool directly calls another tool's APIs (lazydocker → docker)
+- The tool is a runtime that runs inside another tool (kind → docker for Kubernetes-in-Docker)
+- The tool won't start or function without the dependency
+
+**Behavior:**
+- ALL listed dependencies must be available (installed or in config)
+- If any dependency is missing from config, a warning is shown
+- Dependencies are installed before the dependent tool (topological sort)
+
+### Flexible Dependencies (`depends_on_one_of`)
+
+Use `depends_on_one_of` when a tool needs **at least one** of several alternative dependencies. The user has flexibility in which one to use.
+
+```rust
+//! kubectl - Kubernetes CLI that needs a cluster to talk to
+
+use crate::define_tool;
+
+define_tool!(KUBECTL, {
+    command: "kubectl",
+    macos: { brew: "kubectl" },
+    linux: { uniform: "kubectl" },
+    windows: { winget: "Kubernetes.kubectl" },
+    // kubectl needs ANY K8s cluster provider - user chooses which one
+    depends_on_one_of: &["minikube", "kind", "k3d", "docker", "podman"],
+});
+```
+
+**When to use `depends_on_one_of`:**
+- Multiple tools can satisfy the same requirement (container runtimes: docker OR podman)
+- The tool works with various backends (kubectl works with any K8s cluster)
+- Users should have flexibility in their setup
+
+**Behavior:**
+1. If one option is already installed → dependency is satisfied
+2. If none installed but one is in config → that one is installed first
+3. If none installed or in config → advisory warning (tool still installs)
+
+### Dependency Examples
+
+| Tool | Dependency Type | Dependencies | Reason |
+|------|-----------------|--------------|--------|
+| `lazydocker` | strict | `["docker"]` | Uses Docker API directly |
+| `kind` | strict | `["docker"]` | Runs K8s clusters inside Docker |
+| `kubectl` | flexible | `["minikube", "kind", "docker", ...]` | Works with any K8s cluster |
+| `minikube` | flexible | `["docker", "podman"]` | Needs a container runtime |
+| `helm` | flexible | `["kubectl"]` | Uses kubeconfig, kubectl may be bundled |
+| `k9s` | flexible | `["kubectl"]` | K8s TUI, reads kubeconfig |
+| `dive` | flexible | `["docker", "podman"]` | Image explorer, works with either |
+
+### Combined Dependencies
+
+A tool can have both strict and flexible dependencies:
+
+```rust
+define_tool!(EXAMPLE, {
+    command: "example",
+    macos: { brew: "example" },
+    // Must have git installed
+    depends_on: &["git"],
+    // And needs one of these container runtimes
+    depends_on_one_of: &["docker", "podman"],
+});
+```
+
+### Dependency Ordering
+
+Jarvy automatically orders tool installation using topological sort:
+
+1. Tools without dependencies are installed first
+2. Tools with dependencies are installed after their dependencies
+3. For flexible deps, the first matching option in config creates the edge
+
+Example: If config has `[kubectl, minikube, docker]`:
+- Order: docker → minikube → kubectl
+- (kubectl has flexible dep on minikube; minikube has flexible dep on docker)
+
+### Dependency Check Functions
+
+The spec module provides functions for working with dependencies:
+
+```rust
+use jarvy::tools::spec::{
+    get_tool_dependencies,           // Get strict deps
+    get_tool_flexible_dependencies,  // Get flexible deps
+    check_tool_dependencies,         // Check if deps satisfied
+    order_tools_by_dependencies,     // Topological sort
+};
+
+// Check dependency status
+let result = check_tool_dependencies("kubectl", &config_tools, &installed_tools);
+match result {
+    DependencyCheckResult::Satisfied => { /* good to go */ }
+    DependencyCheckResult::MissingRequired(deps) => { /* strict deps missing */ }
+    DependencyCheckResult::WillInstallFlexible(dep) => { /* will install this one first */ }
+    DependencyCheckResult::MissingFlexible { options, .. } => { /* advisory warning */ }
+}
 ```
 
 ## Complex Tools (Custom Installation)

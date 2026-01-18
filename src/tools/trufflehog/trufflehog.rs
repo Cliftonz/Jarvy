@@ -10,6 +10,7 @@ define_tool!(TRUFFLEHOG, {
     command: "trufflehog",
     macos: { brew: "trufflehog" },
     linux: { brew: "trufflehog" },
+    depends_on: &["git"],
 });
 
 #[cfg(test)]

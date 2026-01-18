@@ -1,0 +1,311 @@
+{
+  "title": "PRD-033: Role-Based Configurations",
+  "description": "Enable teams to define role-based tool requirements that automatically provision different toolsets based on a developer's role",
+  "status": "completed",
+  "priority": "Medium",
+  "source": "prd/033-role-based-configurations.md",
+  "createdAt": "2026-01-17",
+  "completedAt": "2026-01-17",
+  "effortEstimate": "8.5 days",
+  "overview": {
+    "problem": "Teams have diverse roles with different tool requirements. Currently must create separate configs, include all tools for everyone, or let developers manually customize.",
+    "solution": "Single team config with [roles.*] sections defining tool sets per role. Developers declare their role in local config.",
+    "goals": [
+      "Role definitions with named tool sets",
+      "Role assignment via role = 'name' in config",
+      "Role inheritance with extends = ['parent1', 'parent2']",
+      "Role discovery via jarvy roles list/show commands",
+      "Role comparison via jarvy roles diff command",
+      "Role override via --role flag"
+    ]
+  },
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Role Definitions",
+      "description": "As a team lead, I want to define roles with specific tool sets so that each developer gets the right tools for their job.",
+      "priority": "P0",
+      "status": "completed",
+      "acceptanceCriteria": [
+        {
+          "criterion": "[roles.name] section defines a role",
+          "passed": true
+        },
+        {
+          "criterion": "description field documents the role",
+          "passed": true
+        },
+        {
+          "criterion": "tools array lists tool names",
+          "passed": true
+        },
+        {
+          "criterion": "[roles.name.tools] specifies versions",
+          "passed": true
+        },
+        {
+          "criterion": "Undefined role produces clear error",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Role Assignment",
+      "description": "As a developer, I want to declare my role so that I get the appropriate tools without manual configuration.",
+      "priority": "P0",
+      "status": "completed",
+      "acceptanceCriteria": [
+        {
+          "criterion": "role = 'name' assigns single role",
+          "passed": true
+        },
+        {
+          "criterion": "role = ['a', 'b'] assigns multiple roles",
+          "passed": true
+        },
+        {
+          "criterion": "Role tools merge with base tools",
+          "passed": true
+        },
+        {
+          "criterion": "Personal tools add to role tools",
+          "passed": true
+        },
+        {
+          "criterion": "jarvy config show --resolved shows role source",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Role Inheritance",
+      "description": "As a team lead, I want roles to inherit from other roles so that I can build hierarchies like junior-frontend extends frontend.",
+      "priority": "P1",
+      "status": "completed",
+      "acceptanceCriteria": [
+        {
+          "criterion": "extends = 'parent' inherits tools",
+          "passed": true
+        },
+        {
+          "criterion": "extends = ['a', 'b'] supports multiple inheritance",
+          "passed": true
+        },
+        {
+          "criterion": "Child overrides parent versions",
+          "passed": true
+        },
+        {
+          "criterion": "Circular inheritance detected with error",
+          "passed": true
+        },
+        {
+          "criterion": "Maximum inheritance depth: 5 levels",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Role Discovery Commands",
+      "description": "As a developer, I want to list and explore available roles so that I know my options.",
+      "priority": "P1",
+      "status": "completed",
+      "acceptanceCriteria": [
+        {
+          "criterion": "jarvy roles list shows all roles",
+          "passed": true
+        },
+        {
+          "criterion": "jarvy roles show <name> shows role details",
+          "passed": true
+        },
+        {
+          "criterion": "jarvy roles show --inheritance shows chain",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "Role Comparison",
+      "description": "As a developer, I want to compare roles so that I understand differences before switching.",
+      "priority": "P2",
+      "status": "completed",
+      "acceptanceCriteria": [
+        {
+          "criterion": "jarvy roles diff <a> <b> compares roles",
+          "passed": true
+        },
+        {
+          "criterion": "jarvy roles diff --current <other> compares to current role",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "US-006",
+      "title": "Role Override",
+      "description": "As a developer, I want to temporarily use a different role for testing or one-off tasks.",
+      "priority": "P2",
+      "status": "completed",
+      "acceptanceCriteria": [
+        {
+          "criterion": "--role <name> overrides for single command",
+          "passed": true
+        },
+        {
+          "criterion": "--dry-run with role shows what would change",
+          "passed": true
+        },
+        {
+          "criterion": "Override doesn't modify jarvy.toml",
+          "passed": true
+        }
+      ]
+    }
+  ],
+  "implementationTasks": [
+    {
+      "id": "T1",
+      "description": "Create roles module structure (src/roles/mod.rs)",
+      "status": "completed",
+      "effort": "0.5 days"
+    },
+    {
+      "id": "T2",
+      "description": "Implement RoleDefinition parsing (src/roles/definition.rs)",
+      "status": "completed",
+      "effort": "1 day"
+    },
+    {
+      "id": "T3",
+      "description": "Implement RoleResolver with inheritance (src/roles/resolver.rs)",
+      "status": "completed",
+      "effort": "1.5 days"
+    },
+    {
+      "id": "T4",
+      "description": "Add role field to JarvyConfig (src/config.rs)",
+      "status": "completed",
+      "effort": "0.5 days"
+    },
+    {
+      "id": "T5",
+      "description": "Implement config resolution with roles",
+      "status": "completed",
+      "effort": "0.5 days"
+    },
+    {
+      "id": "T6",
+      "description": "Implement jarvy roles list command",
+      "status": "completed",
+      "effort": "0.5 days"
+    },
+    {
+      "id": "T7",
+      "description": "Implement jarvy roles show command",
+      "status": "completed",
+      "effort": "0.5 days"
+    },
+    {
+      "id": "T8",
+      "description": "Implement jarvy roles diff command",
+      "status": "completed",
+      "effort": "1 day"
+    },
+    {
+      "id": "T9",
+      "description": "Add --role flag to setup command",
+      "status": "completed",
+      "effort": "0.5 days"
+    },
+    {
+      "id": "T10",
+      "description": "Add role information to config show --resolved",
+      "status": "completed",
+      "effort": "0.5 days"
+    },
+    {
+      "id": "T11",
+      "description": "Write unit tests for role resolution",
+      "status": "completed",
+      "effort": "1 day"
+    },
+    {
+      "id": "T12",
+      "description": "Write integration tests (tests/roles_integration.rs)",
+      "status": "completed",
+      "effort": "0.5 days"
+    },
+    {
+      "id": "T13",
+      "description": "Update documentation (CLAUDE.md)",
+      "status": "completed",
+      "effort": "0.5 days"
+    }
+  ],
+  "filesToCreate": [
+    "src/roles/mod.rs",
+    "src/roles/definition.rs",
+    "src/roles/resolver.rs",
+    "src/roles/commands.rs",
+    "tests/roles_integration.rs"
+  ],
+  "filesToModify": [
+    "src/main.rs",
+    "src/config.rs",
+    "CLAUDE.md"
+  ],
+  "technicalDetails": {
+    "types": {
+      "RoleDefinition": "Struct with description, extends, tools fields",
+      "Extends": "Enum for Single(String) or Multiple(Vec<String>)",
+      "RoleAssignment": "Enum for single or multiple role assignment",
+      "RoleResolver": "Struct with roles HashMap, visited HashSet, depth counter",
+      "ResolvedRole": "Struct with name, description, tools HashMap"
+    },
+    "constants": {
+      "MAX_DEPTH": 5
+    },
+    "algorithms": {
+      "inheritance": "Depth-first resolution with cycle detection via visited set"
+    }
+  },
+  "configExamples": {
+    "teamConfig": "[roles.frontend]\ndescription = \"Frontend development stack\"\ntools = [\"node\", \"bun\", \"pnpm\"]\n\n[roles.frontend.tools]\nnode = \"20\"\nbun = \"latest\"",
+    "developerConfig": "extends = \"team-config.toml\"\nrole = \"frontend\"\n\n[tools]\nvim = \"latest\"",
+    "multipleRoles": "role = [\"frontend\", \"devops\"]",
+    "inheritance": "[roles.senior-frontend]\nextends = \"frontend\"\n\n[roles.senior-frontend.tools]\ndocker = \"latest\""
+  },
+  "risks": [
+    {
+      "risk": "Role proliferation - teams create too many roles",
+      "mitigation": "Best practices guide, inheritance to reduce duplication"
+    },
+    {
+      "risk": "Inheritance complexity - deep chains hard to understand",
+      "mitigation": "Max depth limit (5), --inheritance flag to visualize"
+    },
+    {
+      "risk": "Role conflicts - multiple roles with conflicting versions",
+      "mitigation": "Last role wins, clear precedence rules documented"
+    }
+  ],
+  "dependencies": [],
+  "relatedPRDs": ["PRD-024 (Config Inheritance)"],
+  "testResults": {
+    "unitTests": {
+      "count": 26,
+      "passed": 26,
+      "files": ["src/roles/definition.rs", "src/roles/resolver.rs", "src/roles/commands.rs"]
+    },
+    "integrationTests": {
+      "count": 11,
+      "passed": 11,
+      "file": "tests/roles_integration.rs"
+    }
+  }
+}

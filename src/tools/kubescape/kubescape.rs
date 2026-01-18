@@ -9,6 +9,7 @@ define_tool!(KUBESCAPE, {
     macos: { brew: "kubescape" },
     linux: { uniform: "kubescape" },
     windows: { winget: "kubescape.kubescape" },
+    depends_on: &["kubectl"],
 });
 
 #[cfg(test)]

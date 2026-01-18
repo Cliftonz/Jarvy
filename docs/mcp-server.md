@@ -89,7 +89,7 @@ List all tools Jarvy can install with optional filtering.
 
 ### jarvy_get_tool
 
-Get detailed information about a specific tool.
+Get detailed information about a specific tool, including installation methods and dependencies.
 
 **Parameters:**
 - `name` (required): Tool name (e.g., `git`, `docker`, `node`)
@@ -99,10 +99,32 @@ Get detailed information about a specific tool.
 {
   "name": "jarvy_get_tool",
   "arguments": {
-    "name": "ripgrep"
+    "name": "kubectl"
   }
 }
 ```
+
+**Response:**
+```json
+{
+  "name": "kubectl",
+  "command": "kubectl",
+  "macos": { "brew": "kubectl" },
+  "linux": { "uniform": "kubectl" },
+  "windows": { "winget": "Kubernetes.kubectl" },
+  "dependencies": {
+    "strict": [],
+    "flexible": ["minikube", "kind", "k3d", "docker", "podman"]
+  },
+  "default_hook": {
+    "description": "Enable kubectl shell completion and 'k' alias"
+  }
+}
+```
+
+**Dependency Types:**
+- `strict`: ALL listed tools must be installed (e.g., lazydocker requires docker)
+- `flexible`: AT LEAST ONE of the listed tools must be available (e.g., kubectl needs any K8s cluster provider)
 
 ### jarvy_check_tool
 
@@ -263,6 +285,65 @@ All MCP operations are logged to `~/.jarvy/mcp-audit.log` in JSON Lines format:
 {"timestamp":"2026-01-16T12:36:40Z","action":"install_tool","client":"claude-desktop","tool":"ripgrep","success":true,"version":"14.1.0"}
 ```
 
+## Tool Dependencies
+
+Jarvy tools can declare dependencies on other tools. The MCP server exposes this information to help LLMs make intelligent installation decisions.
+
+### Dependency Types
+
+**Strict Dependencies** (`depends_on`): ALL listed tools must be installed for the dependent tool to function.
+
+Example: `lazydocker` has strict dependency on `docker` because it directly uses Docker APIs.
+
+**Flexible Dependencies** (`depends_on_one_of`): AT LEAST ONE of the listed tools must be available.
+
+Example: `kubectl` has flexible dependency on `["minikube", "kind", "k3d", "docker", "podman"]` because it can work with any Kubernetes cluster provider.
+
+### Dependency Information in Responses
+
+When you call `jarvy_get_tool`, the response includes dependency information:
+
+```json
+{
+  "name": "minikube",
+  "dependencies": {
+    "strict": [],
+    "flexible": ["docker", "podman"]
+  }
+}
+```
+
+### Installation Order Considerations
+
+When installing multiple tools, Jarvy automatically orders them based on dependencies:
+
+1. Tools without dependencies are installed first
+2. Tools with strict dependencies wait for ALL dependencies
+3. Tools with flexible dependencies wait for the FIRST matching option in the install list
+
+**Example:** Installing `[kubectl, minikube, docker]`:
+- Order: `docker` → `minikube` → `kubectl`
+- Reason: minikube needs docker/podman (docker in list), kubectl needs a K8s provider (minikube in list)
+
+### Common Dependency Patterns
+
+| Tool | Strict Deps | Flexible Deps | Notes |
+|------|-------------|---------------|-------|
+| lazydocker | docker | - | Docker TUI, needs daemon |
+| kind | docker | - | Kubernetes-in-Docker |
+| kubectl | - | minikube, kind, docker, ... | Any K8s cluster |
+| helm | - | kubectl | Package manager for K8s |
+| k9s | - | kubectl | K8s TUI |
+| minikube | - | docker, podman | Local K8s cluster |
+| dive | - | docker, podman | Image layer explorer |
+
+### Best Practices for LLMs
+
+1. **Check dependencies first:** Before installing a tool, check its dependencies via `jarvy_get_tool`
+2. **Install dependencies together:** If a user wants kubectl, suggest also installing a cluster provider
+3. **Respect user choice:** For flexible deps, ask which option the user prefers
+4. **Warn about missing deps:** If strict deps are missing, inform the user the tool may not work
+
 ## Error Codes
 
 | Code | Meaning |
@@ -279,6 +360,7 @@ All MCP operations are logged to `~/.jarvy/mcp-audit.log` in JSON Lines format:
 | -32005 | User declined |
 | -32006 | Sudo required |
 | -32007 | Timeout |
+| -32008 | Missing dependency |
 
 ## Troubleshooting
 

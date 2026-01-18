@@ -29,6 +29,8 @@ if [ -f "$HOME/.zshrc" ]; then
 fi
 "#
     },
+    // GitOps tool needs kubectl for cluster management
+    depends_on_one_of: &["kubectl"],
 });
 
 #[cfg(test)]

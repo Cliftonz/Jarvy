@@ -11,6 +11,7 @@ define_tool!(GITLEAKS, {
     macos: { brew: "gitleaks" },
     linux: { brew: "gitleaks" },
     windows: { winget: "Gitleaks.Gitleaks" },
+    depends_on: &["git"],
 });
 
 #[cfg(test)]

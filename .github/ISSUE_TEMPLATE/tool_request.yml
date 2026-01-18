@@ -1,0 +1,64 @@
+name: Tool Request
+description: Request support for a new developer tool
+title: "[Tool]: "
+labels: ["tool-request", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for requesting a new tool! This helps us prioritize which tools to add next.
+
+  - type: input
+    id: tool_name
+    attributes:
+      label: Tool Name
+      placeholder: "kubectl"
+    validations:
+      required: true
+
+  - type: input
+    id: tool_url
+    attributes:
+      label: Tool Website/Repository
+      placeholder: "https://kubernetes.io/docs/tasks/tools/"
+    validations:
+      required: true
+
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use Case
+      description: Why should Jarvy support this tool? How common is it?
+      placeholder: |
+        kubectl is essential for Kubernetes development and is used by...
+    validations:
+      required: true
+
+  - type: textarea
+    id: installation
+    attributes:
+      label: Current Installation Methods
+      description: How is this tool currently installed on different platforms?
+      placeholder: |
+        - macOS: `brew install kubectl`
+        - Linux: `apt install kubectl` or download binary
+        - Windows: `winget install Kubernetes.kubectl`
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: platforms
+    attributes:
+      label: Platforms Needed
+      options:
+        - label: macOS
+        - label: Linux
+        - label: Windows
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I can help implement this tool
+        - label: I can help test this tool

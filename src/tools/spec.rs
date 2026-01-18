@@ -264,8 +264,18 @@ pub struct ToolSpec {
 
     /// Optional list of tool names that must be installed before this tool.
     /// Used for dependency ordering (e.g., node depends on nvm, python depends on pyenv).
+    /// This is a STRICT dependency - ALL listed tools must be available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depends_on: Option<&'static [&'static str]>,
+
+    /// Optional list of tool names where AT LEAST ONE must be available.
+    /// Used for flexible dependencies where multiple tools can satisfy the requirement.
+    /// Example: kubectl can work with minikube, kind, docker, or any K8s cluster provider.
+    /// If one is already installed, the dependency is satisfied.
+    /// If none is installed but one is in config, that one will be installed first.
+    /// If none is installed or in config, a warning is shown but installation proceeds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depends_on_one_of: Option<&'static [&'static str]>,
 }
 
 impl ToolSpec {
@@ -424,13 +434,22 @@ impl ToolSpec {
 ///     windows: { winget: "Git.Git" },
 /// });
 ///
-/// // With dependencies:
+/// // With strict dependencies (ALL must be installed):
 /// define_tool!(node, {
 ///     command: "node",
 ///     macos: { brew: "node" },
 ///     linux: { uniform: "nodejs" },
 ///     windows: { winget: "OpenJS.NodeJS" },
 ///     depends_on: &["nvm"],  // nvm must be installed before node
+/// });
+///
+/// // With flexible dependencies (ONE OF must be installed):
+/// define_tool!(kubectl, {
+///     command: "kubectl",
+///     macos: { brew: "kubectl" },
+///     linux: { uniform: "kubectl" },
+///     windows: { winget: "Kubernetes.kubectl" },
+///     depends_on_one_of: &["minikube", "kind", "docker"],  // needs any K8s cluster
 /// });
 /// ```
 #[macro_export]
@@ -444,6 +463,7 @@ macro_rules! define_tool {
         $(custom_install: $custom:expr,)?
         $(default_hook: { description: $hook_desc:expr, script: $hook_script:expr $(, platform: $hook_platform:expr)? },)?
         $(depends_on: $deps:expr,)?
+        $(depends_on_one_of: $flex_deps:expr,)?
     }) => {
         pub static $name: $crate::tools::spec::ToolSpec = $crate::tools::spec::ToolSpec {
             name: stringify!($name),
@@ -454,6 +474,7 @@ macro_rules! define_tool {
             custom_install: define_tool!(@custom $($custom)?),
             default_hook: define_tool!(@default_hook $($hook_desc, $hook_script $(, $hook_platform)?)?),
             depends_on: define_tool!(@depends_on $($deps)?),
+            depends_on_one_of: define_tool!(@depends_on_one_of $($flex_deps)?),
         };
 
         pub fn ensure(min_hint: &str) -> Result<(), $crate::tools::common::InstallError> {
@@ -542,9 +563,13 @@ macro_rules! define_tool {
         Some($crate::tools::spec::DefaultHook::for_platform($desc, $script, $platform))
     };
 
-    // Dependency helpers
+    // Strict dependency helpers
     (@depends_on) => { None };
     (@depends_on $deps:expr) => { Some($deps) };
+
+    // Flexible dependency helpers (one-of)
+    (@depends_on_one_of) => { None };
+    (@depends_on_one_of $deps:expr) => { Some($deps) };
 }
 
 pub use define_tool;
@@ -1043,7 +1068,7 @@ where
 // Dependency Ordering
 // ============================================================================
 
-/// Get the dependencies of a tool by name.
+/// Get the strict dependencies of a tool by name.
 /// Returns an empty slice if the tool has no dependencies or is not found.
 pub fn get_tool_dependencies(tool_name: &str) -> &'static [&'static str] {
     get_tool_spec(tool_name)
@@ -1051,10 +1076,133 @@ pub fn get_tool_dependencies(tool_name: &str) -> &'static [&'static str] {
         .unwrap_or(&[])
 }
 
+/// Get the flexible dependencies (one-of) of a tool by name.
+/// Returns an empty slice if the tool has no flexible dependencies or is not found.
+pub fn get_tool_flexible_dependencies(tool_name: &str) -> &'static [&'static str] {
+    get_tool_spec(tool_name)
+        .and_then(|spec| spec.depends_on_one_of)
+        .unwrap_or(&[])
+}
+
+/// Result of checking a tool's dependencies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DependencyCheckResult {
+    /// All dependencies are satisfied.
+    Satisfied,
+    /// Missing strict dependencies (ALL must be installed).
+    MissingRequired(Vec<String>),
+    /// No flexible dependency installed, but one is in config and will be installed.
+    WillInstallFlexible(String),
+    /// No flexible dependency installed or in config - advisory warning.
+    MissingFlexible {
+        /// What the tool needs (description).
+        needed: &'static str,
+        /// Available options.
+        options: Vec<String>,
+        /// Suggested option to install.
+        suggestion: Option<String>,
+    },
+}
+
+impl DependencyCheckResult {
+    /// Check if the result indicates all dependencies are satisfied.
+    pub fn is_satisfied(&self) -> bool {
+        matches!(
+            self,
+            DependencyCheckResult::Satisfied | DependencyCheckResult::WillInstallFlexible(_)
+        )
+    }
+
+    /// Check if there are missing required dependencies (blocking).
+    pub fn has_missing_required(&self) -> bool {
+        matches!(self, DependencyCheckResult::MissingRequired(_))
+    }
+
+    /// Check if there are missing flexible dependencies (advisory).
+    pub fn has_missing_flexible(&self) -> bool {
+        matches!(self, DependencyCheckResult::MissingFlexible { .. })
+    }
+}
+
+/// Check the dependency status of a tool.
+///
+/// # Arguments
+/// * `tool_name` - The name of the tool to check
+/// * `config_tools` - Set of tool names in the current config
+/// * `installed_tools` - Set of tool names already installed on the system
+///
+/// # Returns
+/// A `DependencyCheckResult` indicating the dependency status.
+pub fn check_tool_dependencies(
+    tool_name: &str,
+    config_tools: &std::collections::HashSet<String>,
+    installed_tools: &std::collections::HashSet<String>,
+) -> DependencyCheckResult {
+    let spec = match get_tool_spec(tool_name) {
+        Some(s) => s,
+        None => return DependencyCheckResult::Satisfied, // Unknown tool, no deps to check
+    };
+
+    // Check strict dependencies first (ALL must be present)
+    if let Some(strict_deps) = spec.depends_on {
+        let missing: Vec<String> = strict_deps
+            .iter()
+            .filter(|dep| {
+                let dep_lower = dep.to_lowercase();
+                !installed_tools.contains(&dep_lower) && !config_tools.contains(&dep_lower)
+            })
+            .map(|s| s.to_string())
+            .collect();
+
+        if !missing.is_empty() {
+            return DependencyCheckResult::MissingRequired(missing);
+        }
+    }
+
+    // Check flexible dependencies (ONE OF must be present)
+    if let Some(flex_deps) = spec.depends_on_one_of {
+        // Check if any is already installed
+        let any_installed = flex_deps.iter().any(|dep| {
+            let dep_lower = dep.to_lowercase();
+            installed_tools.contains(&dep_lower)
+        });
+
+        if any_installed {
+            return DependencyCheckResult::Satisfied;
+        }
+
+        // Check if any is in config (will be installed)
+        let in_config: Vec<&str> = flex_deps
+            .iter()
+            .filter(|dep| {
+                let dep_lower = dep.to_lowercase();
+                config_tools.contains(&dep_lower)
+            })
+            .copied()
+            .collect();
+
+        if !in_config.is_empty() {
+            return DependencyCheckResult::WillInstallFlexible(in_config[0].to_string());
+        }
+
+        // None installed or in config - advisory warning
+        return DependencyCheckResult::MissingFlexible {
+            needed: "one of the following",
+            options: flex_deps.iter().map(|s| s.to_string()).collect(),
+            suggestion: flex_deps.first().map(|s| s.to_string()),
+        };
+    }
+
+    DependencyCheckResult::Satisfied
+}
+
 /// Order tools by their dependencies using topological sort.
 ///
 /// Tools with dependencies will be placed after their dependencies.
 /// If tool A depends on tool B, then B will appear before A in the result.
+///
+/// This handles both strict dependencies (depends_on - ALL must be present)
+/// and flexible dependencies (depends_on_one_of - if any is in the list, order appropriately).
 ///
 /// # Arguments
 /// * `tools` - Iterator of (tool_name, version) tuples
@@ -1083,6 +1231,7 @@ where
     for (name, _) in &tool_list {
         in_degree.entry(name.as_str()).or_insert(0);
 
+        // Handle strict dependencies (ALL must be present)
         let deps = get_tool_dependencies(name);
         for dep in deps {
             let dep_lower = dep.to_lowercase();
@@ -1091,6 +1240,24 @@ where
                 *in_degree.entry(name.as_str()).or_insert(0) += 1;
                 dependents
                     .entry(dep_lower.leak()) // leak is safe for static strings
+                    .or_default()
+                    .push(name.as_str());
+            }
+        }
+
+        // Handle flexible dependencies (ONE OF - pick first match in our set)
+        let flex_deps = get_tool_flexible_dependencies(name);
+        if !flex_deps.is_empty() {
+            // Find the first flexible dependency that is in our tool set
+            if let Some(flex_dep) = flex_deps.iter().find(|dep| {
+                let dep_lower = dep.to_lowercase();
+                tool_set.contains(dep_lower.as_str())
+            }) {
+                let dep_lower = flex_dep.to_lowercase();
+                // Add edge: flex_dep -> name (flex_dep must be installed before name)
+                *in_degree.entry(name.as_str()).or_insert(0) += 1;
+                dependents
+                    .entry(dep_lower.leak())
                     .or_default()
                     .push(name.as_str());
             }
@@ -1138,9 +1305,19 @@ where
     result
 }
 
-/// Check if a tool has any dependencies.
+/// Check if a tool has any strict dependencies.
 pub fn tool_has_dependencies(tool_name: &str) -> bool {
     !get_tool_dependencies(tool_name).is_empty()
+}
+
+/// Check if a tool has any flexible dependencies.
+pub fn tool_has_flexible_dependencies(tool_name: &str) -> bool {
+    !get_tool_flexible_dependencies(tool_name).is_empty()
+}
+
+/// Check if a tool has any dependencies (strict or flexible).
+pub fn tool_has_any_dependencies(tool_name: &str) -> bool {
+    tool_has_dependencies(tool_name) || tool_has_flexible_dependencies(tool_name)
 }
 
 #[cfg(test)]
@@ -1163,6 +1340,7 @@ mod tests {
         custom_install: None,
         default_hook: None,
         depends_on: None,
+        depends_on_one_of: None,
     };
 
     // Test ToolSpec with a default hook
@@ -1178,6 +1356,7 @@ mod tests {
             "echo 'test hook executed'",
         )),
         depends_on: None,
+        depends_on_one_of: None,
     };
 
     #[test]
@@ -1247,6 +1426,7 @@ mod tests {
             custom_install: None,
             default_hook: None,
             depends_on: None,
+            depends_on_one_of: None,
         };
         assert!(!tool.is_satisfied("1.0"));
     }
@@ -1277,6 +1457,7 @@ mod tests {
             custom_install: Some(|_| Ok(())),
             default_hook: None,
             depends_on: None,
+            depends_on_one_of: None,
         };
         let entry = ToolIndexEntry::from(&custom_tool);
         assert!(entry.custom_install.has_custom_installer);
@@ -1479,6 +1660,7 @@ mod tests {
                 "windows",
             )),
             depends_on: None,
+            depends_on_one_of: None,
         };
 
         // Hook should be available on current platform
@@ -1628,6 +1810,130 @@ mod tests {
         // All names should be lowercase in output
         for (name, _) in &ordered {
             assert_eq!(name, &name.to_lowercase());
+        }
+    }
+
+    // ========================================================================
+    // Flexible Dependency Tests
+    // ========================================================================
+
+    #[test]
+    fn test_get_tool_flexible_dependencies_no_deps() {
+        // Tools without flexible dependencies should return empty slice
+        let deps = get_tool_flexible_dependencies("nonexistent");
+        assert!(deps.is_empty());
+
+        // git has no flexible dependencies
+        let deps = get_tool_flexible_dependencies("git");
+        assert!(deps.is_empty());
+    }
+
+    #[test]
+    fn test_tool_has_flexible_dependencies() {
+        // Unknown tools have no flexible dependencies
+        assert!(!tool_has_flexible_dependencies("nonexistent"));
+        // Most standard tools have no flexible dependencies
+        assert!(!tool_has_flexible_dependencies("git"));
+    }
+
+    #[test]
+    fn test_tool_has_any_dependencies() {
+        // Unknown tools have no dependencies
+        assert!(!tool_has_any_dependencies("nonexistent"));
+        // Standard tools without deps
+        assert!(!tool_has_any_dependencies("git"));
+    }
+
+    #[test]
+    fn test_dependency_check_result_methods() {
+        // Satisfied
+        let satisfied = DependencyCheckResult::Satisfied;
+        assert!(satisfied.is_satisfied());
+        assert!(!satisfied.has_missing_required());
+        assert!(!satisfied.has_missing_flexible());
+
+        // WillInstallFlexible
+        let will_install = DependencyCheckResult::WillInstallFlexible("docker".to_string());
+        assert!(will_install.is_satisfied()); // This is still "satisfied" from ordering perspective
+        assert!(!will_install.has_missing_required());
+        assert!(!will_install.has_missing_flexible());
+
+        // MissingRequired
+        let missing_req = DependencyCheckResult::MissingRequired(vec!["docker".to_string()]);
+        assert!(!missing_req.is_satisfied());
+        assert!(missing_req.has_missing_required());
+        assert!(!missing_req.has_missing_flexible());
+
+        // MissingFlexible
+        let missing_flex = DependencyCheckResult::MissingFlexible {
+            needed: "container runtime",
+            options: vec!["docker".to_string(), "podman".to_string()],
+            suggestion: Some("docker".to_string()),
+        };
+        assert!(!missing_flex.is_satisfied());
+        assert!(!missing_flex.has_missing_required());
+        assert!(missing_flex.has_missing_flexible());
+    }
+
+    #[test]
+    fn test_check_tool_dependencies_unknown_tool() {
+        use std::collections::HashSet;
+        let config_tools = HashSet::new();
+        let installed_tools = HashSet::new();
+
+        let result =
+            check_tool_dependencies("nonexistent_tool_xyz", &config_tools, &installed_tools);
+        assert_eq!(result, DependencyCheckResult::Satisfied);
+    }
+
+    #[test]
+    fn test_check_tool_dependencies_no_deps() {
+        use std::collections::HashSet;
+        let config_tools = HashSet::new();
+        let installed_tools = HashSet::new();
+
+        // git has no dependencies
+        let result = check_tool_dependencies("git", &config_tools, &installed_tools);
+        assert_eq!(result, DependencyCheckResult::Satisfied);
+    }
+
+    #[test]
+    fn test_check_tool_dependencies_strict_in_config() {
+        use std::collections::HashSet;
+        let mut config_tools = HashSet::new();
+        config_tools.insert("docker".to_string());
+        let installed_tools = HashSet::new();
+
+        // lazydocker depends on docker - docker is in config so should be satisfied
+        let result = check_tool_dependencies("lazydocker", &config_tools, &installed_tools);
+        assert!(result.is_satisfied());
+    }
+
+    #[test]
+    fn test_check_tool_dependencies_strict_installed() {
+        use std::collections::HashSet;
+        let config_tools = HashSet::new();
+        let mut installed_tools = HashSet::new();
+        installed_tools.insert("docker".to_string());
+
+        // lazydocker depends on docker - docker is installed so should be satisfied
+        let result = check_tool_dependencies("lazydocker", &config_tools, &installed_tools);
+        assert!(result.is_satisfied());
+    }
+
+    #[test]
+    fn test_check_tool_dependencies_strict_missing() {
+        use std::collections::HashSet;
+        let config_tools = HashSet::new();
+        let installed_tools = HashSet::new();
+
+        // lazydocker depends on docker - docker is missing
+        let result = check_tool_dependencies("lazydocker", &config_tools, &installed_tools);
+        assert!(result.has_missing_required());
+        if let DependencyCheckResult::MissingRequired(missing) = result {
+            assert!(missing.contains(&"docker".to_string()));
+        } else {
+            panic!("Expected MissingRequired");
         }
     }
 }

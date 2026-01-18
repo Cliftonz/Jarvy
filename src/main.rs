@@ -34,6 +34,7 @@ mod outputs;
 mod posthog;
 mod provisioner;
 mod report;
+mod roles;
 mod services;
 mod setup;
 mod team;
@@ -72,6 +73,9 @@ enum Commands {
         /// Fetch configuration from a URL (e.g., GitHub raw URL, gist, HTTP endpoint)
         #[clap(long, value_name = "URL")]
         from: Option<String>,
+        /// Override role assignment for this run (temporary, doesn't modify config)
+        #[clap(long, value_name = "ROLE")]
+        role: Option<String>,
         /// Skip all hook execution
         #[clap(long)]
         no_hooks: bool,
@@ -334,6 +338,14 @@ enum Commands {
     Team {
         #[clap(subcommand)]
         action: TeamAction,
+    },
+    /// Manage role-based configurations (list, show, diff)
+    Roles {
+        /// Path to the configuration file
+        #[clap(short, long, default_value = "./jarvy.toml")]
+        file: String,
+        #[clap(subcommand)]
+        action: roles::RolesAction,
     },
     /// Manage version lock files for reproducible environments
     Lock {
@@ -611,6 +623,7 @@ fn main() {
             Some(Commands::Mcp { .. }) => "mcp",
             Some(Commands::Diagnose { .. }) => "diagnose",
             Some(Commands::Team { .. }) => "team",
+            Some(Commands::Roles { .. }) => "roles",
             Some(Commands::Lock { .. }) => "lock",
             Some(Commands::Config { .. }) => "config",
             Some(Commands::External(..)) => "external",
@@ -679,6 +692,7 @@ fn main() {
         Some(Commands::Setup {
             file,
             from,
+            role,
             no_hooks,
             dry_run,
             ci,
@@ -762,7 +776,11 @@ fn main() {
                 println!("[DRY-RUN] Would run platform setup");
             }
 
-            let tools = config.get_tool_configs();
+            // Get tool configs with role override if --role flag was used
+            if let Some(role_name) = role {
+                println!("Using role override: {}", role_name);
+            }
+            let tools = config.get_tool_configs_with_role_override(role.as_deref());
 
             // Phase 2: Parallel version checking - determine which tools need installation
             println!("Checking tool versions...");
@@ -2077,6 +2095,9 @@ fn main() {
         Some(Commands::Team { action }) => {
             handle_team_command(action);
         }
+        Some(Commands::Roles { file, action }) => {
+            handle_roles_command(file, action);
+        }
         Some(Commands::Lock { action }) => {
             handle_lock_command(action);
         }
@@ -2653,6 +2674,23 @@ fn handle_team_command(action: &TeamAction) {
                 }
             }
         }
+    }
+}
+
+/// Handle roles subcommands
+fn handle_roles_command(file: &str, action: &roles::RolesAction) {
+    let config = config::Config::new(file);
+
+    if let Err(e) = roles::handle_roles_command(
+        action.clone(),
+        Some(config.get_roles_config()),
+        config
+            .get_assigned_roles()
+            .map(|v| v.first().copied())
+            .flatten(),
+    ) {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
     }
 }
 

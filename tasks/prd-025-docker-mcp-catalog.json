@@ -1,0 +1,327 @@
+{
+  "id": "PRD-025",
+  "parent_prd": "PRD-025",
+  "title": "Docker Desktop MCP Catalog Distribution",
+  "description": "Containerize Jarvy's MCP server and submit it to Docker Desktop's MCP catalog, enabling one-click installation for developers using Claude Desktop, Cursor, and other MCP clients",
+  "status": "pending",
+  "priority": "high",
+  "dependencies": ["PRD-021"],
+  "estimated_complexity": "medium",
+  "acceptance_criteria": [
+    "Dockerfile.mcp builds successfully with multi-stage Alpine build",
+    "Container image is < 20MB compressed",
+    "Container runs as non-root user (uid 1000)",
+    "MCP initialize handshake works via stdio",
+    "tools/list returns all Jarvy tools",
+    "tools/call works for all 6 MCP tools",
+    "mcp/server.yaml validates with Docker registry tools",
+    "mcp/tools.json matches PRD-021 tool definitions",
+    "mcp/readme.md includes all usage examples",
+    "jarvy-icon.png asset exists (256x256 PNG)",
+    "PR submitted to docker/mcp-registry",
+    "Docker Desktop MCP Toolkit can enable Jarvy",
+    "GitHub Actions workflow auto-creates registry PRs on release"
+  ],
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Create Dockerfile.mcp",
+      "description": "Create multi-stage Dockerfile for MCP server container",
+      "passed": false,
+      "priority": "high",
+      "files": ["Dockerfile.mcp"],
+      "subtasks": [
+        "Create builder stage with rust:1.83-alpine",
+        "Add musl-dev, openssl-dev, openssl-libs-static dependencies",
+        "Implement cargo dependency caching with BuildKit cache mounts",
+        "Build jarvy binary with release profile",
+        "Create runtime stage with alpine:3.21",
+        "Add tini for proper signal handling",
+        "Create non-root user (jarvy:1000)",
+        "Copy binary and set permissions",
+        "Add OCI labels for image metadata",
+        "Set ENTRYPOINT with tini and jarvy mcp"
+      ]
+    },
+    {
+      "id": "T2",
+      "title": "Implement container-aware host detection",
+      "description": "Modify MCP server to detect running in container and handle host interaction",
+      "passed": false,
+      "priority": "high",
+      "files": ["src/mcp/config.rs", "src/mcp/tools.rs"],
+      "subtasks": [
+        "Add JARVY_MCP_MODE environment variable check",
+        "Detect containerized environment (/proc/1/cgroup check)",
+        "Modify tool detection for container context",
+        "Return installation commands as strings (not execute directly)",
+        "Add container-specific logging configuration",
+        "Update jarvy_platform_info to indicate container mode"
+      ]
+    },
+    {
+      "id": "T3",
+      "title": "Test local container build",
+      "description": "Verify Docker build and basic MCP communication",
+      "passed": false,
+      "priority": "high",
+      "files": [],
+      "subtasks": [
+        "Build image: docker build -f Dockerfile.mcp -t jarvy-mcp:local .",
+        "Verify image size < 20MB",
+        "Test MCP initialize handshake",
+        "Test tools/list request",
+        "Test tools/call for jarvy_list_tools",
+        "Test with MCP Inspector (npx @anthropic-ai/mcp-inspector)",
+        "Verify non-root user execution",
+        "Test read-only filesystem mode (--read-only)"
+      ]
+    },
+    {
+      "id": "T4",
+      "title": "Create mcp/server.yaml manifest",
+      "description": "Create Docker MCP Registry server manifest",
+      "passed": false,
+      "priority": "high",
+      "files": ["mcp/server.yaml"],
+      "subtasks": [
+        "Define name, type (local), and category (devops)",
+        "Add tags: devtools, installation, package-manager, cross-platform",
+        "Write about section with title, description, icon",
+        "Define source with project URL and dockerfile path",
+        "Add config section with environment variables",
+        "Define parameters for Docker Desktop UI",
+        "Validate YAML syntax"
+      ]
+    },
+    {
+      "id": "T5",
+      "title": "Create mcp/tools.json definitions",
+      "description": "Create MCP tool definitions for Docker registry",
+      "passed": false,
+      "priority": "high",
+      "files": ["mcp/tools.json"],
+      "subtasks": [
+        "Define jarvy_list_tools with inputSchema",
+        "Define jarvy_get_tool with inputSchema",
+        "Define jarvy_check_tool with inputSchema",
+        "Define jarvy_check_multiple with inputSchema",
+        "Define jarvy_install_tool with inputSchema (dry_run default)",
+        "Define jarvy_platform_info with inputSchema",
+        "Validate JSON syntax matches MCP protocol spec"
+      ]
+    },
+    {
+      "id": "T6",
+      "title": "Create mcp/readme.md documentation",
+      "description": "Write MCP-specific documentation for Docker catalog",
+      "passed": false,
+      "priority": "medium",
+      "files": ["mcp/readme.md"],
+      "subtasks": [
+        "Write overview and features section",
+        "Add Docker Desktop quick start instructions",
+        "Add manual Claude Desktop configuration example",
+        "Document all 6 MCP tools with examples",
+        "Add security section (dry-run, confirmation, rate limiting)",
+        "Document environment variable configuration",
+        "Add enterprise usage example",
+        "List supported tools by category"
+      ]
+    },
+    {
+      "id": "T7",
+      "title": "Create Jarvy icon asset",
+      "description": "Create icon for Docker MCP catalog listing",
+      "passed": false,
+      "priority": "low",
+      "files": ["assets/jarvy-icon.png"],
+      "subtasks": [
+        "Design or source 256x256 PNG icon",
+        "Ensure transparent background works on dark/light themes",
+        "Optimize PNG file size",
+        "Add to assets/ directory"
+      ]
+    },
+    {
+      "id": "T8",
+      "title": "Validate with Docker MCP registry tools",
+      "description": "Use Docker's validation tools to verify metadata",
+      "passed": false,
+      "priority": "medium",
+      "files": [],
+      "subtasks": [
+        "Clone docker/mcp-registry repository",
+        "Copy mcp/ files to servers/jarvy/",
+        "Run task validate -- --server servers/jarvy",
+        "Fix any validation errors",
+        "Run task build -- --tools jarvy",
+        "Verify catalog generation succeeds"
+      ]
+    },
+    {
+      "id": "T9",
+      "title": "Test with Docker Desktop MCP Toolkit",
+      "description": "Test end-to-end with Docker Desktop integration",
+      "passed": false,
+      "priority": "high",
+      "files": [],
+      "subtasks": [
+        "Generate local catalog: task catalog -- jarvy",
+        "Import to Docker Desktop: docker mcp catalog import",
+        "Enable Jarvy in MCP Toolkit UI",
+        "Test with Claude Desktop connected to Docker MCP",
+        "Verify tool discovery works",
+        "Test jarvy_check_tool for installed tool",
+        "Test jarvy_install_tool dry_run mode",
+        "Verify audit logging works in container"
+      ]
+    },
+    {
+      "id": "T10",
+      "title": "Fork and configure docker/mcp-registry",
+      "description": "Prepare repository fork for PR submission",
+      "passed": false,
+      "priority": "high",
+      "files": [],
+      "subtasks": [
+        "Fork docker/mcp-registry to jarvy-dev org",
+        "Clone fork locally",
+        "Create add-jarvy branch",
+        "Copy mcp/ files to servers/jarvy/",
+        "Verify all validation passes",
+        "Commit with proper message format"
+      ]
+    },
+    {
+      "id": "T11",
+      "title": "Submit PR to docker/mcp-registry",
+      "description": "Submit pull request for catalog inclusion",
+      "passed": false,
+      "priority": "high",
+      "files": [],
+      "subtasks": [
+        "Push add-jarvy branch to fork",
+        "Create PR with descriptive title",
+        "Include testing evidence in PR description",
+        "Link to Jarvy repository and documentation",
+        "Respond to Docker team review feedback",
+        "Make requested changes if needed"
+      ]
+    },
+    {
+      "id": "T12",
+      "title": "Create GitHub Actions workflow for registry updates",
+      "description": "Automate registry PR creation on new releases",
+      "passed": false,
+      "priority": "medium",
+      "files": [".github/workflows/mcp-registry.yml"],
+      "subtasks": [
+        "Create workflow triggered on release publish",
+        "Add workflow_dispatch for manual testing",
+        "Extract version and commit from release",
+        "Clone docker/mcp-registry",
+        "Update server.yaml with new commit reference",
+        "Create branch and commit changes",
+        "Submit PR using gh cli",
+        "Add MCP_REGISTRY_PAT secret documentation"
+      ]
+    },
+    {
+      "id": "T13",
+      "title": "Update main documentation",
+      "description": "Add Docker MCP distribution to project docs",
+      "passed": false,
+      "priority": "low",
+      "files": ["README.md", "docs/mcp/docker-desktop.md"],
+      "subtasks": [
+        "Add Docker Desktop installation section to README",
+        "Create docs/mcp/docker-desktop.md guide",
+        "Add troubleshooting section",
+        "Document enterprise configuration options",
+        "Link to Docker Hub MCP catalog page"
+      ]
+    },
+    {
+      "id": "T14",
+      "title": "Write integration tests for containerized MCP",
+      "description": "Add tests for Docker container MCP functionality",
+      "passed": false,
+      "priority": "medium",
+      "files": ["tests/mcp_docker_integration.rs"],
+      "subtasks": [
+        "Test container build in CI",
+        "Test MCP protocol compliance in container",
+        "Test all tool handlers return valid responses",
+        "Test rate limiting works in container",
+        "Test environment variable configuration",
+        "Add container startup time benchmark"
+      ]
+    }
+  ],
+  "implementation_notes": {
+    "dockerfile_location": "Root of repository as Dockerfile.mcp (per Docker MCP registry convention)",
+    "metadata_location": "mcp/ directory for server.yaml, tools.json, readme.md",
+    "icon_requirements": "256x256 PNG, works on dark and light backgrounds",
+    "host_integration": "Container returns install commands as strings; MCP client executes on host",
+    "testing_approach": "Use MCP Inspector for protocol testing, Docker Desktop for integration testing"
+  },
+  "non_goals": [
+    "Hosting our own Docker images (Docker builds and hosts as mcp/jarvy)",
+    "SSE/HTTP transport (stdio only for Docker MCP catalog)",
+    "Installing tools inside the container (tools install on the host)",
+    "Remote server deployment (local containerized server only)"
+  ],
+  "files_to_create": [
+    "Dockerfile.mcp",
+    "mcp/server.yaml",
+    "mcp/tools.json",
+    "mcp/readme.md",
+    "assets/jarvy-icon.png",
+    ".github/workflows/mcp-registry.yml",
+    "docs/mcp/docker-desktop.md",
+    "tests/mcp_docker_integration.rs"
+  ],
+  "files_to_modify": [
+    "src/mcp/config.rs",
+    "src/mcp/tools.rs",
+    "README.md"
+  ],
+  "risks": [
+    {
+      "description": "Docker rejects PR",
+      "mitigation": "Follow contributing guide exactly, test thoroughly with their validation tools"
+    },
+    {
+      "description": "Host tool detection fails in container",
+      "mitigation": "Return commands as strings, let MCP client handle execution on host"
+    },
+    {
+      "description": "Image size exceeds target",
+      "mitigation": "Multi-stage build, Alpine base, strip debug symbols, minimal dependencies"
+    },
+    {
+      "description": "MCP protocol version changes",
+      "mitigation": "Pin to stable version (2024-11-05), monitor spec updates"
+    },
+    {
+      "description": "Slow PR review from Docker team",
+      "mitigation": "Submit early, provide thorough documentation and test evidence"
+    }
+  ],
+  "effort_estimate": {
+    "dockerfile_creation": "0.5 days",
+    "container_host_detection": "1 day",
+    "local_testing": "0.5 days",
+    "registry_metadata": "1 day",
+    "documentation": "0.5 days",
+    "icon_creation": "0.5 days",
+    "validation_testing": "0.5 days",
+    "docker_desktop_testing": "1 day",
+    "pr_submission": "0.5 days",
+    "pr_review_response": "1-2 days",
+    "ci_workflow": "0.5 days",
+    "integration_tests": "1 day",
+    "total": "8-10 days"
+  }
+}

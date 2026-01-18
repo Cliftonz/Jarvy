@@ -49,7 +49,7 @@ This folder contains PRDs for improving Jarvy based on a comprehensive codebase 
 |---|-----|--------|--------|-------------|
 | 21 | [MCP Server](021-mcp-server.md) | LLM integration | 10 days | Expose Jarvy as MCP server for Claude, Cursor, etc. |
 | 22 | [Remote Telemetry & Monitoring](022-remote-telemetry-monitoring.md) | Observability | 3-5 days | OTEL metrics, traces, unsupported tool reporting |
-| 23 | [Docker MCP Catalog](023-docker-mcp-catalog.md) | Distribution | 2-3 days | Containerize and publish to Docker Desktop MCP catalog |
+| 23 | [Docker MCP Catalog](025-docker-mcp-catalog.md) | Distribution | 2-3 days | Containerize and publish to Docker Desktop MCP catalog |
 
 ## Recommended Implementation Order
 

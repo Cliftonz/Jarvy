@@ -10,6 +10,8 @@ define_tool!(DIVE, {
     command: "dive",
     macos: { brew: "dive" },
     linux: { brew: "dive" },
+    // dive can explore images from docker or podman
+    depends_on_one_of: &["docker", "podman"],
 });
 
 #[cfg(test)]

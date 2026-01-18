@@ -38,6 +38,7 @@
 | PRD-027 | Observability and Debugging | 2026-01-16 | Structured logging, profiler, sanitizer, diagnose command |
 | PRD-015 | Config Validation & Remote Loading | 2026-01-16 | jarvy validate, --from URL, --header auth, 1MB size limit |
 | PRD-013 | Expand Tool Coverage | 2026-01-17 | 154 tools total, 35 new tools added across all categories |
+| N/A | Tool Dependency Expansion | 2026-01-17 | 19 tools with deps, java/erlang added, 12 new deps |
 
 ---
 
@@ -2254,3 +2255,550 @@ Tools with default hooks for shell initialization:
 3. **GUI App Coverage**: Some popular GUI apps (Cursor, Zed, JetBrains Toolbox) have limited cross-platform package manager availability
 
 4. **Registry Auto-Discovery**: The inventory crate enables zero-config tool registration - just add the module to mod.rs
+
+---
+
+## Tool Dependency Expansion (Completed)
+
+**Date**: 2026-01-17
+**Status**: Complete (19 tools with dependencies, 12 new dependencies added)
+**Task File**: `tasks/tool-dependency-update.json`
+
+### New Tools Created
+
+Created two new tools to enable JVM and BEAM language dependencies:
+
+| Tool | File | Purpose | Default Hook |
+|------|------|---------|--------------|
+| java | src/tools/java/java.rs | OpenJDK runtime for JVM languages | JAVA_HOME setup |
+| erlang | src/tools/erlang/erlang.rs | BEAM VM for Elixir | None |
+
+### New Dependencies Added
+
+Added `depends_on` to 12 additional tools:
+
+**Kubernetes Ecosystem (6)**:
+| Tool | Depends On | Reason |
+|------|------------|--------|
+| k3d | docker | k3d runs k3s in Docker containers |
+| krew | kubectl | krew is a kubectl plugin manager |
+| k9s | kubectl | k9s provides a terminal UI for kubectl |
+| helm | kubectl | Helm is the Kubernetes package manager |
+| stern | kubectl | stern tails logs from multiple pods using kubectl |
+| kubescape | kubectl | kubescape scans Kubernetes clusters via kubectl |
+
+**Docker Ecosystem (1)**:
+| Tool | Depends On | Reason |
+|------|------------|--------|
+| dive | docker | dive explores Docker image layers |
+
+**Git-Based Security Tools (2)**:
+| Tool | Depends On | Reason |
+|------|------------|--------|
+| gitleaks | git | gitleaks scans git repositories for secrets |
+| trufflehog | git | trufflehog scans git history for secrets |
+
+**JVM/BEAM Languages (3)**:
+| Tool | Depends On | Reason |
+|------|------------|--------|
+| kotlin | java | Kotlin runs on the JVM |
+| scala | java | Scala runs on the JVM |
+| elixir | erlang | Elixir runs on the BEAM VM (Erlang runtime) |
+
+### Total Dependency Coverage
+
+| Metric | Before | After | Change |
+|--------|--------|-------|--------|
+| Tools with dependencies | 7 | 19 | +12 |
+| Total tool count | 154 | 156 | +2 (java, erlang) |
+| Dependency categories | 3 | 6 | +3 |
+
+### Dependency Categories
+
+1. **Version Managers** (3): node→nvm, python→pyenv, ruby→rbenv
+2. **Docker Tools** (4): lazydocker→docker, kind→docker, minikube→docker, k3d→docker, dive→docker
+3. **Kubernetes Tools** (7): kubectl→minikube/kind, krew→kubectl, k9s→kubectl, helm→kubectl, stern→kubectl, kubescape→kubectl
+4. **JVM Languages** (2): kotlin→java, scala→java
+5. **BEAM Languages** (1): elixir→erlang
+6. **Git Security** (2): gitleaks→git, trufflehog→git
+
+### Implementation Pattern
+
+```rust
+define_tool!(K3D, {
+    command: "k3d",
+    macos: { brew: "k3d" },
+    linux: { brew: "k3d" },
+    windows: { winget: "k3d-io.k3d" },
+    depends_on: &["docker"],
+});
+```
+
+### Key Learnings
+
+1. **Transitive Dependencies**: Some tools have transitive dependency chains (e.g., krew→kubectl→minikube/kind→docker)
+2. **Optional Dependencies**: Dependencies only affect installation order when the dependency is also in the user's config
+3. **JVM/BEAM Pattern**: JVM languages (kotlin, scala) and BEAM languages (elixir) now have their runtime dependencies properly expressed
+
+---
+
+## PRD-033: Role-Based Configurations Implementation (2026-01-17)
+
+### Overview
+
+Implemented role-based configurations allowing teams to define tool sets by role (frontend, backend, devops, etc.) with inheritance support.
+
+### Architecture Summary
+
+**Module Structure**: `src/roles/`
+- `mod.rs` - Module declarations and re-exports, MAX_INHERITANCE_DEPTH constant (5)
+- `definition.rs` - Type definitions using serde untagged enums for flexible TOML parsing
+- `resolver.rs` - Inheritance resolution with caching and cycle detection
+- `commands.rs` - CLI handlers for list, show, diff subcommands
+
+### Key Type Patterns
+
+**Serde Untagged Enums** enable flexible TOML parsing:
+```rust
+#[derive(Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum RoleAssignment {
+    Single(String),           // role = "frontend"
+    Multiple(Vec<String>),    // role = ["frontend", "devops"]
+}
+```
+
+**Three-Tier Tool Specification**:
+1. Simple array: `tools = ["node", "bun"]` → defaults to "latest" version
+2. Versioned table: `[roles.name.tools] node = "20"` → specific versions
+3. Detailed config: `node = { version = "20", version_manager = false }` → full control
+
+### Resolver Implementation
+
+**Caching Strategy**: RoleResolver maintains `resolved: HashMap<String, ResolvedRole>` to avoid re-resolving the same role in complex inheritance graphs.
+
+**Topological Resolution**: For multiple role assignment, uses `resolve_multiple()` which:
+1. Resolves each role individually
+2. Merges in order (later roles override earlier ones)
+3. Preserves source_role tracking for debugging
+
+**Cycle Detection**: Tracks visited roles during depth-first resolution. If a role is visited twice before resolution completes, returns `RoleResolverError::CircularInheritance`.
+
+### Integration Points
+
+1. **Config.rs**: Added `get_tool_configs_with_role_override()` for --role flag handling
+2. **Main.rs**: Setup handler calls role-aware tool getter, prints override message when --role used
+3. **Analytics**: Added "roles" to cmd_name mapping in analytics section
+
+### Borrow Conflict Resolution
+
+In `commands.rs`, the `handle_show()` function had a borrow conflict:
+```rust
+// WRONG: resolver borrowed immutably then mutably
+let role_def = resolver.get_role(name)?;  // immutable borrow
+let resolved = resolver.resolve(name)?;    // mutable borrow needed
+
+// FIX: Clone to end the immutable borrow
+let role_def = resolver.get_role(name)?.clone();
+let resolved = resolver.resolve(name)?;
+```
+
+### CLI Commands
+
+| Command | Function |
+|---------|----------|
+| `jarvy roles list` | Lists all roles with optional verbose tool counts |
+| `jarvy roles list -F json` | JSON output for scripting |
+| `jarvy roles show <name>` | Shows role details |
+| `jarvy roles show <name> --resolved` | Shows with inherited tools |
+| `jarvy roles show <name> --inheritance` | Shows inheritance chain |
+| `jarvy roles diff <a> <b>` | Compares two roles |
+| `jarvy setup --role <name>` | Overrides role for single run |
+
+### Test Coverage
+
+Integration tests in `tests/roles_integration.rs` cover:
+- Empty roles list handling
+- Role listing and JSON output
+- Role show with inheritance
+- Nonexistent role errors
+- Role diff functionality
+- Role assignment parsing (single and multiple)
+- --role flag acceptance
+
+### Key Learnings
+
+1. **Serde Untagged Enums**: Powerful for TOML flexibility but order matters (try most specific variant first)
+2. **Ownership in CLI**: When CLI handler needs both reference and mutable access to same struct, clone early
+3. **Caching in Resolvers**: Essential for complex inheritance graphs to avoid exponential resolution
+4. **Test-Driven PRD**: PRD-033 was well-specified - tests mapped directly to acceptance criteria
+
+---
+
+## PRD-034: Enhanced Tool Dependency System
+
+**Completed**: 2026-01-17
+**Files Modified**: 
+- `src/tools/spec.rs` - Core dependency types and functions
+- `src/tools/kubectl/kubectl.rs` - Updated to flexible deps
+- `src/tools/minikube/minikube.rs` - Updated to flexible deps  
+- `src/tools/dive/dive.rs` - Updated to flexible deps
+- `src/tools/helm/helm.rs` - Updated to flexible deps
+- `src/tools/k9s/k9s.rs` - Updated to flexible deps
+- `src/tools/argocd/argocd.rs` - Updated to flexible deps
+- `src/tools/krew/krew.rs` - Updated to flexible deps
+- `CLAUDE.md` - Documentation added
+
+### Problem
+
+The original `depends_on` field treated all dependencies as strict - ALL listed tools must be installed. This was incorrect for tools like kubectl that just need ANY Kubernetes cluster provider (minikube OR kind OR docker), not all of them.
+
+### Solution: Two Dependency Types
+
+1. **Strict Dependencies** (`depends_on: &[...]`): ALL listed tools must be available
+   - Example: `lazydocker` requires `docker` (uses Docker APIs directly)
+   - Example: `kind` requires `docker` (Kubernetes-in-Docker needs Docker)
+
+2. **Flexible Dependencies** (`depends_on_one_of: &[...]`): AT LEAST ONE must be available
+   - Example: `kubectl` needs one of `minikube`, `kind`, `k3d`, `docker`, `podman`
+   - Example: `minikube` needs one of `docker`, `podman` (container runtime)
+   - Example: `helm` needs `kubectl` (but kubectl may be provided by minikube, etc.)
+
+### Implementation Details
+
+**New Struct Field** (`src/tools/spec.rs:276-278`):
+```rust
+pub depends_on_one_of: Option<&'static [&'static str]>,
+```
+
+**New Enum** (`DependencyCheckResult`):
+- `Satisfied` - All dependencies met
+- `MissingRequired(Vec<String>)` - Missing strict dependencies (blocking)
+- `WillInstallFlexible(String)` - No flex dep installed, but one in config
+- `MissingFlexible { needed, options, suggestion }` - Advisory warning
+
+**New Functions**:
+- `get_tool_flexible_dependencies(tool_name)` - Returns `&'static [&'static str]`
+- `check_tool_dependencies(tool, config_tools, installed_tools)` - Returns `DependencyCheckResult`
+- `tool_has_flexible_dependencies(tool_name)` - Boolean check
+- `tool_has_any_dependencies(tool_name)` - Checks both strict and flexible
+
+**Topological Sort Updates** (`order_tools_by_dependencies`):
+- Handles both `depends_on` (all required) and `depends_on_one_of` (first match in config)
+- Uses Kahn's algorithm with in-degree counting
+- For flexible deps, finds first option in the tool set and adds single edge
+
+### Macro Pattern Matching
+
+The `define_tool!` macro field order matters. Fields must appear in this order:
+1. `command`
+2. `macos`, `linux`, `windows` (optional)
+3. `custom_install` (optional)
+4. `default_hook` (optional)
+5. `depends_on` (optional)
+6. `depends_on_one_of` (optional)
+
+### Tools Updated
+
+| Tool | Dependency Type | Dependencies |
+|------|-----------------|--------------|
+| kubectl | flexible | minikube, kind, k3d, docker, podman |
+| minikube | flexible | docker, podman |
+| dive | flexible | docker, podman |
+| helm | flexible | kubectl |
+| k9s | flexible | kubectl |
+| argocd | flexible | kubectl |
+| krew | flexible | kubectl |
+| lazydocker | strict | docker |
+| kind | strict | docker |
+
+### Key Learnings
+
+1. **Macro Field Order**: Rust declarative macros match patterns strictly. Reordering fields in tool definitions without matching macro patterns causes confusing errors like "no rules expected 'default_hook'"
+
+2. **Advisory vs Blocking**: Flexible dependencies are advisory - tool installs even if no option is available. This supports users with external K8s clusters or alternative setups.
+
+3. **First Match Strategy**: For flexible deps in topological sort, use first matching option from config to create single dependency edge. This prevents over-constraining the graph.
+
+4. **Test ToolSpec Completeness**: When adding new fields to ToolSpec, all test ToolSpecs must include the field (even if `None`), otherwise tests fail to compile.
+
+### Test Coverage
+
+5 new unit tests added for flexible dependencies:
+- `test_get_tool_flexible_dependencies_no_deps`
+- `test_tool_has_flexible_dependencies`
+- `test_tool_has_any_dependencies`
+- `test_dependency_check_result_methods`
+- `test_check_tool_dependencies_*` (multiple scenarios)
+
+---
+
+## PRD-033 Integration Fixes (2026-01-17)
+
+### Issues Fixed
+
+1. **Config Parsing Conflict - Serde `alias` vs `rename`**
+   - **Problem**: `role` field had `#[serde(alias = "roles")]` which conflicted with `roles_config` field's `#[serde(rename = "roles")]`. Both tried to claim the `roles` TOML key.
+   - **Error**: "TOML parse error... data did not match any variant of untagged enum RoleAssignment"
+   - **Fix**: Removed `alias = "roles"` from the `role` field (`src/config.rs:151`). Users must use `role = "name"` syntax, not `roles = [...]`.
+
+2. **Validation Command - Missing known_keys**
+   - **Problem**: `validate.rs` `known_keys` array didn't include `roles`, `role`, or `extends`
+   - **Symptom**: Warning "Unknown configuration section: [roles]"
+   - **Fix**: Added these keys to `known_keys` array (`src/commands/validate.rs:69`)
+
+3. **Integration Test - CLI Argument Order**
+   - **Problem**: Tests used `roles list -f <path>` but `-f` is defined on parent `Roles` command, not subcommands
+   - **Error**: "unexpected argument '-f' found"
+   - **Fix**: Changed all tests to use `roles -f <path> <subcommand>` pattern
+
+4. **Integration Test - Invalid TOML**
+   - **Problem**: Test tried to use `tools = ["node"]` (array) AND `[roles.frontend.tools]` (table) simultaneously
+   - **Error**: "duplicate key" in TOML
+   - **Fix**: Simplified test config to use only the array format
+
+### Key Learnings
+
+1. **Serde Attribute Conflicts**: When using both `alias` and `rename` attributes in the same struct, they can compete for the same TOML key. The parser tries matching in order and can fail unexpectedly.
+
+2. **Clap Parent vs Subcommand Flags**: In clap, flags defined on parent commands (`#[command(flatten)]` or direct struct fields) must be placed BEFORE the subcommand in CLI invocations. Example: `jarvy roles -f config.toml list` NOT `jarvy roles list -f config.toml`.
+
+3. **TOML Key Exclusivity**: In TOML, a key can only be ONE type. You cannot have `tools = [...]` (array) and `[roles.name.tools]` (table header) in the same definition - these are mutually exclusive.
+
+4. **Error Message Hygiene**: Adding the actual error message to Config::new's error output (`"Failed to parse config file: {}", e`) was essential for debugging the parsing conflict.
+
+### Test Coverage
+
+- **Unit Tests**: 26 tests in `src/roles/` module (definition, resolver, commands)
+- **Integration Tests**: 11 tests in `tests/roles_integration.rs`
+  - `test_roles_list_no_roles`
+  - `test_roles_list_with_roles`
+  - `test_roles_show_basic`
+  - `test_roles_show_nonexistent`
+  - `test_roles_show_with_inheritance`
+  - `test_roles_diff`
+  - `test_roles_list_json_output`
+  - `test_role_assignment_in_config`
+  - `test_multiple_role_assignment`
+  - `test_role_inheritance_chain`
+  - `test_setup_role_override_flag`
+
+---
+
+## PRD-033: Role-Based Configurations
+
+**Date**: 2026-01-17
+**Status**: Complete - All tasks implemented and tested
+
+### Overview
+
+Role-based configurations allow teams to define different tool requirements based on developer roles (frontend, backend, devops, etc.). Developers can be assigned roles that automatically provision the correct toolset.
+
+### Files Created
+
+```
+src/roles/mod.rs        # Module exports and MAX_INHERITANCE_DEPTH constant
+src/roles/definition.rs # Role type definitions (RoleAssignment, RoleExtends, RoleDefinition, etc.)
+src/roles/resolver.rs   # RoleResolver with inheritance, caching, and diff functionality
+src/roles/commands.rs   # CLI subcommands for roles list/show/diff
+tests/roles_integration.rs # 11 integration tests
+```
+
+### Files Modified
+
+```
+src/config.rs           # Added role field and roles_config with resolution methods
+src/main.rs             # Added roles module, Roles subcommand, --role flag to setup
+CLAUDE.md               # Added role-based configurations documentation
+Cargo.toml              # No changes needed - used existing dependencies
+```
+
+### Key Features
+
+#### 1. Role Definition Syntax
+```toml
+[roles.frontend]
+description = "Frontend development stack"
+tools = ["node", "bun", "pnpm"]
+
+[roles.frontend.tools]
+node = "20"
+bun = "latest"
+```
+
+#### 2. Role Assignment
+```toml
+# Single role
+role = "frontend"
+
+# Multiple roles
+role = ["frontend", "devops"]
+```
+
+#### 3. Role Inheritance
+```toml
+[roles.base]
+tools = ["git", "docker"]
+
+[roles.developer]
+extends = "base"
+tools = ["vim", "tmux"]
+
+[roles.senior]
+extends = "developer"  # Inherits from developer which inherits from base
+tools = ["kubectl"]
+```
+
+#### 4. CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `jarvy roles list` | List all available roles |
+| `jarvy roles list -v` | Verbose list with tool counts |
+| `jarvy roles list -F json` | JSON output format |
+| `jarvy roles show <name>` | Show role details |
+| `jarvy roles show <name> --resolved` | Show with inherited tools |
+| `jarvy roles show <name> --inheritance` | Show inheritance chain |
+| `jarvy roles diff <a> <b>` | Compare two roles |
+| `jarvy roles diff <a> --current` | Compare with currently assigned role |
+
+#### 5. Setup Integration
+```bash
+# Use role from config
+jarvy setup
+
+# Override with specific role
+jarvy setup --role backend
+
+# Dry-run with role override
+jarvy setup --dry-run --role senior
+```
+
+### Implementation Details
+
+#### Type Definitions (definition.rs)
+
+```rust
+// Flexible role assignment - single or array
+#[serde(untagged)]
+pub enum RoleAssignment {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+// Role inheritance - single or multiple parents
+#[serde(untagged)]
+pub enum RoleExtends {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+// Tool specification - simple version or detailed config
+#[serde(untagged)]
+pub enum RoleToolSpec {
+    Detailed { version: String, version_manager: Option<bool>, use_sudo: Option<bool> },
+    Simple(String),
+}
+```
+
+#### Resolution Strategy (resolver.rs)
+
+1. **Depth-first inheritance**: Parent roles are resolved before child roles
+2. **Cycle detection**: Uses visited HashSet to prevent infinite loops
+3. **MAX_INHERITANCE_DEPTH = 5**: Prevents excessive nesting
+4. **Last-role-wins**: For version conflicts in multiple inheritance
+5. **Direct tools override**: Tools defined directly in a role override inherited tools
+6. **Caching**: Resolved roles are cached to avoid redundant resolution
+
+#### Config Integration (config.rs)
+
+```rust
+// New methods added to Config
+pub fn get_roles_config(&self) -> &RolesConfig
+pub fn has_roles(&self) -> bool
+pub fn get_assigned_roles(&self) -> Option<Vec<&str>>
+pub fn has_assigned_role(&self, role: &str) -> bool
+pub fn get_tool_configs_with_roles(&self) -> HashMap<String, Tool>
+pub fn get_tool_configs_with_role_override(&self, role_override: Option<&str>) -> HashMap<String, Tool>
+```
+
+### Test Coverage
+
+#### Unit Tests (26 total)
+- `roles::definition::tests` - 11 tests for type parsing
+- `roles::resolver::tests` - 11 tests for resolution and inheritance
+- `roles::commands::tests` - 4 tests for CLI handlers
+
+#### Integration Tests (11 total)
+- `test_roles_list_no_roles` - Empty roles config
+- `test_roles_list_with_roles` - List roles
+- `test_roles_show_basic` - Show role details
+- `test_roles_show_nonexistent` - Error handling
+- `test_roles_show_with_inheritance` - Resolved view
+- `test_roles_diff` - Compare two roles
+- `test_roles_list_json_output` - JSON format
+- `test_role_assignment_in_config` - Single role
+- `test_multiple_role_assignment` - Multiple roles
+- `test_role_inheritance_chain` - Deep inheritance
+- `test_setup_role_override_flag` - --role flag
+
+### Key Learnings
+
+1. **Serde untagged enums**: Ideal for flexible TOML parsing (single value vs array)
+2. **Flatten attribute**: Used to map role names directly in RolesConfig
+3. **Clone for Clap actions**: RolesAction needed Clone to be passed to handler
+4. **Borrow checker with resolution**: Required careful ordering and cloning to avoid conflicts
+
+### PRD Task Completion
+
+| Task | Title | Status |
+|------|-------|--------|
+| T1 | Create roles module structure | ✓ Complete |
+| T2 | Implement RoleDefinition parsing | ✓ Complete |
+| T3 | Implement role assignment in config | ✓ Complete |
+| T4 | Implement role inheritance | ✓ Complete |
+| T5 | Implement tool merging strategy | ✓ Complete |
+| T6 | Add jarvy roles list command | ✓ Complete |
+| T7 | Add jarvy roles show command | ✓ Complete |
+| T8 | Add jarvy roles diff command | ✓ Complete |
+| T9 | Integrate roles with setup command | ✓ Complete |
+| T10 | Add --role override flag | ✓ Complete |
+| T11 | Write unit tests | ✓ Complete |
+| T12 | Write integration tests | ✓ Complete |
+| T13 | Update documentation | ✓ Complete |
+
+### Usage Examples
+
+#### Basic Role Setup
+```toml
+# jarvy.toml
+role = "frontend"
+
+[provisioner]
+git = "latest"
+
+[roles.frontend]
+description = "Frontend development stack"
+tools = ["node", "bun"]
+
+[roles.frontend.tools]
+node = "20"
+```
+
+#### Multiple Roles with Inheritance
+```toml
+role = ["developer", "devops"]
+
+[roles.base]
+tools = ["git", "docker"]
+
+[roles.developer]
+extends = "base"
+tools = ["vim"]
+
+[roles.devops]
+extends = "base"
+tools = ["kubectl", "terraform"]
+```
+
+---

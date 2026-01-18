@@ -25,6 +25,8 @@ if [ -f "$HOME/.zshrc" ] && ! grep -q 'k9s completion' "$HOME/.zshrc"; then
 fi
 "#
     },
+    // K8s TUI needs kubectl to interact with clusters
+    depends_on_one_of: &["kubectl"],
 });
 
 #[cfg(test)]

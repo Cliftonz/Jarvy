@@ -10,6 +10,11 @@
     "macroSupport": "define_tool! macro supports depends_on: &[\"tool1\", \"tool2\"] syntax",
     "orderingFunction": "order_tools_by_dependencies() in spec.rs uses topological sort"
   },
+  "summary": {
+    "totalToolsWithDependencies": 19,
+    "newToolsCreated": ["java", "erlang"],
+    "newDependenciesAdded": 12
+  },
   "completedDependencies": [
     {
       "tool": "node",
@@ -33,152 +38,137 @@
       "tool": "lazydocker",
       "dependsOn": ["docker"],
       "file": "src/tools/lazydocker/lazydocker.rs",
-      "reason": "Docker TUI requires Docker daemon to be installed",
-      "completedAt": "2026-01-17"
+      "reason": "Docker TUI requires Docker daemon to be installed"
     },
     {
       "tool": "kind",
       "dependsOn": ["docker"],
       "file": "src/tools/kind/kind.rs",
-      "reason": "Kubernetes-in-Docker requires Docker runtime",
-      "completedAt": "2026-01-17"
+      "reason": "Kubernetes-in-Docker requires Docker runtime"
     },
     {
       "tool": "minikube",
       "dependsOn": ["docker"],
       "file": "src/tools/minikube/minikube.rs",
-      "reason": "Default driver uses Docker; install Docker first if both in config",
-      "completedAt": "2026-01-17"
+      "reason": "Default driver uses Docker; install Docker first if both in config"
     },
     {
       "tool": "kubectl",
       "dependsOn": ["minikube", "kind"],
       "file": "src/tools/kubectl/kubectl.rs",
-      "reason": "If K8s cluster tools are in config, install them before kubectl",
+      "reason": "If K8s cluster tools are in config, install them before kubectl"
+    },
+    {
+      "tool": "k3d",
+      "dependsOn": ["docker"],
+      "file": "src/tools/k3d/k3d.rs",
+      "reason": "k3d runs k3s in Docker containers",
+      "completedAt": "2026-01-17"
+    },
+    {
+      "tool": "krew",
+      "dependsOn": ["kubectl"],
+      "file": "src/tools/krew/krew.rs",
+      "reason": "krew is a kubectl plugin manager",
+      "completedAt": "2026-01-17"
+    },
+    {
+      "tool": "k9s",
+      "dependsOn": ["kubectl"],
+      "file": "src/tools/k9s/k9s.rs",
+      "reason": "k9s provides a terminal UI for kubectl",
+      "completedAt": "2026-01-17"
+    },
+    {
+      "tool": "helm",
+      "dependsOn": ["kubectl"],
+      "file": "src/tools/helm/helm.rs",
+      "reason": "Helm is the Kubernetes package manager, requires kubectl context",
+      "completedAt": "2026-01-17"
+    },
+    {
+      "tool": "stern",
+      "dependsOn": ["kubectl"],
+      "file": "src/tools/stern/stern.rs",
+      "reason": "stern tails logs from multiple pods using kubectl",
+      "completedAt": "2026-01-17"
+    },
+    {
+      "tool": "kubescape",
+      "dependsOn": ["kubectl"],
+      "file": "src/tools/kubescape/kubescape.rs",
+      "reason": "kubescape scans Kubernetes clusters via kubectl",
+      "completedAt": "2026-01-17"
+    },
+    {
+      "tool": "dive",
+      "dependsOn": ["docker"],
+      "file": "src/tools/dive/dive.rs",
+      "reason": "dive explores Docker image layers",
+      "completedAt": "2026-01-17"
+    },
+    {
+      "tool": "gitleaks",
+      "dependsOn": ["git"],
+      "file": "src/tools/gitleaks/gitleaks.rs",
+      "reason": "gitleaks scans git repositories for secrets",
+      "completedAt": "2026-01-17"
+    },
+    {
+      "tool": "trufflehog",
+      "dependsOn": ["git"],
+      "file": "src/tools/trufflehog/trufflehog.rs",
+      "reason": "trufflehog scans git history for secrets",
+      "completedAt": "2026-01-17"
+    },
+    {
+      "tool": "kotlin",
+      "dependsOn": ["java"],
+      "file": "src/tools/kotlin/kotlin.rs",
+      "reason": "Kotlin runs on the JVM",
+      "completedAt": "2026-01-17"
+    },
+    {
+      "tool": "scala",
+      "dependsOn": ["java"],
+      "file": "src/tools/scala/scala.rs",
+      "reason": "Scala runs on the JVM",
+      "completedAt": "2026-01-17"
+    },
+    {
+      "tool": "elixir",
+      "dependsOn": ["erlang"],
+      "file": "src/tools/elixir/elixir.rs",
+      "reason": "Elixir runs on the BEAM VM (Erlang runtime)",
       "completedAt": "2026-01-17"
     }
   ],
-  "toolsNeedingDependencies": {
-    "highPriority": [
-      {
-        "tool": "lazydocker",
-        "shouldDependOn": ["docker"],
-        "file": "src/tools/lazydocker/lazydocker.rs",
-        "reason": "Docker TUI requires Docker daemon to be installed",
-        "status": "completed",
-        "completedAt": "2026-01-17"
+  "newToolsCreated": [
+    {
+      "tool": "java",
+      "file": "src/tools/java/java.rs",
+      "reason": "Created to enable kotlin and scala dependencies (JVM-based languages)",
+      "packages": {
+        "macos": "brew: openjdk",
+        "linux": "apt: default-jdk, dnf: java-latest-openjdk, pacman: jdk-openjdk, apk: openjdk21",
+        "windows": "winget: Microsoft.OpenJDK.21, choco: openjdk"
       },
-      {
-        "tool": "kind",
-        "shouldDependOn": ["docker"],
-        "file": "src/tools/kind/kind.rs",
-        "reason": "Kubernetes-in-Docker requires Docker runtime",
-        "status": "completed",
-        "completedAt": "2026-01-17"
-      },
-      {
-        "tool": "minikube",
-        "shouldDependOn": ["docker"],
-        "file": "src/tools/minikube/minikube.rs",
-        "reason": "Default driver uses Docker; should install Docker first if both in config",
-        "status": "completed",
-        "completedAt": "2026-01-17"
-      },
-      {
-        "tool": "kubectl",
-        "shouldDependOn": ["minikube", "kind"],
-        "file": "src/tools/kubectl/kubectl.rs",
-        "reason": "If K8s cluster tools are in config, install them before kubectl",
-        "status": "completed",
-        "completedAt": "2026-01-17"
+      "defaultHook": "Configures JAVA_HOME environment variable"
+    },
+    {
+      "tool": "erlang",
+      "file": "src/tools/erlang/erlang.rs",
+      "reason": "Created to enable elixir dependency (BEAM-based language)",
+      "packages": {
+        "macos": "brew: erlang",
+        "linux": "uniform: erlang",
+        "windows": "winget: Erlang.ErlangOTP, choco: erlang"
       }
-    ],
-    "mediumPriority": [
-      {
-        "tool": "kotlin",
-        "shouldDependOn": ["java"],
-        "file": "src/tools/kotlin/kotlin.rs",
-        "reason": "Kotlin runs on JVM, Java should be available first",
-        "status": "blocked",
-        "notes": "Blocked: java tool does not exist in Jarvy. If java tool is added in the future, this dependency should be implemented."
-      },
-      {
-        "tool": "scala",
-        "shouldDependOn": ["java"],
-        "file": "src/tools/scala/scala.rs",
-        "reason": "Scala runs on JVM, Java should be available first",
-        "status": "blocked",
-        "notes": "Blocked: java tool does not exist in Jarvy. If java tool is added in the future, this dependency should be implemented."
-      },
-      {
-        "tool": "mongosh",
-        "shouldDependOn": [],
-        "file": "src/tools/mongosh/mongosh.rs",
-        "reason": "Usually connects to remote MongoDB, no local dependency needed",
-        "status": "no-action-needed"
-      },
-      {
-        "tool": "psql",
-        "shouldDependOn": [],
-        "file": "src/tools/psql/psql.rs",
-        "reason": "Usually connects to remote PostgreSQL, standalone CLI tool",
-        "status": "no-action-needed"
-      },
-      {
-        "tool": "mysql",
-        "shouldDependOn": [],
-        "file": "src/tools/mysql/mysql.rs",
-        "reason": "Usually connects to remote MySQL, standalone CLI tool",
-        "status": "no-action-needed"
-      }
-    ],
-    "lowPriority": [
-      {
-        "tool": "bun",
-        "shouldDependOn": [],
-        "file": "src/tools/bun/bun.rs",
-        "reason": "Bun is an alternative to Node, no dependency on nvm/node",
-        "status": "no-action-needed"
-      },
-      {
-        "tool": "deno",
-        "shouldDependOn": [],
-        "file": "src/tools/deno/deno.rs",
-        "reason": "Deno is standalone, no dependency on node ecosystem",
-        "status": "no-action-needed"
-      },
-      {
-        "tool": "go",
-        "shouldDependOn": [],
-        "file": "src/tools/go/go.rs",
-        "reason": "Go is self-contained, no version manager dependency",
-        "status": "no-action-needed"
-      },
-      {
-        "tool": "rust",
-        "shouldDependOn": [],
-        "file": "src/tools/rust/rust.rs",
-        "reason": "Rustup is the standard installer, self-contained",
-        "status": "no-action-needed"
-      },
-      {
-        "tool": "elixir",
-        "shouldDependOn": ["erlang"],
-        "file": "src/tools/elixir/elixir.rs",
-        "reason": "Elixir runs on BEAM VM, Erlang should be installed first",
-        "status": "blocked",
-        "notes": "Blocked: erlang tool does not exist in Jarvy. If erlang tool is added in the future, this dependency should be implemented."
-      }
-    ],
-    "versionManagers": {
-      "note": "Version managers themselves don't depend on other tools",
-      "tools": [
-        {"tool": "nvm", "dependsOn": [], "reason": "Node version manager, standalone"},
-        {"tool": "pyenv", "dependsOn": [], "reason": "Python version manager, standalone"},
-        {"tool": "rbenv", "dependsOn": [], "reason": "Ruby version manager, standalone"},
-        {"tool": "mise", "dependsOn": [], "reason": "Polyglot version manager, standalone"}
-      ]
     }
+  ],
+  "toolsNeedingDependencies": {
+    "note": "All identified dependencies have been implemented",
+    "completed": true
   },
   "implementationSteps": [
     {
@@ -198,20 +188,43 @@
     },
     {
       "step": 4,
-      "description": "Add depends_on: &[\"minikube\", \"kind\"] to kubectl tool (if both K8s tools present)",
+      "description": "Add depends_on: &[\"minikube\", \"kind\"] to kubectl tool",
       "status": "completed"
     },
     {
       "step": 5,
-      "description": "Review JVM-based tools (kotlin, scala) for java dependency",
-      "status": "blocked",
-      "notes": "java tool does not exist in Jarvy"
+      "description": "Create java tool for JVM-based language support",
+      "status": "completed"
     },
     {
       "step": 6,
-      "description": "Review elixir for erlang dependency",
-      "status": "blocked",
-      "notes": "erlang tool does not exist in Jarvy"
+      "description": "Create erlang tool for BEAM-based language support",
+      "status": "completed"
+    },
+    {
+      "step": 7,
+      "description": "Add depends_on to JVM tools (kotlin, scala)",
+      "status": "completed"
+    },
+    {
+      "step": 8,
+      "description": "Add depends_on to BEAM tools (elixir)",
+      "status": "completed"
+    },
+    {
+      "step": 9,
+      "description": "Add depends_on to Kubernetes ecosystem tools (k3d, krew, k9s, helm, stern, kubescape)",
+      "status": "completed"
+    },
+    {
+      "step": 10,
+      "description": "Add depends_on to Docker ecosystem tools (dive)",
+      "status": "completed"
+    },
+    {
+      "step": 11,
+      "description": "Add depends_on to git-based security tools (gitleaks, trufflehog)",
+      "status": "completed"
     }
   ],
   "testingGuidance": {

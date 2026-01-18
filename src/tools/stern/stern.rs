@@ -9,6 +9,7 @@ define_tool!(STERN, {
     macos: { brew: "stern" },
     linux: { uniform: "stern" },
     windows: { winget: "stern.stern" },
+    depends_on: &["kubectl"],
 });
 
 #[cfg(test)]

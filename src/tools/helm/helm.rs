@@ -22,6 +22,8 @@ fi
 helm repo update 2>/dev/null || true
 "#
     },
+    // Helm needs kubectl/kubeconfig to deploy to a cluster
+    depends_on_one_of: &["kubectl"],
 });
 
 #[cfg(test)]

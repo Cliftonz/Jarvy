@@ -222,12 +222,47 @@ Tool responses should be structured for LLM consumption:
     "linux": { "apt": "docker.io", "dnf": "docker" },
     "windows": { "winget": "Docker.DockerDesktop" }
   },
+  "dependencies": {
+    "strict": [],
+    "flexible": []
+  },
   "default_hook": {
     "description": "Add user to docker group on Linux",
     "platform": "linux"
   },
   "documentation_url": "https://docs.docker.com/get-docker/"
 }
+
+// jarvy_get_tool response (tool with dependencies)
+{
+  "name": "kubectl",
+  "command": "kubectl",
+  "description": "Kubernetes CLI",
+  "category": "container",
+  "current_platform": {
+    "os": "macos",
+    "install_method": "brew",
+    "package_name": "kubectl",
+    "package_manager": "homebrew"
+  },
+  "all_platforms": {
+    "macos": { "brew": "kubectl" },
+    "linux": { "uniform": "kubectl" },
+    "windows": { "winget": "Kubernetes.kubectl" }
+  },
+  "dependencies": {
+    "strict": [],
+    "flexible": ["minikube", "kind", "k3d", "docker", "podman"]
+  },
+  "default_hook": {
+    "description": "Enable kubectl shell completion and 'k' alias"
+  },
+  "documentation_url": "https://kubernetes.io/docs/reference/kubectl/"
+}
+
+// Dependency types explained:
+// - strict: ALL listed tools must be installed (e.g., lazydocker requires docker)
+// - flexible: AT LEAST ONE of the listed tools must be available (e.g., kubectl needs any K8s cluster provider)
 
 // jarvy_check_tool response
 {
@@ -464,7 +499,10 @@ impl JarvyMcpServer {
 
 ```rust
 // src/mcp/tools.rs
-use crate::tools::spec::{generate_tool_index, get_tool_spec, list_tool_names};
+use crate::tools::spec::{
+    generate_tool_index, get_tool_spec, list_tool_names,
+    get_tool_dependencies, get_tool_flexible_dependencies
+};
 
 pub async fn handle_list_tools(params: ListToolsParams) -> McpResult<ListToolsResponse> {
     let index = generate_tool_index();
@@ -478,6 +516,8 @@ pub async fn handle_list_tools(params: ListToolsParams) -> McpResult<ListToolsRe
             category: categorize_tool(&t.name),
             platforms: get_supported_platforms(t),
             has_default_hook: has_default_hook(&t.name),
+            has_dependencies: !get_tool_dependencies(&t.name).is_empty()
+                || !get_tool_flexible_dependencies(&t.name).is_empty(),
         })
         .collect();
 
@@ -485,6 +525,27 @@ pub async fn handle_list_tools(params: ListToolsParams) -> McpResult<ListToolsRe
         tools,
         count: tools.len(),
         platform: current_platform(),
+    })
+}
+
+pub async fn handle_get_tool(params: GetToolParams) -> McpResult<GetToolResponse> {
+    let spec = get_tool_spec(&params.name)
+        .ok_or_else(|| McpError::unknown_tool(&params.name))?;
+
+    Ok(GetToolResponse {
+        name: spec.name.to_string(),
+        command: spec.command.to_string(),
+        description: get_tool_description(&spec.name),
+        category: categorize_tool(&spec.name),
+        current_platform: get_current_platform_info(spec),
+        all_platforms: get_all_platform_info(spec),
+        dependencies: DependencyInfo {
+            strict: get_tool_dependencies(&spec.name).iter().map(|s| s.to_string()).collect(),
+            flexible: get_tool_flexible_dependencies(&spec.name).iter().map(|s| s.to_string()).collect(),
+        },
+        default_hook: spec.default_hook.as_ref().map(|h| HookInfo {
+            description: h.description.to_string(),
+        }),
     })
 }
 

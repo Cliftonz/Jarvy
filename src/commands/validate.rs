@@ -252,7 +252,7 @@ fn validate_structure(parsed: &toml::Value, content: &str, issues: &mut Vec<Vali
     }
 
     // Check for unknown top-level keys
-    let known_keys = ["provisioner", "privileges", "hooks", "env", "services"];
+    let known_keys = ["provisioner", "privileges", "hooks", "env", "services", "roles", "role", "extends"];
     if let Some(table) = parsed.as_table() {
         for key in table.keys() {
             if !known_keys.contains(&key.as_str()) {

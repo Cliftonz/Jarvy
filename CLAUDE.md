@@ -21,8 +21,9 @@ Jarvy is a cross-platform CLI tool that provisions development environments from
 
 ### Core Modules
 
-- **`src/main.rs`** - CLI entry point using clap with derive macros. Commands: `setup`, `bootstrap`, `configure`, `get`
+- **`src/main.rs`** - CLI entry point using clap with derive macros. Commands: `setup`, `bootstrap`, `configure`, `get`, `roles`
 - **`src/config.rs`** - Parses `jarvy.toml` using serde. Supports simple (`git = "2.40"`) and detailed (`git = { version = "2.40", version_manager = true }`) formats
+- **`src/roles/`** - Role-based configurations with inheritance (PRD-033). Key files: `definition.rs` (types), `resolver.rs` (inheritance), `commands.rs` (CLI)
 - **`src/tools/registry.rs`** - Global `OnceLock<RwLock<HashMap>>` registry mapping tool names to handler functions
 - **`src/tools/common.rs`** - Shared utilities: `Os` enum, `InstallError` type, `run()`, `has()`, `cmd_satisfies()`, package manager detection
 - **`src/tools/spec.rs`** - ToolSpec pattern: `ToolSpec` struct and `define_tool!` macro for declarative tool definitions
@@ -85,6 +86,88 @@ fi
 ```
 
 List tools with default hooks: `jarvy tools --default-hooks`
+
+### Tool Dependencies
+
+Tools can declare dependencies on other tools to ensure correct installation order:
+
+**Strict Dependencies** (`depends_on`): ALL listed tools MUST be available.
+```rust
+define_tool!(LAZYDOCKER, {
+    command: "lazydocker",
+    macos: { brew: "lazydocker" },
+    // Docker TUI requires Docker daemon
+    depends_on: &["docker"],
+});
+```
+
+**Flexible Dependencies** (`depends_on_one_of`): AT LEAST ONE tool must be available.
+```rust
+define_tool!(KUBECTL, {
+    command: "kubectl",
+    macos: { brew: "kubectl" },
+    // Needs any K8s cluster provider (minikube, kind, docker, etc.)
+    depends_on_one_of: &["minikube", "kind", "k3d", "docker", "podman"],
+});
+```
+
+**Dependency Behavior:**
+- Strict: Missing deps cause warnings; tools are still installed but may not work
+- Flexible: If one option is installed, satisfied. If one is in config, it's installed first. Otherwise, advisory warning
+- Dependencies affect installation order via topological sort
+
+**Dependency Functions** (`src/tools/spec.rs`):
+- `get_tool_dependencies()` - Get strict dependencies
+- `get_tool_flexible_dependencies()` - Get flexible dependencies
+- `check_tool_dependencies()` - Returns `DependencyCheckResult` (Satisfied, MissingRequired, WillInstallFlexible, MissingFlexible)
+- `order_tools_by_dependencies()` - Topological sort respecting both dependency types
+
+### Role-Based Configurations
+
+Jarvy supports role-based tool configurations for teams with diverse developer roles. Each role defines a tool set that gets merged with directly configured tools.
+
+**Config Example:**
+```toml
+# Assign a role
+role = "frontend"
+# Or multiple roles (last wins for conflicts)
+role = ["frontend", "devops"]
+
+# Direct tools always override role tools
+[provisioner]
+vim = "latest"
+
+# Role definitions
+[roles.base]
+description = "Base development tools"
+tools = ["git", "docker"]
+
+[roles.frontend]
+description = "Frontend development"
+extends = "base"                    # Inherit from parent
+tools = ["node", "bun"]
+
+[roles.frontend.tools]              # Version overrides
+node = "20"
+bun = "latest"
+
+[roles.senior-frontend]
+extends = "frontend"                # Deep inheritance (max 5 levels)
+tools = ["kubectl"]
+```
+
+**CLI Commands:**
+```bash
+jarvy roles list                    # List available roles
+jarvy roles list -v                 # Verbose with tool counts
+jarvy roles show <name>             # Show role details
+jarvy roles show <name> --resolved  # Show with inherited tools
+jarvy roles show <name> --inheritance  # Show inheritance chain
+jarvy roles diff <a> <b>            # Compare two roles
+jarvy setup --role <name>           # Override role for single run
+```
+
+**Module**: `src/roles/` - Role definitions, resolution with inheritance, and CLI commands.
 
 ### Config Files
 

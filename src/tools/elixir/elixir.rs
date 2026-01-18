@@ -9,6 +9,7 @@ define_tool!(ELIXIR, {
     macos: { brew: "elixir" },
     linux: { uniform: "elixir" },
     windows: { winget: "Elixir.Elixir" },
+    depends_on: &["erlang"],
 });
 
 #[cfg(test)]

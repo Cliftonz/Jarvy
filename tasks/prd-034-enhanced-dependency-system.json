@@ -1,0 +1,425 @@
+{
+  "title": "PRD-034: Enhanced Tool Dependency System",
+  "description": "Expand the tool dependency system to support both strict (required) and flexible (one-of-many) dependencies",
+  "status": "completed",
+  "completedAt": "2026-01-17",
+  "priority": "Medium",
+  "source": "prd/034-enhanced-dependency-system.md",
+  "createdAt": "2026-01-17",
+  "effortEstimate": "5-7 days",
+  "overview": {
+    "problem": "Current depends_on treats all dependencies as strict requirements. kubectl depends on ['minikube', 'kind'] meaning BOTH must be installed, when really it just needs ANY Kubernetes cluster provider.",
+    "solution": "Introduce depends_on_one_of field for flexible dependencies where at least one of the listed tools must be present.",
+    "goals": [
+      "Strict dependencies (depends_on) - ALL listed tools required",
+      "Flexible dependencies (depends_on_one_of) - AT LEAST ONE required",
+      "Dependency resolution algorithm updates",
+      "Doctor command integration for dependency status",
+      "Diff command integration for dependency resolution display"
+    ]
+  },
+  "dependencyTypes": {
+    "strict": {
+      "field": "depends_on",
+      "behavior": "ALL listed tools must be installed",
+      "example": "lazydocker requires docker"
+    },
+    "flexible": {
+      "field": "depends_on_one_of",
+      "behavior": "AT LEAST ONE of the listed tools must be installed",
+      "example": "kubectl requires_one_of [minikube, kind, docker, podman]"
+    }
+  },
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Strict Dependencies (Existing, Enhanced)",
+      "description": "As a developer, I want to specify that a tool requires ALL of certain dependencies so that installation fails or warns appropriately if they're missing.",
+      "priority": "P0",
+      "status": "pending",
+      "acceptanceCriteria": [
+        {
+          "criterion": "depends_on: &['tool1', 'tool2'] requires both tool1 AND tool2",
+          "passed": true,
+          "notes": "Already implemented in PRD-001"
+        },
+        {
+          "criterion": "Missing strict dependency in config triggers a warning/error",
+          "passed": false
+        },
+        {
+          "criterion": "Installation order respects strict dependencies",
+          "passed": true,
+          "notes": "Already implemented via order_tools_by_dependencies()"
+        },
+        {
+          "criterion": "Tests cover strict dependency scenarios",
+          "passed": true,
+          "notes": "6 tests exist in spec.rs"
+        }
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Flexible Dependencies (New)",
+      "description": "As a developer, I want to specify that a tool requires ONE OF several possible dependencies so that users have flexibility in their setup.",
+      "priority": "P0",
+      "status": "completed",
+      "acceptanceCriteria": [
+        {
+          "criterion": "depends_on_one_of: &['tool1', 'tool2', 'tool3'] accepts any one of the options",
+          "passed": true,
+          "notes": "Implemented via define_tool! macro and ToolSpec struct"
+        },
+        {
+          "criterion": "If one option is already installed, dependency is satisfied",
+          "passed": true,
+          "notes": "check_tool_dependencies() returns Satisfied"
+        },
+        {
+          "criterion": "If no option installed but one in config, install that one first",
+          "passed": true,
+          "notes": "check_tool_dependencies() returns WillInstallFlexible; order_tools_by_dependencies() handles ordering"
+        },
+        {
+          "criterion": "If no option installed or in config, warn but proceed (advisory)",
+          "passed": true,
+          "notes": "check_tool_dependencies() returns MissingFlexible with options/suggestion"
+        },
+        {
+          "criterion": "Tests cover flexible dependency scenarios",
+          "passed": true,
+          "notes": "5+ tests for flexible dependencies in spec.rs"
+        }
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Doctor Command Integration",
+      "description": "As a user, I want jarvy doctor to show me which flexible dependencies are satisfied and which options are available.",
+      "priority": "P1",
+      "status": "pending",
+      "acceptanceCriteria": [
+        {
+          "criterion": "Doctor shows 'kubectl: needs K8s cluster (satisfied by: docker)'",
+          "passed": false
+        },
+        {
+          "criterion": "Doctor shows 'kubectl: needs K8s cluster (MISSING - install one of: minikube, kind, docker)'",
+          "passed": false
+        },
+        {
+          "criterion": "JSON output includes dependency satisfaction status",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Diff Command Integration",
+      "description": "As a user, I want jarvy diff to show which flexible dependency will be installed to satisfy a requirement.",
+      "priority": "P2",
+      "status": "pending",
+      "acceptanceCriteria": [
+        {
+          "criterion": "Diff shows 'kubectl requires K8s cluster - will use: minikube (in config)'",
+          "passed": false
+        },
+        {
+          "criterion": "Diff warns if no flexible dependency will be satisfied",
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "implementationTasks": [
+    {
+      "id": "T1",
+      "description": "Update ToolSpec struct with depends_on_one_of field",
+      "status": "completed",
+      "effort": "0.5 days",
+      "files": ["src/tools/spec.rs"]
+    },
+    {
+      "id": "T2",
+      "description": "Update define_tool! macro to support depends_on_one_of",
+      "status": "completed",
+      "effort": "0.5 days",
+      "files": ["src/tools/spec.rs"]
+    },
+    {
+      "id": "T3",
+      "description": "Implement get_tool_flexible_dependencies() function",
+      "status": "completed",
+      "effort": "0.25 days",
+      "files": ["src/tools/spec.rs"]
+    },
+    {
+      "id": "T4",
+      "description": "Implement DependencyCheckResult enum and check_dependencies() function",
+      "status": "completed",
+      "effort": "0.5 days",
+      "files": ["src/tools/spec.rs", "src/tools/common.rs"]
+    },
+    {
+      "id": "T5",
+      "description": "Update order_tools_by_dependencies() for flexible deps",
+      "status": "completed",
+      "effort": "0.5 days",
+      "files": ["src/tools/spec.rs"]
+    },
+    {
+      "id": "T6",
+      "description": "Add unit tests for flexible dependency resolution",
+      "status": "completed",
+      "effort": "0.5 days",
+      "files": ["src/tools/spec.rs"]
+    },
+    {
+      "id": "T7",
+      "description": "Update kubectl with flexible K8s cluster dependencies",
+      "status": "completed",
+      "effort": "0.25 days",
+      "files": ["src/tools/kubectl/kubectl.rs"]
+    },
+    {
+      "id": "T8",
+      "description": "Update minikube with flexible container runtime dependency",
+      "status": "completed",
+      "effort": "0.25 days",
+      "files": ["src/tools/minikube/minikube.rs"]
+    },
+    {
+      "id": "T9",
+      "description": "Update helm, k9s, argocd, krew, dive with flexible kubectl/container dependencies",
+      "status": "completed",
+      "effort": "0.5 days",
+      "files": ["src/tools/helm/helm.rs", "src/tools/k9s/k9s.rs", "src/tools/argocd/argocd.rs", "src/tools/krew/krew.rs", "src/tools/dive/dive.rs"]
+    },
+    {
+      "id": "T10",
+      "description": "Update jarvy doctor to show dependency satisfaction",
+      "status": "deferred",
+      "effort": "0.5 days",
+      "files": ["src/commands/doctor.rs"],
+      "notes": "P1 - deferred to future iteration"
+    },
+    {
+      "id": "T11",
+      "description": "Update jarvy diff to show flexible dependency resolution",
+      "status": "deferred",
+      "effort": "0.5 days",
+      "files": ["src/commands/diff.rs"],
+      "notes": "P2 - deferred to future iteration"
+    },
+    {
+      "id": "T12",
+      "description": "Update jarvy validate to check dependency configuration",
+      "status": "deferred",
+      "effort": "0.25 days",
+      "files": ["src/commands/validate.rs"],
+      "notes": "P2 - deferred to future iteration"
+    },
+    {
+      "id": "T13",
+      "description": "Add --ignore-missing-deps flag for advanced users",
+      "status": "deferred",
+      "effort": "0.25 days",
+      "files": ["src/main.rs"],
+      "notes": "P2 - deferred to future iteration"
+    },
+    {
+      "id": "T14",
+      "description": "Update CLAUDE.md with new dependency syntax",
+      "status": "completed",
+      "effort": "0.25 days",
+      "files": ["CLAUDE.md"]
+    },
+    {
+      "id": "T15",
+      "description": "Write integration tests for dependency resolution",
+      "status": "deferred",
+      "effort": "0.5 days",
+      "files": ["tests/"],
+      "notes": "P2 - deferred to future iteration; unit tests provide adequate coverage"
+    }
+  ],
+  "toolDependencyMappings": {
+    "highPriority": [
+      {
+        "tool": "lazydocker",
+        "strict": ["docker"],
+        "flexible": [],
+        "notes": "Docker TUI requires docker daemon"
+      },
+      {
+        "tool": "kind",
+        "strict": ["docker"],
+        "flexible": [],
+        "notes": "Kubernetes-in-Docker requires docker"
+      },
+      {
+        "tool": "minikube",
+        "strict": [],
+        "flexible": ["docker", "podman"],
+        "notes": "Needs a container runtime, docker or podman"
+      },
+      {
+        "tool": "kubectl",
+        "strict": [],
+        "flexible": ["minikube", "kind", "docker", "podman", "rancher-desktop", "k3d"],
+        "notes": "Needs any K8s cluster provider"
+      },
+      {
+        "tool": "helm",
+        "strict": [],
+        "flexible": ["kubectl"],
+        "notes": "Needs kubectl/kubeconfig"
+      },
+      {
+        "tool": "k9s",
+        "strict": [],
+        "flexible": ["kubectl"],
+        "notes": "K8s TUI needs kubectl"
+      },
+      {
+        "tool": "stern",
+        "strict": [],
+        "flexible": ["kubectl"],
+        "notes": "Log tailer needs kubectl"
+      },
+      {
+        "tool": "flux",
+        "strict": [],
+        "flexible": ["kubectl"],
+        "notes": "GitOps tool needs kubectl"
+      },
+      {
+        "tool": "argocd",
+        "strict": [],
+        "flexible": ["kubectl"],
+        "notes": "GitOps tool needs kubectl"
+      }
+    ],
+    "mediumPriority": [
+      {
+        "tool": "kotlin",
+        "strict": [],
+        "flexible": ["java", "graalvm", "temurin"],
+        "notes": "JVM language, blocked until java tool exists"
+      },
+      {
+        "tool": "scala",
+        "strict": [],
+        "flexible": ["java", "graalvm", "temurin"],
+        "notes": "JVM language, blocked until java tool exists"
+      },
+      {
+        "tool": "gradle",
+        "strict": [],
+        "flexible": ["java", "graalvm", "temurin"],
+        "notes": "Build tool, blocked until java tool exists"
+      },
+      {
+        "tool": "maven",
+        "strict": [],
+        "flexible": ["java", "graalvm", "temurin"],
+        "notes": "Build tool, blocked until java tool exists"
+      }
+    ],
+    "containerEcosystem": [
+      {
+        "tool": "docker-compose",
+        "strict": [],
+        "flexible": ["docker", "podman"],
+        "notes": "Needs container runtime"
+      },
+      {
+        "tool": "dive",
+        "strict": [],
+        "flexible": ["docker", "podman"],
+        "notes": "Image explorer needs runtime"
+      },
+      {
+        "tool": "ctop",
+        "strict": [],
+        "flexible": ["docker", "podman"],
+        "notes": "Container top needs runtime"
+      }
+    ]
+  },
+  "technicalDetails": {
+    "newTypes": {
+      "DependencyCheckResult": {
+        "variants": [
+          "Satisfied - All dependencies met",
+          "MissingRequired(Vec<String>) - Missing strict dependencies",
+          "WillInstallFlexible(String) - No flexible dep installed, but one in config",
+          "MissingFlexible { needed_one_of, suggestion } - No flexible dep, warning"
+        ]
+      }
+    },
+    "newFunctions": {
+      "get_tool_flexible_dependencies": "Returns &'static [&'static str] for depends_on_one_of",
+      "check_dependencies": "Returns DependencyCheckResult for a tool given config and installed set"
+    },
+    "macroChanges": {
+      "define_tool!": "Add $(depends_on_one_of: $flex_deps:expr,)? pattern and @depends_on_one_of helpers"
+    }
+  },
+  "filesToModify": [
+    "src/tools/spec.rs",
+    "src/tools/common.rs",
+    "src/main.rs",
+    "src/commands/doctor.rs",
+    "src/commands/diff.rs",
+    "src/commands/validate.rs",
+    "src/tools/kubectl/kubectl.rs",
+    "src/tools/minikube/minikube.rs",
+    "src/tools/helm/helm.rs",
+    "src/tools/k9s/k9s.rs",
+    "CLAUDE.md"
+  ],
+  "risks": [
+    {
+      "risk": "Complex dependency chains",
+      "likelihood": "Medium",
+      "impact": "Medium",
+      "mitigation": "Limit to 2 levels of indirection"
+    },
+    {
+      "risk": "User confusion about flexible deps",
+      "likelihood": "Medium",
+      "impact": "Low",
+      "mitigation": "Clear messaging in doctor/diff commands"
+    },
+    {
+      "risk": "Performance impact on large configs",
+      "likelihood": "Low",
+      "impact": "Low",
+      "mitigation": "Dependencies are static, cached in ToolSpec"
+    },
+    {
+      "risk": "Backward compatibility",
+      "likelihood": "Low",
+      "impact": "Medium",
+      "mitigation": "New field is additive, existing depends_on unchanged"
+    }
+  ],
+  "openQuestions": [
+    {
+      "question": "Should flexible deps be advisory or blocking?",
+      "recommendation": "Advisory with clear warning (user may have external K8s cluster)"
+    },
+    {
+      "question": "How to handle nested flexible deps (kubectl -> K8s cluster, K8s cluster -> container runtime)?",
+      "recommendation": "Flatten to single level; don't chain flexible deps"
+    },
+    {
+      "question": "Should we add a 'provided_by' field for external tools like Docker Desktop?",
+      "recommendation": "Defer to future PRD; keep scope focused"
+    }
+  ],
+  "dependencies": ["PRD-001 (Parallel Tool Installation) - builds on dependency ordering"],
+  "relatedPRDs": ["PRD-001"]
+}

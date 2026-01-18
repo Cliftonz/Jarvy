@@ -5,6 +5,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::{fs, process};
 
+use crate::roles::definition::{RoleAssignment, RolesConfig};
 use crate::team::Extends;
 use crate::tools::{Os, current_os};
 
@@ -259,6 +260,10 @@ pub struct Config {
     /// Parent configs to extend (URL or local path)
     #[serde(default)]
     pub extends: Option<Extends>,
+    /// Role assignment for this config (single or multiple roles)
+    /// Use `role = "name"` for single role or `role = ["a", "b"]` for multiple
+    #[serde(default)]
+    pub role: Option<RoleAssignment>,
     #[serde(rename = "provisioner")]
     tools: HashMap<String, ToolConfig>,
     #[serde(default)]
@@ -272,6 +277,9 @@ pub struct Config {
     /// Services configuration (docker-compose, tilt)
     #[serde(default)]
     pub services: ServicesConfig,
+    /// Role definitions section
+    #[serde(default, rename = "roles")]
+    pub roles_config: RolesConfig,
 }
 
 #[derive(Deserialize, Debug, Default)]
@@ -325,8 +333,8 @@ impl Config {
 
         match toml::from_str(&config_content) {
             Ok(config) => config,
-            Err(_) => {
-                println!("Failed to parse config file. Please ensure it's in correct format.");
+            Err(e) => {
+                println!("Failed to parse config file: {}", e);
                 process::exit(crate::error_codes::CONFIG_ERROR);
             }
         }
@@ -404,6 +412,146 @@ impl Config {
         !self.env.vars.is_empty()
             || !self.env.secrets.is_empty()
             || self.env.tool_env.values().any(|t| !t.vars.is_empty())
+    }
+
+    /// Get the roles configuration
+    pub fn get_roles_config(&self) -> &RolesConfig {
+        &self.roles_config
+    }
+
+    /// Check if any roles are defined
+    pub fn has_roles(&self) -> bool {
+        !self.roles_config.roles.is_empty()
+    }
+
+    /// Get assigned role(s) if any
+    pub fn get_assigned_roles(&self) -> Option<Vec<&str>> {
+        self.role.as_ref().map(|r| r.as_vec())
+    }
+
+    /// Check if a role is assigned
+    pub fn has_assigned_role(&self) -> bool {
+        self.role.as_ref().map(|r| !r.is_empty()).unwrap_or(false)
+    }
+
+    /// Get tool configs with roles applied
+    /// This merges role tools with directly configured tools
+    /// Direct tools override role tools
+    pub fn get_tool_configs_with_roles(&self) -> HashMap<String, Tool> {
+        use crate::roles::resolver::RoleResolver;
+
+        let mut result = HashMap::new();
+
+        // If roles are assigned, resolve and add those tools first
+        if let Some(role_assignment) = &self.role {
+            let role_names = role_assignment.as_vec();
+            if !role_names.is_empty() && self.has_roles() {
+                let mut resolver = RoleResolver::new(&self.roles_config);
+                if let Ok(resolved) = resolver.resolve_multiple(&role_names) {
+                    for (name, tool) in resolved.tools {
+                        result.insert(
+                            name.clone(),
+                            Tool {
+                                name,
+                                version: tool.version,
+                                version_manager: tool.version_manager,
+                                use_sudo: tool.use_sudo,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
+        // Direct tools override role tools
+        for (name, config) in &self.tools {
+            let tool = match config {
+                ToolConfig::Detailed {
+                    version,
+                    version_manager,
+                    use_sudo,
+                } => Tool {
+                    name: name.clone(),
+                    version: version.clone(),
+                    version_manager: version_manager.unwrap_or(true),
+                    use_sudo: *use_sudo,
+                },
+                ToolConfig::Simple(version) => Tool {
+                    name: name.clone(),
+                    version: version.clone(),
+                    version_manager: true,
+                    use_sudo: None,
+                },
+            };
+            result.insert(name.clone(), tool);
+        }
+
+        result
+    }
+
+    /// Get tool configs with an optional CLI role override
+    /// If role_override is Some, it temporarily replaces the config's role assignment
+    /// This is used by the --role flag in the setup command
+    pub fn get_tool_configs_with_role_override(
+        &self,
+        role_override: Option<&str>,
+    ) -> HashMap<String, Tool> {
+        use crate::roles::resolver::RoleResolver;
+
+        let mut result = HashMap::new();
+
+        // Determine which role(s) to use: CLI override takes precedence
+        let effective_role: Option<RoleAssignment> = if let Some(role_name) = role_override {
+            Some(RoleAssignment::Single(role_name.to_string()))
+        } else {
+            self.role.clone()
+        };
+
+        // If roles are assigned, resolve and add those tools first
+        if let Some(role_assignment) = &effective_role {
+            let role_names = role_assignment.as_vec();
+            if !role_names.is_empty() && self.has_roles() {
+                let mut resolver = RoleResolver::new(&self.roles_config);
+                if let Ok(resolved) = resolver.resolve_multiple(&role_names) {
+                    for (name, tool) in resolved.tools {
+                        result.insert(
+                            name.clone(),
+                            Tool {
+                                name,
+                                version: tool.version,
+                                version_manager: tool.version_manager,
+                                use_sudo: tool.use_sudo,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
+        // Direct tools override role tools
+        for (name, config) in &self.tools {
+            let tool = match config {
+                ToolConfig::Detailed {
+                    version,
+                    version_manager,
+                    use_sudo,
+                } => Tool {
+                    name: name.clone(),
+                    version: version.clone(),
+                    version_manager: version_manager.unwrap_or(true),
+                    use_sudo: *use_sudo,
+                },
+                ToolConfig::Simple(version) => Tool {
+                    name: name.clone(),
+                    version: version.clone(),
+                    version_manager: true,
+                    use_sudo: None,
+                },
+            };
+            result.insert(name.clone(), tool);
+        }
+
+        result
     }
 }
 
