@@ -1,0 +1,307 @@
+# PRD-038: Hybrid Cross-Platform E2E Testing Harness
+#
+# This workflow tests Jarvy tool installations across multiple platforms:
+# - GitHub-hosted runners (FREE): macOS, Ubuntu, Windows
+# - AWS EC2 Spot (future): Fedora, Arch, Alpine, FreeBSD
+#
+# Cost: ~$0/month (GitHub-hosted runners are free for public repos)
+
+name: E2E Cross-Platform Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: 'Tool tier to test (1=core, 2=runtimes, 3=devops, 4=deps, all)'
+        required: false
+        default: 'all'
+      skip_install:
+        description: 'Skip actual installation (dry-run mode)'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  JARVY_TELEMETRY: 0
+
+jobs:
+  # ============================================================================
+  # GitHub-Hosted Runners (FREE)
+  # ============================================================================
+  github-hosted:
+    name: E2E (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS - Intel
+          - os: macos-13
+            name: macOS Intel
+            platform: macos-x86_64
+          # macOS - Apple Silicon
+          - os: macos-14
+            name: macOS ARM (M1)
+            platform: macos-arm64
+          # Ubuntu LTS versions
+          - os: ubuntu-22.04
+            name: Ubuntu 22.04
+            platform: ubuntu-22.04
+          - os: ubuntu-24.04
+            name: Ubuntu 24.04
+            platform: ubuntu-24.04
+          # Windows
+          - os: windows-latest
+            name: Windows
+            platform: windows-x86_64
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Build Jarvy
+        run: cargo build --release --bin jarvy
+
+      - name: Set Jarvy binary path
+        id: jarvy
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            echo "bin=${{ github.workspace }}/target/release/jarvy.exe" >> $GITHUB_OUTPUT
+          else
+            echo "bin=${{ github.workspace }}/target/release/jarvy" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Verify Jarvy runs
+        shell: bash
+        run: |
+          ${{ steps.jarvy.outputs.bin }} --version
+          ${{ steps.jarvy.outputs.bin }} --help
+
+      - name: Run E2E Tests
+        shell: bash
+        run: |
+          # Run the E2E test suite
+          cargo test --test e2e_base_tools -- --show-output --nocapture
+        env:
+          JARVY_BIN: ${{ steps.jarvy.outputs.bin }}
+          JARVY_TEST_MODE: 1
+          JARVY_E2E_TIER: ${{ github.event.inputs.tier || 'all' }}
+          JARVY_E2E_SKIP_INSTALL: ${{ github.event.inputs.skip_install == 'true' && '1' || '' }}
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-${{ matrix.platform }}
+          path: |
+            target/e2e-results/
+          retention-days: 30
+
+  # ============================================================================
+  # AWS EC2 Spot Runners (Future - for distros not on GitHub)
+  # These jobs are currently commented out and will be enabled when
+  # the EC2 infrastructure is deployed.
+  # ============================================================================
+  # ec2-hosted:
+  #   name: E2E (${{ matrix.name }})
+  #   # Only run on main merges and nightly, not every PR (to control costs)
+  #   if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       include:
+  #         - runner: self-hosted-fedora
+  #           name: Fedora 40
+  #           platform: fedora-40
+  #         - runner: self-hosted-arch
+  #           name: Arch Linux
+  #           platform: arch-linux
+  #         - runner: self-hosted-alpine
+  #           name: Alpine
+  #           platform: alpine
+  #         - runner: self-hosted-freebsd
+  #           name: FreeBSD 14
+  #           platform: freebsd-14
+  #
+  #   runs-on: ${{ matrix.runner }}
+  #   timeout-minutes: 30
+  #
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - name: Build Jarvy
+  #       run: cargo build --release
+  #
+  #     - name: Run E2E Tests
+  #       run: cargo test --test e2e_base_tools -- --show-output
+  #       env:
+  #         JARVY_BIN: ${{ github.workspace }}/target/release/jarvy
+  #         JARVY_TEST_MODE: 1
+  #
+  #     - name: Upload Results
+  #       if: always()
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: e2e-results-${{ matrix.platform }}
+  #         path: target/e2e-results/
+
+  # ============================================================================
+  # Results Aggregation
+  # ============================================================================
+  aggregate-results:
+    name: Aggregate Results
+    needs: [github-hosted]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-results/
+          pattern: e2e-results-*
+
+      - name: Generate Summary Report
+        shell: bash
+        run: |
+          echo "## E2E Cross-Platform Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | Status | Duration | Tools Passed | Tools Failed |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|----------|--------------|--------------|" >> $GITHUB_STEP_SUMMARY
+
+          for dir in all-results/e2e-results-*/; do
+            if [ -d "$dir" ]; then
+              platform=$(basename "$dir" | sed 's/e2e-results-//')
+
+              if [ -f "$dir/results.json" ]; then
+                # Parse results.json
+                passed=$(jq -r '.passed // 0' "$dir/results.json" 2>/dev/null || echo "0")
+                failed=$(jq -r '.failed // 0' "$dir/results.json" 2>/dev/null || echo "0")
+                duration=$(jq -r '.total_duration_seconds // 0' "$dir/results.json" 2>/dev/null || echo "0")
+
+                if [ "$failed" -eq "0" ]; then
+                  status="passed"
+                else
+                  status="failed"
+                fi
+
+                echo "| $platform | $status | ${duration}s | $passed | $failed |" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "| $platform | no results | - | - | - |" >> $GITHUB_STEP_SUMMARY
+              fi
+            fi
+          done
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Download test results from the workflow artifacts for detailed logs." >> $GITHUB_STEP_SUMMARY
+
+      - name: Check for Failures
+        shell: bash
+        run: |
+          total_failed=0
+          for dir in all-results/e2e-results-*/; do
+            if [ -f "$dir/results.json" ]; then
+              failed=$(jq -r '.failed // 0' "$dir/results.json" 2>/dev/null || echo "0")
+              total_failed=$((total_failed + failed))
+            fi
+          done
+
+          if [ "$total_failed" -gt "0" ]; then
+            echo "::warning::$total_failed tool installation(s) failed across platforms. Check artifacts for details."
+          fi
+
+      - name: Post PR Comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Read the step summary
+            let summary = '## E2E Cross-Platform Test Results\n\n';
+
+            // Build results table
+            summary += '| Platform | Status | Duration |\n';
+            summary += '|----------|--------|----------|\n';
+
+            const resultsDir = 'all-results';
+            if (fs.existsSync(resultsDir)) {
+              const dirs = fs.readdirSync(resultsDir);
+              for (const dir of dirs) {
+                if (dir.startsWith('e2e-results-')) {
+                  const platform = dir.replace('e2e-results-', '');
+                  const resultsFile = `${resultsDir}/${dir}/results.json`;
+
+                  if (fs.existsSync(resultsFile)) {
+                    const results = JSON.parse(fs.readFileSync(resultsFile, 'utf8'));
+                    const status = results.failed === 0 ? 'passed' : 'failed';
+                    const icon = results.failed === 0 ? ':white_check_mark:' : ':x:';
+                    summary += `| ${platform} | ${icon} ${status} | ${results.total_duration_seconds}s |\n`;
+                  } else {
+                    summary += `| ${platform} | :grey_question: no results | - |\n`;
+                  }
+                }
+              }
+            }
+
+            summary += '\n---\n';
+            summary += '_Download artifacts for detailed logs._';
+
+            // Find existing comment or create new one
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' &&
+              c.body.includes('E2E Cross-Platform Test Results')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: summary
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: summary
+              });
+            }

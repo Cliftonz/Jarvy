@@ -1,0 +1,477 @@
+{
+  "title": "Hybrid Cross-Platform E2E Testing Harness",
+  "priority": "High",
+  "status": "Not Started",
+  "source": "prd/038-aws-ec2-e2e-testing-harness.md",
+  "createdAt": "2026-01-19T00:00:00Z",
+  "updatedAt": "2026-01-19T00:00:00Z",
+  "overview": {
+    "description": "Design and implement a comprehensive end-to-end testing harness using a hybrid approach: GitHub-hosted runners for macOS and Windows (cost-effective), plus AWS EC2 Spot instances for Linux distributions not available on GitHub (Fedora, Arch, Alpine, FreeBSD). This validates Jarvy tool installations across all supported platforms with real package managers in isolated, reproducible environments.",
+    "goals": [
+      "True platform parity: Test on actual macOS (Intel + Apple Silicon), real Linux distros, Windows 10/11",
+      "Fresh environment guarantee: Every test runs on a clean, just-provisioned instance",
+      "Base tool validation: Verify a core set of tools installs correctly on each platform",
+      "Cost efficiency: Minimize AWS spend through spot instances, auto-termination, and smart scheduling",
+      "CI integration: Results flow back to GitHub PRs with clear pass/fail status",
+      "Reproducibility: Any failure can be reproduced by spinning up the same instance type"
+    ]
+  },
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "GitHub-Hosted Platform Testing",
+      "description": "As a Jarvy maintainer, I want E2E tests to run on GitHub-hosted runners for macOS, Ubuntu, and Windows, so that I get free, reliable testing on the most common platforms.",
+      "passed": false,
+      "acceptanceCriteria": [
+        {
+          "criterion": "macOS tests run on both macos-13 (Intel) and macos-14 (Apple Silicon M1)",
+          "passed": false
+        },
+        {
+          "criterion": "Ubuntu tests run on ubuntu-22.04 and ubuntu-24.04",
+          "passed": false
+        },
+        {
+          "criterion": "Windows tests run on windows-latest with winget available",
+          "passed": false
+        },
+        {
+          "criterion": "All GitHub-hosted jobs run in parallel via matrix strategy",
+          "passed": false
+        },
+        {
+          "criterion": "Tests verify Jarvy builds and installs base tool set successfully",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "AWS EC2 Spot Testing for Additional Distros",
+      "description": "As a Jarvy maintainer, I want E2E tests on Fedora, Arch, Alpine, and FreeBSD via AWS EC2 Spot instances, so that I can verify package manager support on distros not available on GitHub.",
+      "passed": false,
+      "acceptanceCriteria": [
+        {
+          "criterion": "EC2 Spot instances used for Fedora 40, Arch Linux, Alpine, and FreeBSD 14",
+          "passed": false
+        },
+        {
+          "criterion": "Ephemeral self-hosted runners register, run job, then auto-terminate",
+          "passed": false
+        },
+        {
+          "criterion": "Spot interruption handled gracefully (job marked as 'interrupted', not failed)",
+          "passed": false
+        },
+        {
+          "criterion": "Cost per run < $0.05 for all 4 distros combined",
+          "passed": false
+        },
+        {
+          "criterion": "Custom AMIs built with Packer include Rust toolchain pre-installed",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Multi-Platform Parallel Execution",
+      "description": "As a Jarvy maintainer, I want tests to run in parallel across all platforms, so that the full test suite completes in under 20 minutes.",
+      "passed": false,
+      "acceptanceCriteria": [
+        {
+          "criterion": "GitHub Actions matrix runs all platforms concurrently",
+          "passed": false
+        },
+        {
+          "criterion": "Individual platform failures don't block other platforms (fail-fast: false)",
+          "passed": false
+        },
+        {
+          "criterion": "Results aggregation job waits for all matrix jobs",
+          "passed": false
+        },
+        {
+          "criterion": "Total wall-clock time < 20 minutes for full 9-platform suite",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "GitHub PR Integration",
+      "description": "As a Jarvy maintainer, I want E2E test results integrated with GitHub PRs, so that I can see platform compatibility before merging.",
+      "passed": false,
+      "acceptanceCriteria": [
+        {
+          "criterion": "PR commit status shows 'pending', 'success', or 'failure'",
+          "passed": false
+        },
+        {
+          "criterion": "PR comment includes result matrix (platform × tool × status)",
+          "passed": false
+        },
+        {
+          "criterion": "Failed tests include links to GitHub artifacts for debugging",
+          "passed": false
+        },
+        {
+          "criterion": "Manual re-run available via workflow_dispatch or 'Re-run jobs' button",
+          "passed": false
+        },
+        {
+          "criterion": "Results visible within 5 minutes of job completion",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "Test Result Artifacts",
+      "description": "As a Jarvy maintainer, I want comprehensive test artifacts stored in GitHub Actions, so that I can debug failures without re-running tests.",
+      "passed": false,
+      "acceptanceCriteria": [
+        {
+          "criterion": "Each platform job uploads artifacts with unique naming",
+          "passed": false
+        },
+        {
+          "criterion": "Artifacts include results.json - Structured test results (tool, status, duration, error)",
+          "passed": false
+        },
+        {
+          "criterion": "Artifacts include jarvy-output.log - Full stdout/stderr from jarvy commands",
+          "passed": false
+        },
+        {
+          "criterion": "Artifacts include system-info.txt - OS version, arch, package manager versions",
+          "passed": false
+        },
+        {
+          "criterion": "Artifacts retained for 30 days (GitHub default)",
+          "passed": false
+        },
+        {
+          "criterion": "Artifacts downloadable directly from workflow run page",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-006",
+      "title": "Scheduled Nightly Full Suite",
+      "description": "As a Jarvy maintainer, I want a nightly full E2E test run, so that platform regressions are caught even without PRs.",
+      "passed": false,
+      "acceptanceCriteria": [
+        {
+          "criterion": "Nightly run at 2 AM UTC via schedule trigger",
+          "passed": false
+        },
+        {
+          "criterion": "Full platform matrix (all 9 platforms)",
+          "passed": false
+        },
+        {
+          "criterion": "Results posted to GitHub Actions summary",
+          "passed": false
+        },
+        {
+          "criterion": "Automatic GitHub issue creation for new failures (optional)",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "US-007",
+      "title": "MacinCloud Fallback (Future)",
+      "description": "As a Jarvy maintainer, I want the option to add MacinCloud as a macOS testing fallback, so that I can get cleaner environments if GitHub runners prove insufficient.",
+      "passed": false,
+      "acceptanceCriteria": [
+        {
+          "criterion": "Architecture documented for MacinCloud integration",
+          "passed": false
+        },
+        {
+          "criterion": "SSH-based self-hosted runner setup instructions provided",
+          "passed": false
+        },
+        {
+          "criterion": "Cost comparison documented (GitHub free vs MacinCloud ~$20-50/mo)",
+          "passed": false
+        },
+        {
+          "criterion": "Migration path from GitHub runners to MacinCloud defined",
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "phases": [
+    {
+      "id": "Phase-1",
+      "title": "GitHub-Native E2E (Week 1)",
+      "description": "Create the E2E test workflow using only GitHub-hosted runners",
+      "passed": false,
+      "tasks": [
+        {
+          "id": "T1",
+          "description": "Create tests/e2e_base_tools.rs integration test",
+          "passed": false
+        },
+        {
+          "id": "T2",
+          "description": "Create .github/workflows/e2e-cross-platform.yml with matrix strategy",
+          "passed": false
+        },
+        {
+          "id": "T3",
+          "description": "Configure macOS (Intel + ARM), Ubuntu (22.04 + 24.04), Windows matrix",
+          "passed": false
+        },
+        {
+          "id": "T4",
+          "description": "Implement result aggregation job with PR comments",
+          "passed": false
+        },
+        {
+          "id": "T5",
+          "description": "Add nightly schedule trigger",
+          "passed": false
+        }
+      ],
+      "deliverables": [
+        "Working E2E tests on 5 platforms (all GitHub-hosted)",
+        "PR comments with result matrix",
+        "Nightly scheduled runs"
+      ]
+    },
+    {
+      "id": "Phase-2",
+      "title": "AWS EC2 for Additional Distros (Week 2)",
+      "description": "Add EC2 Spot runners for Fedora, Arch, Alpine, and FreeBSD",
+      "passed": false,
+      "tasks": [
+        {
+          "id": "T6",
+          "description": "Create Packer templates for 4 custom AMIs (Fedora 40, Arch Linux, Alpine, FreeBSD 14)",
+          "passed": false
+        },
+        {
+          "id": "T7",
+          "description": "Create minimal Terraform for EC2 runner provisioning (infra/modules/ec2-runner/)",
+          "passed": false
+        },
+        {
+          "id": "T8",
+          "description": "Configure self-hosted runner registration in user-data script",
+          "passed": false
+        },
+        {
+          "id": "T9",
+          "description": "Add EC2-hosted jobs to GitHub workflow",
+          "passed": false
+        },
+        {
+          "id": "T10",
+          "description": "Test Spot interruption handling",
+          "passed": false
+        }
+      ],
+      "deliverables": [
+        "4 custom AMIs with Rust toolchain",
+        "Terraform module for ephemeral runners",
+        "Full 9-platform E2E coverage"
+      ]
+    },
+    {
+      "id": "Phase-3",
+      "title": "Production Polish (Week 3)",
+      "description": "Harden the system and document everything",
+      "passed": false,
+      "tasks": [
+        {
+          "id": "T11",
+          "description": "Add retry logic for flaky tests",
+          "passed": false
+        },
+        {
+          "id": "T12",
+          "description": "Implement better error messages and debugging info",
+          "passed": false
+        },
+        {
+          "id": "T13",
+          "description": "Create runbook for common issues",
+          "passed": false
+        },
+        {
+          "id": "T14",
+          "description": "Document architecture and maintenance procedures",
+          "passed": false
+        },
+        {
+          "id": "T15",
+          "description": "Set up AWS cost alerts ($10/month threshold)",
+          "passed": false
+        }
+      ],
+      "deliverables": [
+        "Reliable E2E suite with <5% flake rate",
+        "Operational documentation",
+        "Cost monitoring"
+      ]
+    },
+    {
+      "id": "Phase-4",
+      "title": "MacinCloud Integration (Future - Optional)",
+      "description": "Only implement if GitHub macOS runners prove insufficient",
+      "passed": false,
+      "tasks": [
+        {
+          "id": "T16",
+          "description": "Set up MacinCloud account and SSH access",
+          "passed": false
+        },
+        {
+          "id": "T17",
+          "description": "Configure self-hosted runner on MacinCloud",
+          "passed": false
+        },
+        {
+          "id": "T18",
+          "description": "Add to workflow matrix with conditional logic",
+          "passed": false
+        },
+        {
+          "id": "T19",
+          "description": "Document cost trade-offs",
+          "passed": false
+        }
+      ],
+      "deliverables": [
+        "MacinCloud runner integration (if needed)",
+        "Cost comparison documentation"
+      ]
+    }
+  ],
+  "filesToCreate": [
+    "infra/README.md",
+    "infra/modules/ec2-runner/main.tf",
+    "infra/modules/ec2-runner/variables.tf",
+    "infra/modules/ec2-runner/outputs.tf",
+    "infra/modules/ec2-runner/user-data.sh",
+    "infra/packer/fedora-40.pkr.hcl",
+    "infra/packer/arch-linux.pkr.hcl",
+    "infra/packer/alpine.pkr.hcl",
+    "infra/packer/freebsd-14.pkr.hcl",
+    "infra/environments/prod/main.tf",
+    "infra/environments/prod/terraform.tfvars",
+    "tests/e2e_base_tools.rs",
+    ".github/workflows/e2e-cross-platform.yml",
+    "tests/fixtures/e2e-base-tools.toml"
+  ],
+  "baseToolSet": {
+    "tier1_core": ["git", "jq", "ripgrep", "curl", "wget"],
+    "tier2_runtimes": ["node", "python", "rust", "go"],
+    "tier3_devops": ["docker", "kubectl", "terraform", "awscli"],
+    "tier4_dependencies": ["lazydocker", "lazygit", "k9s"]
+  },
+  "platformMatrix": {
+    "github_hosted": [
+      {"name": "macOS Intel", "runner": "macos-13", "cost": "Free"},
+      {"name": "macOS ARM (M1)", "runner": "macos-14", "cost": "Free"},
+      {"name": "macOS ARM (M2)", "runner": "macos-15", "cost": "Free"},
+      {"name": "Ubuntu 22.04", "runner": "ubuntu-22.04", "cost": "Free"},
+      {"name": "Ubuntu 24.04", "runner": "ubuntu-24.04", "cost": "Free"},
+      {"name": "Windows", "runner": "windows-latest", "cost": "Free"}
+    ],
+    "ec2_spot": [
+      {"name": "Fedora 40", "runner": "self-hosted-fedora", "cost": "~$0.01/run"},
+      {"name": "Arch Linux", "runner": "self-hosted-arch", "cost": "~$0.01/run"},
+      {"name": "Alpine", "runner": "self-hosted-alpine", "cost": "~$0.005/run"},
+      {"name": "FreeBSD 14", "runner": "self-hosted-freebsd", "cost": "~$0.01/run"}
+    ]
+  },
+  "nonGoals": [
+    "Testing every tool (176 tools × 8 platforms = 1,408 combinations is not feasible)",
+    "Performance benchmarking (separate concern)",
+    "Load/stress testing (Jarvy is single-user CLI)",
+    "Testing tool functionality beyond installation verification",
+    "Supporting cloud providers other than AWS (can be added later)"
+  ],
+  "technicalConsiderations": [
+    {
+      "area": "Security",
+      "details": "Ephemeral runners terminate after single job, no persistent state. IAM least privilege. VPC isolation with NAT gateway for egress only. No secrets on runners."
+    },
+    {
+      "area": "Cost Efficiency",
+      "details": "GitHub-hosted runners are free. EC2 Spot instances cost ~$0.008/hr (80% savings vs on-demand). Ephemeral runners only run ~20 min per test. Total monthly cost estimate: $3-5."
+    },
+    {
+      "area": "Spot Interruption",
+      "details": "Jobs on Spot instances may be interrupted. Handle gracefully by marking as 'interrupted' not failed. Only run EC2 tests on merge/nightly, not every PR."
+    },
+    {
+      "area": "AMI Maintenance",
+      "details": "Custom AMIs may drift over time. Schedule monthly AMI rebuilds with Packer. Pin package manager versions where possible."
+    }
+  ],
+  "successMetrics": [
+    {"metric": "Platform coverage", "current": "3 (ubuntu, macos-github, windows-github)", "target": "9 platforms"},
+    {"metric": "E2E test availability", "current": "0", "target": "100% (on every PR)"},
+    {"metric": "P95 test duration", "current": "N/A", "target": "< 20 minutes"},
+    {"metric": "Flake rate", "current": "Unknown", "target": "< 5%"},
+    {"metric": "Monthly cost", "current": "~$0 (GitHub free tier)", "target": "< $10"},
+    {"metric": "Test reliability", "current": "Unknown", "target": "> 95% pass rate for known-good commits"}
+  ],
+  "risks": [
+    {
+      "risk": "GitHub runner environment pollution",
+      "likelihood": "Medium",
+      "impact": "Medium",
+      "mitigation": "Document known pre-installed tools; test 'install over existing'"
+    },
+    {
+      "risk": "Spot instance interruptions",
+      "likelihood": "Low",
+      "impact": "Low",
+      "mitigation": "Retry logic; jobs only run on merge/nightly, not every PR"
+    },
+    {
+      "risk": "AMI drift causes failures",
+      "likelihood": "Medium",
+      "impact": "Medium",
+      "mitigation": "Monthly AMI rebuilds; pin versions"
+    },
+    {
+      "risk": "Package manager rate limiting",
+      "likelihood": "Low",
+      "impact": "Medium",
+      "mitigation": "Spread tests; use mirrors if needed"
+    },
+    {
+      "risk": "Self-hosted runner security",
+      "likelihood": "Low",
+      "impact": "High",
+      "mitigation": "Ephemeral runners; isolated VPC; no secrets on instance"
+    }
+  ],
+  "openQuestions": [
+    "EC2 distro priority: Should we start with all 4 (Fedora, Arch, Alpine, FreeBSD) or prioritize?",
+    "PR vs main: Should EC2 tests run on PRs, or only on merge to main / nightly?",
+    "Failure policy: Should E2E failures block merges, or just be advisory?"
+  ],
+  "effortEstimate": {
+    "phase1": "3 days",
+    "phase2": "4 days",
+    "phase3": "2 days",
+    "phase4": "2 days (optional)",
+    "total": "~9 days (2 weeks) for Phases 1-3"
+  },
+  "dependencies": {
+    "aws_services": ["EC2 (Spot instances)", "IAM (runner role)", "VPC (optional)"],
+    "external": ["GitHub Actions", "Package manager mirrors (brew, apt, dnf, pacman, apk, winget, pkg)"],
+    "internal": ["PRD-006: Testing Infrastructure", "PRD-014: Real-World Testing"]
+  }
+}

@@ -1,0 +1,36 @@
+# E2E Base Tools Test Configuration
+#
+# This configuration defines the base tool set used for E2E testing.
+# Tools are organized into tiers based on priority and complexity.
+#
+# Tier 1: Core - Must work on ALL platforms
+# Tier 2: Runtimes - Language runtimes (may skip on some platforms)
+# Tier 3: DevOps - Container/cloud tools (platform-dependent)
+# Tier 4: Dependencies - Tools that depend on other tools
+
+[privileges]
+use_sudo = false
+
+# Tier 1: Core Tools (Always Tested)
+# These must pass on every platform for a release to ship.
+[provisioner]
+git = "latest"
+jq = "latest"
+ripgrep = "latest"
+curl = "latest"
+wget = "latest"
+
+# Tier 2: Language Runtimes
+# Comment out if testing specific tier only
+node = "latest"
+python = "latest"
+go = "latest"
+
+# Tier 3: DevOps Tools
+# Note: docker is skipped on Alpine/FreeBSD
+kubectl = "latest"
+terraform = "latest"
+
+# Tier 4: Tools with Dependencies
+# lazygit has no deps, good baseline
+lazygit = "latest"

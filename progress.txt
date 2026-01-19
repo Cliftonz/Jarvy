@@ -42,6 +42,7 @@
 | PRD-023 | User Onboarding & Education | 2026-01-18 | `jarvy init`, `jarvy quickstart`, `jarvy templates`, first-run detection, 20 built-in templates |
 | PRD-035 | Self-Updating Functionality | 2026-01-19 | `jarvy update`, multi-method detection (Homebrew/Cargo/apt/etc), rollback support, CI auto-disable |
 | PRD-037 | Main.rs Code Maintainability Refactor | 2026-01-19 | main.rs reduced 83% (3175→542 lines), CLI extracted to `src/cli/`, commands to `src/commands/` |
+| PRD-038 | Hybrid Cross-Platform E2E Testing Harness | 2026-01-19 | GitHub-hosted runners (free) + AWS EC2 Spot (~$5-15/mo), 10 platforms, tiered tool testing |
 
 ---
 
@@ -466,10 +467,77 @@ src/
 └── interactive.rs (interactive menu)
 ```
 
+### PRD-038 Hybrid Cross-Platform E2E Testing Harness (Completed 2026-01-19)
+**Goal**: Validate base tool installations across all supported platforms with cost-efficient infrastructure.
+
+**Architecture Decision - Hybrid Approach:**
+- **GitHub-hosted runners** (FREE): macOS Intel, macOS ARM, Ubuntu 22.04/24.04, Windows
+- **AWS EC2 Spot** (~$0.01/run): Fedora 40, Arch Linux, Alpine, FreeBSD 14
+- **Cost reduction**: From ~$925/month (AWS dedicated hosts) to ~$5-15/month
+
+**Files Created:**
+
+| File | Purpose |
+|------|---------|
+| `tests/e2e_base_tools.rs` | Integration test for base tool validation |
+| `tests/fixtures/e2e-base-tools.toml` | Test fixture with minimal tool set |
+| `.github/workflows/e2e-cross-platform.yml` | GitHub Actions workflow with matrix strategy |
+| `infra/README.md` | Infrastructure documentation |
+| `infra/modules/ec2-runner/main.tf` | EC2 Spot runner Terraform module |
+| `infra/modules/ec2-runner/variables.tf` | Module variables |
+| `infra/modules/ec2-runner/outputs.tf` | Module outputs |
+| `infra/modules/ec2-runner/user-data.sh` | Bootstrap script for ephemeral runners |
+| `infra/packer/fedora-40.pkr.hcl` | Packer template for Fedora AMI |
+| `infra/packer/arch-linux.pkr.hcl` | Packer template for Arch Linux AMI |
+| `infra/packer/alpine.pkr.hcl` | Packer template for Alpine AMI |
+| `infra/packer/freebsd-14.pkr.hcl` | Packer template for FreeBSD AMI |
+| `infra/environments/prod/main.tf` | Production environment Terraform |
+| `infra/environments/prod/terraform.tfvars` | Environment variables template |
+
+**Tool Test Tiers:**
+```rust
+tier1_core: ["git", "jq", "ripgrep", "curl", "wget"]      // Always required
+tier2_runtimes: ["node", "python", "go"]                   // Language runtimes
+tier3_devops: ["kubectl", "terraform"]                     // DevOps tools
+tier4_dependencies: ["lazygit"]                            // Tools with deps
+```
+
+**Key Technical Details:**
+- Matrix strategy with `fail-fast: false` for complete test coverage
+- Ephemeral self-hosted runners that auto-terminate after job completion
+- IAM roles with SSM access for GitHub runner registration
+- Packer AMIs pre-install Rust toolchain and GitHub Actions runner
+- Test results aggregated and posted as PR comments
+- Nightly schedule (2 AM UTC) + manual trigger support
+
+**Platform Coverage (10 total):**
+| Platform | Runner Type | Status |
+|----------|-------------|--------|
+| macOS 13 Intel | `macos-13` | GitHub-hosted |
+| macOS 14 ARM | `macos-14` | GitHub-hosted |
+| Ubuntu 22.04 | `ubuntu-22.04` | GitHub-hosted |
+| Ubuntu 24.04 | `ubuntu-24.04` | GitHub-hosted |
+| Windows | `windows-latest` | GitHub-hosted |
+| Fedora 40 | `self-hosted-fedora` | AWS EC2 Spot |
+| Arch Linux | `self-hosted-arch` | AWS EC2 Spot |
+| Alpine | `self-hosted-alpine` | AWS EC2 Spot |
+| FreeBSD 14 | `self-hosted-freebsd` | AWS EC2 Spot |
+
+**AWS Infrastructure Notes:**
+- EC2 Spot instances (t3.medium/t3.small) for 90% cost reduction
+- Security groups allow SSH (22), HTTPS (443) egress only
+- User data script fetches GitHub runner token from SSM Parameter Store
+- Runner auto-deregisters and instance self-terminates on job completion
+
+**Alpine/FreeBSD Considerations:**
+- Alpine uses musl libc; gcompat package required for GitHub runner
+- FreeBSD has no official GitHub Actions runner support; custom solution needed
+
 ### Future Enhancements
 - `jarvy search --category` (category filtering)
 - `jarvy validate --from URL` (remote validation)
 - Package manager expansion: pip, snap, flatpak, cargo, scoop
+- MacinCloud integration if GitHub macOS runners prove insufficient
 
 ---
 
