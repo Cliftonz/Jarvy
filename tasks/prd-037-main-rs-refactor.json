@@ -1,0 +1,472 @@
+{
+  "prd": "037-main-rs-refactor",
+  "title": "Main.rs Code Maintainability Refactor",
+  "version": "1.0.0",
+  "priority": "high",
+  "estimated_days": 5,
+  "created": "2026-01-19",
+  "status": "not_started",
+  "progress": {
+    "completed": 0,
+    "total": 30,
+    "percentage": 0
+  },
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "CLI Extraction",
+      "status": "not_started",
+      "estimated_days": 1,
+      "tasks": [
+        {
+          "id": "T001",
+          "title": "Create CLI module structure",
+          "description": "Create src/cli/mod.rs with module declarations and re-exports",
+          "status": "not_started",
+          "files": ["src/cli/mod.rs"],
+          "acceptance_criteria": ["Module compiles", "Exports are accessible from main"]
+        },
+        {
+          "id": "T002",
+          "title": "Extract CLI argument definitions to args.rs",
+          "description": "Move Cli struct, Commands enum, and OutputFormat enum to src/cli/args.rs",
+          "status": "not_started",
+          "files": ["src/cli/args.rs", "src/main.rs"],
+          "acceptance_criteria": [
+            "Cli struct moved with all clap derives",
+            "Commands enum with all subcommands moved",
+            "OutputFormat enum moved",
+            "parse_ci_provider helper moved",
+            "cargo check passes"
+          ]
+        },
+        {
+          "id": "T003",
+          "title": "Extract subcommand enums to subcommands.rs",
+          "description": "Move TemplatesSubcommand, TelemetryAction, ServicesAction, TeamAction, LockAction, ConfigAction to src/cli/subcommands.rs",
+          "status": "not_started",
+          "files": ["src/cli/subcommands.rs", "src/main.rs"],
+          "acceptance_criteria": [
+            "All 6 subcommand enums moved",
+            "Proper imports established",
+            "cargo check passes"
+          ]
+        },
+        {
+          "id": "T004",
+          "title": "Update main.rs imports for CLI module",
+          "description": "Update main.rs to import from cli module instead of local definitions",
+          "status": "not_started",
+          "files": ["src/main.rs"],
+          "acceptance_criteria": [
+            "main.rs uses cli::* imports",
+            "No duplicate definitions",
+            "cargo test passes"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "Utility Extraction",
+      "status": "not_started",
+      "estimated_days": 0.5,
+      "tasks": [
+        {
+          "id": "T005",
+          "title": "Create remote.rs module",
+          "description": "Extract fetch_remote_config and transform_github_url to src/remote.rs",
+          "status": "not_started",
+          "files": ["src/remote.rs", "src/main.rs"],
+          "acceptance_criteria": [
+            "fetch_remote_config function moved",
+            "transform_github_url function moved",
+            "MAX_REMOTE_CONFIG_SIZE constant moved",
+            "cargo check passes"
+          ]
+        },
+        {
+          "id": "T006",
+          "title": "Create interactive.rs module",
+          "description": "Extract user_select and print_logo to src/interactive.rs",
+          "status": "not_started",
+          "files": ["src/interactive.rs", "src/main.rs"],
+          "acceptance_criteria": [
+            "user_select function moved",
+            "print_logo function moved",
+            "Interactive menu works correctly",
+            "cargo test passes"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "Simple Command Handlers",
+      "status": "not_started",
+      "estimated_days": 1,
+      "tasks": [
+        {
+          "id": "T007",
+          "title": "Create get.rs command handler",
+          "description": "Extract Get command handler to src/commands/get.rs",
+          "status": "not_started",
+          "files": ["src/commands/get.rs", "src/commands/mod.rs", "src/main.rs"],
+          "acceptance_criteria": [
+            "Get command logic extracted",
+            "Reports struct moved or shared",
+            "pretty_output, color_for_status helpers available",
+            "jarvy get works correctly"
+          ]
+        },
+        {
+          "id": "T008",
+          "title": "Create tools_cmd.rs command handler",
+          "description": "Extract Tools command handler to src/commands/tools_cmd.rs",
+          "status": "not_started",
+          "files": ["src/commands/tools_cmd.rs", "src/commands/mod.rs", "src/main.rs"],
+          "acceptance_criteria": [
+            "Tools command logic extracted",
+            "Tool listing works",
+            "Index output works",
+            "Default hooks listing works"
+          ]
+        },
+        {
+          "id": "T009",
+          "title": "Create env_cmd.rs command handler",
+          "description": "Extract Env command handler to src/commands/env_cmd.rs",
+          "status": "not_started",
+          "files": ["src/commands/env_cmd.rs", "src/commands/mod.rs", "src/main.rs"],
+          "acceptance_criteria": [
+            "Env command logic extracted",
+            "Dotenv generation works",
+            "Shell rc update works",
+            "Export mode works"
+          ]
+        },
+        {
+          "id": "T010",
+          "title": "Create services_cmd.rs command handler",
+          "description": "Extract Services command handler to src/commands/services_cmd.rs",
+          "status": "not_started",
+          "files": ["src/commands/services_cmd.rs", "src/commands/mod.rs", "src/main.rs"],
+          "acceptance_criteria": [
+            "Services subcommands extracted",
+            "Start, stop, status, restart work",
+            "Config file path handling correct"
+          ]
+        },
+        {
+          "id": "T011",
+          "title": "Create ci_cmd.rs command handler",
+          "description": "Extract CiConfig and CiInfo command handlers to src/commands/ci_cmd.rs",
+          "status": "not_started",
+          "files": ["src/commands/ci_cmd.rs", "src/commands/mod.rs", "src/main.rs"],
+          "acceptance_criteria": [
+            "CiConfig command logic extracted",
+            "CiInfo command logic extracted",
+            "CI provider generation works"
+          ]
+        },
+        {
+          "id": "T012",
+          "title": "Create mcp_cmd.rs command handler",
+          "description": "Extract MCP command handler to src/commands/mcp_cmd.rs",
+          "status": "not_started",
+          "files": ["src/commands/mcp_cmd.rs", "src/commands/mod.rs", "src/main.rs"],
+          "acceptance_criteria": [
+            "MCP command logic extracted",
+            "Config path handling correct",
+            "Server startup works"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-4",
+      "name": "Complex Command Handlers",
+      "status": "not_started",
+      "estimated_days": 1,
+      "tasks": [
+        {
+          "id": "T013",
+          "title": "Create telemetry_cmd.rs command handler",
+          "description": "Move handle_telemetry_command to src/commands/telemetry_cmd.rs",
+          "status": "not_started",
+          "files": ["src/commands/telemetry_cmd.rs", "src/commands/mod.rs", "src/main.rs"],
+          "acceptance_criteria": [
+            "handle_telemetry_command moved",
+            "update_telemetry_config helper moved",
+            "All subcommands work (status, enable, disable, set-endpoint, test, preview)"
+          ]
+        },
+        {
+          "id": "T014",
+          "title": "Create team_cmd.rs command handler",
+          "description": "Move handle_team_command to src/commands/team_cmd.rs",
+          "status": "not_started",
+          "files": ["src/commands/team_cmd.rs", "src/commands/mod.rs", "src/main.rs"],
+          "acceptance_criteria": [
+            "handle_team_command moved",
+            "All subcommands work (add, list, browse, sync, remove, init)"
+          ]
+        },
+        {
+          "id": "T015",
+          "title": "Create lock_cmd.rs command handler",
+          "description": "Move handle_lock_command to src/commands/lock_cmd.rs",
+          "status": "not_started",
+          "files": ["src/commands/lock_cmd.rs", "src/commands/mod.rs", "src/main.rs"],
+          "acceptance_criteria": [
+            "handle_lock_command moved",
+            "All subcommands work (generate, status, verify)"
+          ]
+        },
+        {
+          "id": "T016",
+          "title": "Create config_cmd.rs command handler",
+          "description": "Move handle_config_command to src/commands/config_cmd.rs",
+          "status": "not_started",
+          "files": ["src/commands/config_cmd.rs", "src/commands/mod.rs", "src/main.rs"],
+          "acceptance_criteria": [
+            "handle_config_command moved",
+            "All subcommands work (show, refresh)"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-5",
+      "name": "Setup Command Extraction",
+      "status": "not_started",
+      "estimated_days": 1,
+      "tasks": [
+        {
+          "id": "T017",
+          "title": "Create setup_cmd.rs command handler",
+          "description": "Extract the large Setup command handler (~600 lines) to src/commands/setup_cmd.rs",
+          "status": "not_started",
+          "files": ["src/commands/setup_cmd.rs", "src/commands/mod.rs", "src/main.rs"],
+          "acceptance_criteria": [
+            "Setup command logic fully extracted",
+            "Tool installation with parallel execution works",
+            "Hook execution works",
+            "Environment variable setup works",
+            "Service auto-start works",
+            "Role override works",
+            "Dry-run mode works"
+          ]
+        },
+        {
+          "id": "T018",
+          "title": "Extract output helpers",
+          "description": "Move Reports struct, color_for_status, pretty_output to appropriate location",
+          "status": "not_started",
+          "files": ["src/commands/setup_cmd.rs", "src/output.rs"],
+          "acceptance_criteria": [
+            "Helper functions accessible to commands that need them",
+            "No duplicate definitions"
+          ]
+        },
+        {
+          "id": "T019",
+          "title": "Extract Bootstrap and Configure handlers",
+          "description": "Extract Bootstrap and Configure command handlers from main",
+          "status": "not_started",
+          "files": ["src/commands/bootstrap_cmd.rs", "src/commands/configure_cmd.rs", "src/main.rs"],
+          "acceptance_criteria": [
+            "Bootstrap command works",
+            "Configure command creates default config"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-6",
+      "name": "Final Cleanup & Verification",
+      "status": "not_started",
+      "estimated_days": 0.5,
+      "tasks": [
+        {
+          "id": "T020",
+          "title": "Clean up main.rs to minimal dispatch",
+          "description": "Reduce main.rs to ~100 lines with only initialization and command dispatch",
+          "status": "not_started",
+          "files": ["src/main.rs"],
+          "acceptance_criteria": [
+            "main.rs under 150 lines",
+            "main() function under 100 lines",
+            "Only module declarations, initialization, and dispatch logic remains"
+          ]
+        },
+        {
+          "id": "T021",
+          "title": "Update commands/mod.rs exports",
+          "description": "Ensure all new command modules are properly exported",
+          "status": "not_started",
+          "files": ["src/commands/mod.rs"],
+          "acceptance_criteria": [
+            "All new modules exported",
+            "Public functions accessible"
+          ]
+        },
+        {
+          "id": "T022",
+          "title": "Update lib.rs if needed",
+          "description": "Export cli module for integration tests if needed",
+          "status": "not_started",
+          "files": ["src/lib.rs"],
+          "acceptance_criteria": [
+            "External crate access works if needed",
+            "Integration tests can import necessary types"
+          ]
+        },
+        {
+          "id": "T023",
+          "title": "Run full test suite",
+          "description": "Run cargo test --verbose -- --show-output to verify all tests pass",
+          "status": "not_started",
+          "files": [],
+          "acceptance_criteria": [
+            "All unit tests pass",
+            "All integration tests pass"
+          ]
+        },
+        {
+          "id": "T024",
+          "title": "Run clippy and fix warnings",
+          "description": "Run cargo clippy --all-features -- -D warnings",
+          "status": "not_started",
+          "files": [],
+          "acceptance_criteria": [
+            "No clippy warnings",
+            "No clippy errors"
+          ]
+        },
+        {
+          "id": "T025",
+          "title": "Run cargo fmt",
+          "description": "Run cargo fmt --all to format all code",
+          "status": "not_started",
+          "files": [],
+          "acceptance_criteria": [
+            "All code properly formatted"
+          ]
+        },
+        {
+          "id": "T026",
+          "title": "Manual CLI verification",
+          "description": "Test key CLI commands manually to verify functionality",
+          "status": "not_started",
+          "files": [],
+          "acceptance_criteria": [
+            "jarvy --help works",
+            "jarvy setup --dry-run works",
+            "jarvy tools --index works",
+            "jarvy get works",
+            "Interactive menu works"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-7",
+      "name": "Documentation",
+      "status": "not_started",
+      "estimated_days": 0.5,
+      "tasks": [
+        {
+          "id": "T027",
+          "title": "Update CLAUDE.md with new module structure",
+          "description": "Document the new cli/ and commands/ module organization",
+          "status": "not_started",
+          "files": ["CLAUDE.md"],
+          "acceptance_criteria": [
+            "CLI module documented",
+            "New command modules documented",
+            "Module responsibilities clear"
+          ]
+        },
+        {
+          "id": "T028",
+          "title": "Add inline documentation",
+          "description": "Add module-level documentation to new files",
+          "status": "not_started",
+          "files": ["src/cli/mod.rs", "src/cli/args.rs", "src/cli/subcommands.rs", "src/remote.rs", "src/interactive.rs"],
+          "acceptance_criteria": [
+            "Each new module has //! doc comment",
+            "Public functions have /// doc comments"
+          ]
+        },
+        {
+          "id": "T029",
+          "title": "Update progress.txt",
+          "description": "Document the refactor completion in progress.txt",
+          "status": "not_started",
+          "files": ["progress.txt"],
+          "acceptance_criteria": [
+            "PRD-037 completion noted",
+            "New module structure documented"
+          ]
+        },
+        {
+          "id": "T030",
+          "title": "Verify line count targets",
+          "description": "Verify that main.rs is under 150 lines and largest module under 500 lines",
+          "status": "not_started",
+          "files": [],
+          "acceptance_criteria": [
+            "main.rs under 150 lines",
+            "No module over 500 lines",
+            "main() function under 100 lines"
+          ]
+        }
+      ]
+    }
+  ],
+  "files_to_create": [
+    "src/cli/mod.rs",
+    "src/cli/args.rs",
+    "src/cli/subcommands.rs",
+    "src/commands/setup_cmd.rs",
+    "src/commands/get.rs",
+    "src/commands/tools_cmd.rs",
+    "src/commands/env_cmd.rs",
+    "src/commands/ci_cmd.rs",
+    "src/commands/services_cmd.rs",
+    "src/commands/telemetry_cmd.rs",
+    "src/commands/team_cmd.rs",
+    "src/commands/lock_cmd.rs",
+    "src/commands/config_cmd.rs",
+    "src/commands/mcp_cmd.rs",
+    "src/commands/bootstrap_cmd.rs",
+    "src/commands/configure_cmd.rs",
+    "src/interactive.rs",
+    "src/remote.rs"
+  ],
+  "files_to_modify": [
+    "src/main.rs",
+    "src/commands/mod.rs",
+    "src/lib.rs",
+    "CLAUDE.md",
+    "progress.txt"
+  ],
+  "success_metrics": {
+    "main_rs_lines_before": 3085,
+    "main_rs_lines_after": 150,
+    "main_function_lines_before": 1525,
+    "main_function_lines_after": 100,
+    "largest_module_before": 3085,
+    "largest_module_after": 500,
+    "command_handlers_in_main_before": 6,
+    "command_handlers_in_main_after": 0
+  },
+  "non_goals": [
+    "Changing user-facing behavior",
+    "Modifying CLI interface or command structure",
+    "Refactoring existing commands/ implementations",
+    "Performance optimization",
+    "Adding new features"
+  ]
+}

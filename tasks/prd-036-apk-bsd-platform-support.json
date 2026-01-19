@@ -1,0 +1,161 @@
+{
+  "id": "PRD-036",
+  "parent_prd": "PRD-036",
+  "title": "APK (Alpine Linux) and BSD (FreeBSD) Platform Support",
+  "description": "Add comprehensive package definitions for Alpine Linux (apk) and FreeBSD (pkg) across all Jarvy tools",
+  "status": "complete",
+  "priority": "medium",
+  "dependencies": ["PRD-002"],
+  "estimated_complexity": "medium",
+  "completed_date": "2026-01-18",
+  "acceptance_criteria": [
+    "All tools have either BSD package defined OR documented as N/A",
+    "All tools using uniform: automatically have APK support",
+    "_template.rs includes BSD placeholder for new tools",
+    "Code compiles successfully with cargo check --all-features",
+    "New brew + apk macro pattern available for hybrid Linux support"
+  ],
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Implement BsdInstall infrastructure",
+      "description": "Create BsdInstall struct and BSD package manager detection",
+      "status": "complete",
+      "priority": "high",
+      "files": ["src/tools/spec.rs", "src/tools/common.rs"],
+      "subtasks": [
+        "Create BsdInstall struct in spec.rs (lines 176-188)",
+        "Implement pkg() helper method",
+        "Add detect_bsd_pm() in common.rs (lines 239-254)",
+        "Implement install_bsd() method in spec.rs (lines 443-459)"
+      ]
+    },
+    {
+      "id": "T2",
+      "title": "Implement APK infrastructure",
+      "description": "Add APK field to LinuxInstall and update uniform() helper",
+      "status": "complete",
+      "priority": "high",
+      "files": ["src/tools/spec.rs"],
+      "subtasks": [
+        "Add apk field to LinuxInstall struct (line 91)",
+        "Update uniform() helper to include APK (line 103)",
+        "Ensure existing tools using uniform: get automatic APK support"
+      ]
+    },
+    {
+      "id": "T3",
+      "title": "Add brew + apk macro pattern",
+      "description": "Create new macro pattern for tools with Alpine packages but not other distro packages",
+      "status": "complete",
+      "priority": "medium",
+      "files": ["src/tools/spec.rs"],
+      "subtasks": [
+        "Design brew + apk pattern in define_tool! macro (lines 560-571)",
+        "Document pattern usage for tool authors"
+      ]
+    },
+    {
+      "id": "T4",
+      "title": "Add BSD support to all applicable tools",
+      "description": "Add bsd: { pkg: \"...\" } to 145 tools",
+      "status": "complete",
+      "priority": "high",
+      "files": ["src/tools/*/"],
+      "subtasks": [
+        "Add BSD package to uniform Linux tools (70 tools)",
+        "Add BSD package to explicit apt/dnf/pacman tools (41 tools)",
+        "Add BSD package to Linuxbrew + APK tools (10 tools)",
+        "Add BSD package to Linuxbrew-only tools (29 tools)",
+        "Document GUI/Desktop apps as N/A (7 tools)",
+        "Document custom install tools as N/A (3 tools)"
+      ]
+    },
+    {
+      "id": "T5",
+      "title": "Research and add APK packages",
+      "description": "Research Alpine packages for tools and add explicit apk definitions",
+      "status": "complete",
+      "priority": "medium",
+      "files": ["src/tools/*/"],
+      "subtasks": [
+        "Research Alpine packages at pkgs.alpinelinux.org",
+        "Add explicit apk for 10 tools: argocd, cosign, dive, grype, krew, lazydocker, nerdctl, ruff, syft, trivy",
+        "Document unavailable tools (29 Linuxbrew-only tools)"
+      ]
+    },
+    {
+      "id": "T6",
+      "title": "Update tool template",
+      "description": "Update _template.rs to include BSD placeholder for new tools",
+      "status": "complete",
+      "priority": "low",
+      "files": ["src/tools/_template.rs"],
+      "subtasks": [
+        "Add BSD placeholder to define_tool! template",
+        "Add comment documenting when to omit BSD"
+      ]
+    },
+    {
+      "id": "T7",
+      "title": "Verification and testing",
+      "description": "Verify implementation compiles and works correctly",
+      "status": "complete",
+      "priority": "high",
+      "files": [],
+      "subtasks": [
+        "Run cargo check --all-features",
+        "Run cargo fmt --all",
+        "Verify no compilation errors"
+      ]
+    }
+  ],
+  "implementation_notes": {
+    "package_naming": {
+      "alpine_python": "py3-{name}",
+      "freebsd_python": "py39-{name}",
+      "standard": "Same as other distros"
+    },
+    "coverage_summary": {
+      "uniform_linux": 70,
+      "explicit_packages": 41,
+      "linuxbrew_apk": 10,
+      "linuxbrew_only": 29,
+      "gui_desktop": 7,
+      "custom_install": 3,
+      "total": 157
+    },
+    "apk_tools_added": [
+      "argocd (edge/testing)",
+      "cosign (edge/community)",
+      "dive (edge/testing)",
+      "grype (edge/community)",
+      "krew (kubectl-krew, edge/testing)",
+      "lazydocker (v3.21/community)",
+      "nerdctl (edge/community)",
+      "ruff (v3.21/community)",
+      "syft (edge/community)",
+      "trivy (edge/testing)"
+    ]
+  },
+  "tools_without_bsd": {
+    "gui_apps": ["cursor", "docker_desktop", "freelens", "iterm2", "jetbrains_toolbox", "podman_desktop", "rancher_desktop", "vscode", "zed"],
+    "custom_install": ["brew", "nvm", "rust"]
+  },
+  "linuxbrew_only_tools": [
+    "act", "actionlint", "bun", "checkov", "dbmate", "deno", "flux", "gitleaks", "hadolint",
+    "k3d", "kind", "kubectx", "kubens", "mise", "mongosh", "pyenv", "rbenv", "sd", "semgrep",
+    "sops", "terraform_docs", "terragrunt", "trufflehog", "up", "usql", "vfox"
+  ],
+  "references": {
+    "alpine_packages": "https://pkgs.alpinelinux.org/packages",
+    "freebsd_ports": "https://www.freshports.org/",
+    "spec_linux_install": "src/tools/spec.rs:82-147",
+    "spec_bsd_install": "src/tools/spec.rs:176-188",
+    "spec_brew_apk_pattern": "src/tools/spec.rs:560-571"
+  },
+  "future_testing": [
+    "Alpine Docker: Build in alpine:edge container",
+    "FreeBSD CI: Cirrus CI with FreeBSD image"
+  ]
+}
