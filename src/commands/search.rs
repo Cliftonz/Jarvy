@@ -3,6 +3,7 @@
 //! Provides fuzzy searching, category filtering, and detailed tool information.
 
 use crate::output::{ExitCode, Format, Outputable, colors, header, icons};
+use crate::telemetry;
 use crate::tools::spec::{ToolIndex, generate_tool_index};
 use serde::Serialize;
 
@@ -148,9 +149,14 @@ pub fn search_tools(query: &str, show_all: bool) -> SearchResults {
         scored_results.into_iter().map(|(r, _)| r).collect()
     };
 
+    let count = results.len();
+
+    // Emit telemetry
+    telemetry::search_executed(query, count);
+
     SearchResults {
         query: query.to_string(),
-        count: results.len(),
+        count,
         results,
     }
 }

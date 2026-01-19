@@ -1,8 +1,9 @@
 use std::env;
 use std::process::Command;
 use std::str;
+use std::time::Duration;
 
-use crate::posthog;
+use crate::telemetry;
 
 pub fn install_homebrew() {
     // Macos Only
@@ -13,7 +14,7 @@ pub fn install_homebrew() {
 
     if !test_brew_cmd.status.success() {
         println!("Installing Homebrew");
-        let start = posthog::now();
+        let start = telemetry::now();
 
         let curl_cmd = r#"/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)""#;
         let _output = Command::new("sh")
@@ -47,95 +48,15 @@ pub fn install_homebrew() {
 
         if !after_install_test_cmd.status.success() {
             eprintln!("Error: Homebrew");
-            let mut props = serde_json::Map::new();
-            props.insert(
-                "tool".to_string(),
-                serde_json::Value::String("homebrew".to_string()),
-            );
-            posthog::capture("tool_install_error", props);
+            telemetry::tool_failed("homebrew", "latest", "installation failed");
         } else {
             println!("Successfully installed Homebrew");
-            let mut props = serde_json::Map::new();
-            props.insert(
-                "tool".to_string(),
-                serde_json::Value::String("homebrew".to_string()),
-            );
-            props.insert(
-                "duration_ms".to_string(),
-                serde_json::Value::from(posthog::ms(start.elapsed()) as u64),
-            );
-            posthog::capture("tool_installed", props);
+            telemetry::tool_installed("homebrew", "latest", "shell", start.elapsed());
         }
     } else {
         println!("Homebrew is already installed");
     }
 }
-
-// pub fn install_nvm_mac() {
-//     match Command::new("nvm").arg("--version").output() {
-//         Ok(output) => {
-//             if output.status.success() {
-//                 println!("NVM is already installed!");
-//             }
-//         }
-//         Err(_) => {
-//             // Attempt to install using brew
-//             let output = Command::new("brew")
-//                 .arg("install")
-//                 .arg("nvm")
-//                 .output()
-//                 .unwrap_or_else(|_| panic!("Failed to execute command"));
-//
-//             // Check if the install command was successful
-//             if output.status.success() {
-//                 println!("Successfully installed NVM!");
-//             } else {
-//                 println!("Failed to install NVM...");
-//                 if let Ok(output_str) = str::from_utf8(&output.stderr) {
-//                     println!("Error: {}", output_str);
-//                 }
-//             }
-//         }
-//     }
-// }
-
-// pub fn install_pnpm() {
-//     let pnpm_version = "9.2.0";
-//
-//     let test_pnpm_output = Command::new("pnpm")
-//         .arg("--version")
-//         .output()
-//         .expect("Failed to execute command");
-//
-//     // If pnpm not found or any other problem occurred
-//     if !test_pnpm_output.status.success() {
-//         println!("Installing PNPM {}", pnpm_version);
-//
-//         let npm_install_output = Command::new("npm")
-//             .arg("install")
-//             .arg("-g")
-//             .arg(format!("pnpm@{}", pnpm_version))
-//             .output()
-//             .expect("Failed to execute command");
-//
-//         // Check if npm install command was successful
-//         if npm_install_output.status.success() {
-//             let after_install_test_output = Command::new("pnpm")
-//                 .arg("--version")
-//                 .output()
-//                 .expect("Failed to execute command");
-//
-//             // If pnpm command now runs properly
-//             if after_install_test_output.status.success() {
-//                 println!("Successfully installed PNPM {}", pnpm_version);
-//             } else {
-//                 println!("Error: PNPM");
-//             }
-//         }
-//     } else {
-//         println!("PNPM {} is already installed", pnpm_version);
-//     }
-// }
 
 pub fn install_docker() {
     let check_homebrew_output = Command::new("brew")
@@ -153,7 +74,7 @@ pub fn install_docker() {
         // If docker not found or any other problem occurred
         if !test_docker_output.status.success() {
             println!("Installing Docker");
-            let start = posthog::now();
+            let start = telemetry::now();
             let brew_install_output = Command::new("brew")
                 .arg("install")
                 .arg("docker")
@@ -171,32 +92,13 @@ pub fn install_docker() {
                 // If Docker now runs properly
                 if after_install_test_output.status.success() {
                     println!("Successfully installed Docker");
-                    let mut props = serde_json::Map::new();
-                    props.insert(
-                        "tool".to_string(),
-                        serde_json::Value::String("docker".to_string()),
-                    );
-                    props.insert(
-                        "duration_ms".to_string(),
-                        serde_json::Value::from(posthog::ms(start.elapsed()) as u64),
-                    );
-                    posthog::capture("tool_installed", props);
+                    telemetry::tool_installed("docker", "latest", "brew", start.elapsed());
                 } else {
                     println!("Error: Docker");
-                    let mut props = serde_json::Map::new();
-                    props.insert(
-                        "tool".to_string(),
-                        serde_json::Value::String("docker".to_string()),
-                    );
-                    posthog::capture("tool_install_error", props);
+                    telemetry::tool_failed("docker", "latest", "post-install test failed");
                 }
             } else {
-                let mut props = serde_json::Map::new();
-                props.insert(
-                    "tool".to_string(),
-                    serde_json::Value::String("docker".to_string()),
-                );
-                posthog::capture("tool_install_error", props);
+                telemetry::tool_failed("docker", "latest", "brew install failed");
             }
         } else {
             println!("Docker is already installed");
@@ -208,7 +110,7 @@ pub fn install_docker() {
 
 // TODO: figure out command and process to start from cli
 pub fn start_docker_infra() {
-    let start = posthog::now();
+    let start = telemetry::now();
     let docker_compose_output = Command::new("docker-compose")
         .arg("-f")
         .arg("./docker//docker-compose.yml")
@@ -219,22 +121,17 @@ pub fn start_docker_infra() {
 
     if docker_compose_output.status.success() {
         println!("Successfully started Docker Infrastructure");
-        let mut props = serde_json::Map::new();
-        props.insert(
-            "duration_ms".to_string(),
-            serde_json::Value::from(posthog::ms(start.elapsed()) as u64),
-        );
-        posthog::capture("docker_infra_up", props);
+        telemetry::service_operation("docker-compose", "up", true);
     } else {
         let err = String::from_utf8_lossy(&docker_compose_output.stderr).to_string();
         eprintln!(
             "An error occurred: \n\t {}. \nPlease run this from the root of your repository.",
             err
         );
-        let mut props = serde_json::Map::new();
-        props.insert("stderr".to_string(), serde_json::Value::String(err));
-        posthog::capture("docker_infra_error", props);
+        telemetry::service_operation("docker-compose", "up", false);
     }
+    // Track duration even if unused for now
+    let _ = start.elapsed();
 }
 
 // Minimal stubs to satisfy references from setup.rs during tests

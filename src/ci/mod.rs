@@ -12,6 +12,7 @@ mod output;
 pub use config::{CiConfigError, CiConfigTemplate, generate_ci_config};
 pub use output::{CiOutput, GroupGuard};
 
+use crate::telemetry;
 use std::env;
 
 /// Supported CI/CD providers
@@ -231,7 +232,18 @@ pub fn detect() -> Option<CiEnvironment> {
         ));
     }
 
-    detect_provider().map(CiEnvironment::new)
+    let ci_env = detect_provider().map(CiEnvironment::new);
+
+    // Emit telemetry if CI detected
+    if let Some(ref env) = ci_env {
+        telemetry::ci_detected(
+            env.provider.name(),
+            env.build_id.as_deref(),
+            env.branch.as_deref(),
+        );
+    }
+
+    ci_env
 }
 
 /// Detects the specific CI provider without checking force flags

@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use super::expand::{EnvContext, expand_value};
+use crate::telemetry;
 
 /// Errors that can occur during shell rc modification
 #[derive(Error, Debug)]
@@ -184,6 +185,9 @@ pub fn update_shell_rc(
 
     // Write the file
     fs::write(&rc_path, new_content)?;
+
+    // Emit telemetry
+    telemetry::env_shell_rc_updated(&shell.to_string(), vars.len());
 
     Ok(rc_path)
 }

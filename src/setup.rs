@@ -8,15 +8,15 @@ use inquire::Select;
 
 use crate::os_setup::set_up_os;
 use crate::outputs::{error_message, installing_dependency, success_message};
-use crate::posthog;
 use crate::provisioner::{
     check_and_install_git, install_docker, install_homebrew, start_docker_infra,
 };
+use crate::telemetry;
 
 // Main function
 pub fn setup() {
     const PLATFORM: &str = env::consts::OS;
-    let start = posthog::now();
+    let start = telemetry::now();
 
     println!("Detecting Platform is: {}\n", PLATFORM);
 
@@ -43,12 +43,15 @@ pub fn setup() {
     refresh_shell(PLATFORM);
 
     // Emit setup_complete with duration
-    let mut props = serde_json::Map::new();
-    props.insert(
-        "duration_ms".to_string(),
-        serde_json::Value::from(posthog::ms(start.elapsed()) as u64),
-    );
-    posthog::capture("setup_complete", props);
+    let summary = telemetry::SetupSummary {
+        tools_requested: 0, // Legacy setup - minimal tracking
+        tools_installed: 0,
+        tools_skipped: 0,
+        tools_failed: 0,
+        hooks_run: 0,
+        duration: start.elapsed(),
+    };
+    telemetry::setup_completed(&summary);
 }
 
 fn check_hard_dependencies(platform: &str) {

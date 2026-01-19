@@ -4,6 +4,7 @@
 
 use crate::config::Config;
 use crate::output::{ExitCode, Format, Outputable, colors, header, icons, subheader};
+use crate::telemetry;
 use crate::tools::common::PackageManager;
 use crate::tools::common::{has, run};
 use crate::tools::spec::{get_tool_install_info, get_tool_spec};
@@ -156,6 +157,9 @@ pub fn run_upgrade(
         .iter()
         .filter(|u| u.status == UpgradeStatus::Skipped || u.status == UpgradeStatus::AlreadyLatest)
         .count();
+
+    // Emit telemetry
+    telemetry::upgrade_result(upgraded_count, failed_count, skipped_count);
 
     UpgradeResult {
         tools: upgrades,

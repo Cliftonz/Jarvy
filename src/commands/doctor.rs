@@ -12,6 +12,7 @@
 
 use crate::config::Config;
 use crate::output::{ExitCode, Format, Outputable, colors, header, icons, subheader};
+use crate::telemetry;
 use crate::tools::common::{cmd_satisfies, has};
 use crate::tools::spec::{
     DependencyCheckResult, check_tool_dependencies, get_tool_default_hook, get_tool_dependencies,
@@ -393,6 +394,9 @@ pub fn run_doctor(config: Option<&Config>, specific_tools: Option<Vec<String>>) 
     } else {
         0
     };
+
+    // Emit telemetry
+    telemetry::doctor_completed(recommendations.len(), tools.len(), exit_code);
 
     DoctorResult {
         system,

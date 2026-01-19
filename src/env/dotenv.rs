@@ -14,6 +14,7 @@ use std::path::Path;
 use thiserror::Error;
 
 use super::expand::{EnvContext, expand_value};
+use crate::telemetry;
 
 /// Errors that can occur during .env file generation
 #[derive(Error, Debug)]
@@ -104,6 +105,9 @@ pub fn generate_dotenv(
     if config.add_to_gitignore {
         add_to_gitignore(path)?;
     }
+
+    // Emit telemetry (count secrets as 0 since we don't track them separately here)
+    telemetry::env_dotenv_generated(vars.len(), 0);
 
     Ok(())
 }

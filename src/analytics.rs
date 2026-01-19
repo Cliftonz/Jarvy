@@ -8,99 +8,11 @@
 
 use std::env;
 use std::io::Write;
-use tracing::field::Visit;
-use tracing::{Event, Level, Subscriber};
+use tracing::Level;
 use tracing_subscriber::Layer;
 use tracing_subscriber::filter::{FilterFn, LevelFilter};
-use tracing_subscriber::layer::{Context, SubscriberExt};
+use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::Registry;
-
-// Layer that forwards ERROR events to PostHog
-struct PosthogErrorLayer;
-
-struct EventVisitor {
-    fields: Vec<(String, String)>,
-}
-
-impl Visit for EventVisitor {
-    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        self.fields
-            .push((field.name().to_string(), format!("{:?}", value)));
-    }
-    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-        self.fields
-            .push((field.name().to_string(), value.to_string()));
-    }
-}
-
-impl<S> Layer<S> for PosthogErrorLayer
-where
-    S: Subscriber,
-{
-    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-        if event.metadata().level() == &Level::ERROR {
-            let mut visitor = EventVisitor { fields: Vec::new() };
-            event.record(&mut visitor);
-            let fields_for_msg = visitor.fields.clone();
-
-            // Prefer the `message` field if present
-            let mut message = None;
-            for (k, v) in &visitor.fields {
-                if k == "message" {
-                    message = Some(v.clone());
-                    break;
-                }
-            }
-            let msg = message.unwrap_or_else(|| {
-                // Fallback: join k=v pairs
-                let parts: Vec<String> = fields_for_msg
-                    .into_iter()
-                    .map(|(k, v)| format!("{}={}", k, v))
-                    .collect();
-                if parts.is_empty() {
-                    "unknown error".to_string()
-                } else {
-                    parts.join(", ")
-                }
-            });
-
-            // Build context from metadata and fields
-            let meta = event.metadata();
-            let mut ctx = serde_json::Map::new();
-            ctx.insert(
-                "level".to_string(),
-                serde_json::Value::String(meta.level().to_string()),
-            );
-            ctx.insert(
-                "target".to_string(),
-                serde_json::Value::String(meta.target().to_string()),
-            );
-            if let Some(m) = meta.module_path() {
-                ctx.insert(
-                    "module".to_string(),
-                    serde_json::Value::String(m.to_string()),
-                );
-            }
-            if let Some(f) = meta.file() {
-                ctx.insert("file".to_string(), serde_json::Value::String(f.to_string()));
-            }
-            if let Some(l) = meta.line() {
-                ctx.insert("line".to_string(), serde_json::Value::from(l as u64));
-            }
-            let fields_obj: serde_json::Map<String, serde_json::Value> = visitor
-                .fields
-                .into_iter()
-                .map(|(k, v)| (k, serde_json::Value::String(v)))
-                .collect();
-            if !fields_obj.is_empty() {
-                ctx.insert("fields".to_string(), serde_json::Value::Object(fields_obj));
-            }
-
-            // Send to PostHog (no-op if client disabled)
-            crate::posthog::capture_exception(&msg, "tracing_error", None, ctx);
-        }
-    }
-}
 
 pub fn init_logging(enable_analytics: bool) {
     // Always log to console: stdout for non-errors, stderr for errors
@@ -126,7 +38,6 @@ pub fn init_logging(enable_analytics: bool) {
     let subscriber = Registry::default()
         .with(stdout_non_error)
         .with(stderr_errors)
-        .with(PosthogErrorLayer)
         .with(otel_layer_opt);
 
     tracing::subscriber::set_global_default(subscriber).expect("setting tracing default failed");
@@ -166,7 +77,6 @@ pub fn send_otlp_smoke_probe() {
     if let Ok(mut s) = std::net::TcpStream::connect(("::1", 4318)) {
         let _ = s.write_all(req);
         let _ = s.flush();
-        return;
     }
 }
 

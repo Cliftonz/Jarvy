@@ -4,6 +4,7 @@
 
 use crate::config::Config;
 use crate::output::{ExitCode, Format, Outputable, colors, header, icons, subheader};
+use crate::telemetry;
 use crate::tools::common::{cmd_satisfies, has};
 use crate::tools::spec::{
     DependencyCheckResult, check_tool_dependencies, get_tool_default_hook, get_tool_dependencies,
@@ -411,6 +412,14 @@ pub fn run_diff(config: &Config, changes_only: bool) -> DiffResult {
             },
         });
     }
+
+    // Emit telemetry
+    telemetry::diff_executed(
+        to_install.len(),
+        to_update.len(),
+        satisfied.len(),
+        unknown.len(),
+    );
 
     DiffResult {
         to_install,

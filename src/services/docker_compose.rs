@@ -4,6 +4,7 @@ use super::{
     ServiceBackend, ServiceBackendOps, ServiceError, ServiceResult, ServiceStatus, command_exists,
     run_command,
 };
+use crate::telemetry;
 use std::path::{Path, PathBuf};
 
 /// Docker Compose backend implementation
@@ -74,12 +75,14 @@ impl ServiceBackendOps for DockerComposeBackend {
         let output = run_command(cmd, &args_ref, working_dir)?;
 
         if output.status.success() {
+            telemetry::service_operation("docker-compose", "start", true);
             Ok(ServiceResult {
                 success: true,
                 message: "Services started successfully".to_string(),
                 backend: ServiceBackend::DockerCompose,
             })
         } else {
+            telemetry::service_operation("docker-compose", "start", false);
             Err(ServiceError::CommandFailed {
                 backend: ServiceBackend::DockerCompose,
                 operation: "start",
@@ -109,12 +112,14 @@ impl ServiceBackendOps for DockerComposeBackend {
         let output = run_command(cmd, &args_ref, working_dir)?;
 
         if output.status.success() {
+            telemetry::service_operation("docker-compose", "stop", true);
             Ok(ServiceResult {
                 success: true,
                 message: "Services stopped successfully".to_string(),
                 backend: ServiceBackend::DockerCompose,
             })
         } else {
+            telemetry::service_operation("docker-compose", "stop", false);
             Err(ServiceError::CommandFailed {
                 backend: ServiceBackend::DockerCompose,
                 operation: "stop",

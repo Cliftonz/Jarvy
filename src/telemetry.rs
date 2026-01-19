@@ -677,6 +677,49 @@ pub fn export_completed(tools_count: usize, format: &str) {
     );
 }
 
+/// Record diff executed
+pub fn diff_executed(to_install: usize, to_update: usize, satisfied: usize, unknown: usize) {
+    if !is_enabled() {
+        return;
+    }
+
+    tracing::info!(
+        event = "diff.executed",
+        to_install = %to_install,
+        to_update = %to_update,
+        satisfied = %satisfied,
+        unknown = %unknown,
+    );
+}
+
+/// Record upgrade result
+pub fn upgrade_result(upgraded: usize, failed: usize, skipped: usize) {
+    if !is_enabled() {
+        return;
+    }
+
+    tracing::info!(
+        event = "upgrade.result",
+        upgraded = %upgraded,
+        failed = %failed,
+        skipped = %skipped,
+    );
+}
+
+/// Record doctor result
+pub fn doctor_completed(issues_count: usize, tools_count: usize, exit_code: i32) {
+    if !is_enabled() {
+        return;
+    }
+
+    tracing::info!(
+        event = "doctor.completed",
+        issues_count = %issues_count,
+        tools_count = %tools_count,
+        exit_code = %exit_code,
+    );
+}
+
 // ============================================================================
 // Event Functions - Config
 // ============================================================================
@@ -819,6 +862,51 @@ pub fn env_shell_rc_updated(shell: &str, vars_count: usize) {
         shell = %shell,
         vars_count = %vars_count,
     );
+}
+
+// ============================================================================
+// Tracing Spans (T8)
+// ============================================================================
+
+/// Create a span for setup operations
+#[macro_export]
+macro_rules! telemetry_span {
+    ($name:expr) => {
+        tracing::info_span!($name)
+    };
+    ($name:expr, $($field:tt)*) => {
+        tracing::info_span!($name, $($field)*)
+    };
+}
+
+/// Create a setup span
+pub fn span_setup(tools_count: usize) -> tracing::Span {
+    tracing::info_span!("jarvy.setup", tools_count = tools_count, platform = %env::consts::OS)
+}
+
+/// Create a version check span
+pub fn span_version_check(tool: &str) -> tracing::Span {
+    tracing::info_span!("jarvy.version_check", tool = %tool)
+}
+
+/// Create an install span
+pub fn span_install(tool: &str, version: &str) -> tracing::Span {
+    tracing::info_span!("jarvy.install", tool = %tool, version = %version)
+}
+
+/// Create a hook span
+pub fn span_hook(hook_name: &str, hook_type: &str) -> tracing::Span {
+    tracing::info_span!("jarvy.hook", hook_name = %hook_name, hook_type = %hook_type)
+}
+
+/// Create a command span
+pub fn span_command(command: &str) -> tracing::Span {
+    tracing::info_span!("jarvy.command", command = %command)
+}
+
+/// Create a service span
+pub fn span_service(backend: &str, action: &str) -> tracing::Span {
+    tracing::info_span!("jarvy.service", backend = %backend, action = %action)
 }
 
 // ============================================================================

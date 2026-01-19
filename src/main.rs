@@ -6,6 +6,7 @@ use crate::env::{
 };
 use crate::hooks::{Hook, HookConfig, HookEnv};
 use crate::init::initialize;
+use crate::onboarding::{is_first_run, mark_initialized, show_welcome_banner, WelcomeBannerConfig};
 use crate::report::{Status, ToolReport, collect_reports};
 use crate::setup::setup;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
@@ -27,11 +28,13 @@ mod hooks;
 mod init;
 mod lock;
 mod mcp;
+mod network;
 mod observability;
+mod onboarding;
 mod os_setup;
 mod output;
 mod outputs;
-mod posthog;
+// PostHog removed in PRD-022 - now using unified telemetry module
 mod provisioner;
 mod report;
 mod roles;
@@ -39,6 +42,7 @@ mod services;
 mod setup;
 mod team;
 mod telemetry;
+mod templates;
 mod tools;
 
 #[derive(Parser)]
@@ -273,6 +277,21 @@ enum Commands {
         #[clap(short = 'F', long = "format", default_value = "pretty")]
         output_format: String,
     },
+    /// Create a new jarvy.toml configuration file interactively
+    Init {
+        /// Use a predefined template (react, vue, go-api, rust-cli, etc.)
+        #[clap(short, long)]
+        template: Option<String>,
+        /// Run without interactive prompts (requires --template)
+        #[clap(long)]
+        non_interactive: bool,
+        /// Output to stdout instead of file
+        #[clap(long)]
+        stdout: bool,
+        /// Output file path (default: jarvy.toml)
+        #[clap(short, long)]
+        output: Option<String>,
+    },
     /// Search available tools that Jarvy can install
     Search {
         /// Search query (tool name or partial match)
@@ -310,6 +329,11 @@ enum Commands {
         /// Show installation instructions
         #[clap(long)]
         instructions: bool,
+    },
+    /// Browse and use pre-built configuration templates
+    Templates {
+        #[clap(subcommand)]
+        action: TemplatesSubcommand,
     },
     /// Manage telemetry settings (OTEL endpoint, signals)
     Telemetry {
@@ -362,9 +386,40 @@ enum Commands {
         #[clap(subcommand)]
         action: ConfigAction,
     },
+    /// Guided quickstart experience for new users
+    Quickstart {
+        /// Run without interactive prompts
+        #[clap(long)]
+        non_interactive: bool,
+        /// Skip system check step
+        #[clap(long)]
+        skip_check: bool,
+    },
     /// Catch-all for unknown subcommands and their args
     #[clap(external_subcommand)]
     External(Vec<String>),
+}
+
+#[derive(Subcommand)]
+enum TemplatesSubcommand {
+    /// List all available templates
+    List {},
+    /// Show details of a specific template
+    Show {
+        /// Template name to show
+        name: String,
+    },
+    /// Use a template to create jarvy.toml
+    Use {
+        /// Template name to use
+        name: String,
+        /// Output file path (default: jarvy.toml)
+        #[clap(short, long)]
+        output: Option<String>,
+        /// Run setup immediately after creating config
+        #[clap(long)]
+        setup: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -579,14 +634,12 @@ fn main() {
 
     init_logging(global_config.settings.telemetry);
 
-    // Initialize PostHog client (no-op if disabled or no API key)
-    // Note: PostHog is being deprecated in favor of unified OTEL telemetry (PRD-022)
-    let fingerprint = global_config
+    // Machine fingerprint for telemetry (used if needed for user identification)
+    let _fingerprint = global_config
         .settings
         .fingerprint
         .clone()
         .unwrap_or_else(|| "unknown".to_string());
-    posthog::init(global_config.settings.telemetry, fingerprint.clone());
 
     // Initialize unified telemetry (OTEL-based)
     // Merge config file settings with environment variable overrides
@@ -605,76 +658,12 @@ fn main() {
     }
     telemetry::init(telemetry_config);
 
-    // Send a cli_start event and set global analytics context
-    {
-        let cmd_name = match &cli.command {
-            Some(Commands::Setup { .. }) => "setup",
-            Some(Commands::Bootstrap { .. }) => "bootstrap",
-            Some(Commands::Configure { .. }) => "configure",
-            Some(Commands::Get { .. }) => "get",
-            Some(Commands::Tools { .. }) => "tools",
-            Some(Commands::Env { .. }) => "env",
-            Some(Commands::CiConfig { .. }) => "ci-config",
-            Some(Commands::CiInfo { .. }) => "ci-info",
-            Some(Commands::Services { .. }) => "services",
-            Some(Commands::Doctor { .. }) => "doctor",
-            Some(Commands::Diff { .. }) => "diff",
-            Some(Commands::Export { .. }) => "export",
-            Some(Commands::Upgrade { .. }) => "upgrade",
-            Some(Commands::Search { .. }) => "search",
-            Some(Commands::Validate { .. }) => "validate",
-            Some(Commands::Completions { .. }) => "completions",
-            Some(Commands::Telemetry { .. }) => "telemetry",
-            Some(Commands::Mcp { .. }) => "mcp",
-            Some(Commands::Diagnose { .. }) => "diagnose",
-            Some(Commands::Team { .. }) => "team",
-            Some(Commands::Roles { .. }) => "roles",
-            Some(Commands::Lock { .. }) => "lock",
-            Some(Commands::Config { .. }) => "config",
-            Some(Commands::External(..)) => "external",
-            None => "interactive",
-        };
-        // Set global context for subsequent analytics/error events
-        let mut ctx = serde_json::Map::new();
-        ctx.insert(
-            "command".to_string(),
-            serde_json::Value::String(cmd_name.to_string()),
-        );
-        ctx.insert(
-            "telemetry_enabled".to_string(),
-            serde_json::Value::Bool(global_config.settings.telemetry),
-        );
-        let args_json = std::env::args()
-            .skip(1)
-            .map(serde_json::Value::String)
-            .collect::<Vec<_>>();
-        ctx.insert("args".to_string(), serde_json::Value::Array(args_json));
-        posthog::set_context_map(ctx);
-
-        // Emit cli_start
-        let mut props = serde_json::Map::new();
-        props.insert(
-            "command".to_string(),
-            serde_json::Value::String(cmd_name.to_string()),
-        );
-        posthog::capture("cli_start", props);
-    }
-
-    // Install panic hook to report CLI errors to PostHog and stderr
+    // Install panic hook to log errors
     {
         std::panic::set_hook(Box::new(|info| {
-            // Print to stderr
             eprintln!("Jarvy panic: {}", info);
-
-            // Send to PostHog using $exception format
-            let bt = std::backtrace::Backtrace::capture();
-            let stack_str = format!("{}", bt);
-            let mut ctx = serde_json::Map::new();
-            ctx.insert(
-                "kind".to_string(),
-                serde_json::Value::String("panic".to_string()),
-            );
-            crate::posthog::capture_exception(&format!("{}", info), "panic", Some(stack_str), ctx);
+            // Note: OTEL telemetry is flush-at-exit, panic info captured by tracing
+            tracing::error!(event = "panic", message = %info);
         }));
     }
 
@@ -818,27 +807,16 @@ fn main() {
                 );
             }
 
-            // Log unknown tools
+            // Log unknown tools - critical for MCP feedback loop
             for (name, version) in &version_check.unknown {
                 let msg = format!(
                     "We do not currently have support for {} package but we have logged it and will be adding it soon.",
                     name
                 );
-                if posthog::telemetry_enabled() {
-                    let mut props = serde_json::Map::new();
-                    props.insert("tool".to_string(), serde_json::Value::String(name.clone()));
-                    props.insert(
-                        "version_hint".to_string(),
-                        serde_json::Value::String(version.clone()),
-                    );
-                    props.insert(
-                        "source".to_string(),
-                        serde_json::Value::String("config".to_string()),
-                    );
-                    posthog::capture_error("unknown_tool_in_config", &msg, props);
-                    eprintln!("{}", msg);
-                } else {
-                    eprintln!("{}", msg);
+                eprintln!("{}", msg);
+                // Emit telemetry for unknown tool (used by MCP feedback)
+                telemetry::tool_not_supported(name, Some(version), telemetry::Source::Config);
+                if !telemetry::is_enabled() {
                     eprintln!(
                         "Telemetry is disabled. Please consider creating a feature request here: https://github.com/bearbinary/Jarvy/issues/new"
                     );
@@ -887,10 +865,19 @@ fn main() {
                     );
                 }
             } else {
+                // Emit setup_started event
+                telemetry::setup_started(version_check.needs_install.len());
+                let setup_start = telemetry::now();
+
                 // Batch install by package manager
                 for (pm, packages) in &tool_groups.by_package_manager {
                     if packages.is_empty() {
                         continue;
+                    }
+
+                    // Emit tool_requested for each tool in the batch
+                    for (tool_name, _, version) in packages {
+                        telemetry::tool_requested(tool_name, version, telemetry::Source::Config);
                     }
 
                     let package_names: Vec<&str> =
@@ -902,8 +889,10 @@ fn main() {
                         package_names.join(", ")
                     );
 
+                    let install_start = telemetry::now();
                     match tools::common::PkgOps::batch_install(*pm, &package_names, None) {
                         Ok(result) => {
+                            let batch_duration = install_start.elapsed();
                             // Track successful installs
                             for pkg_name in &result.succeeded {
                                 // Find the tool name for this package
@@ -913,6 +902,12 @@ fn main() {
                                     println!("Successfully installed {} ({})", tool_name, version);
                                     successfully_installed
                                         .push((tool_name.clone(), version.clone()));
+                                    telemetry::tool_installed(
+                                        tool_name,
+                                        version,
+                                        &format!("{:?}", pm),
+                                        batch_duration,
+                                    );
                                 }
                             }
                             // Log failures
@@ -925,22 +920,7 @@ fn main() {
                                         tool_name, version, error
                                     );
                                     eprintln!("{}", msg);
-                                    if posthog::telemetry_enabled() {
-                                        let mut props = serde_json::Map::new();
-                                        props.insert(
-                                            "tool".to_string(),
-                                            serde_json::Value::String(tool_name.clone()),
-                                        );
-                                        props.insert(
-                                            "version_hint".to_string(),
-                                            serde_json::Value::String(version.clone()),
-                                        );
-                                        props.insert(
-                                            "error".to_string(),
-                                            serde_json::Value::String(error.clone()),
-                                        );
-                                        posthog::capture_error("tool_install_failed", &msg, props);
-                                    }
+                                    telemetry::tool_failed(tool_name, version, error);
                                 }
                             }
                         }
@@ -952,22 +932,7 @@ fn main() {
                                     tool_name, version, e
                                 );
                                 eprintln!("{}", msg);
-                                if posthog::telemetry_enabled() {
-                                    let mut props = serde_json::Map::new();
-                                    props.insert(
-                                        "tool".to_string(),
-                                        serde_json::Value::String(tool_name.clone()),
-                                    );
-                                    props.insert(
-                                        "version_hint".to_string(),
-                                        serde_json::Value::String(version.clone()),
-                                    );
-                                    props.insert(
-                                        "error".to_string(),
-                                        serde_json::Value::String(format!("{:?}", e)),
-                                    );
-                                    posthog::capture_error("tool_install_failed", &msg, props);
-                                }
+                                telemetry::tool_failed(tool_name, version, &format!("{:?}", e));
                             }
                         }
                     }
@@ -977,6 +942,11 @@ fn main() {
                 // User-space installers (nvm, rustup, etc.) don't require system locks
                 // and can safely run in parallel
                 if !tool_groups.custom_install.is_empty() {
+                    // Emit tool_requested for each custom tool
+                    for (name, version) in &tool_groups.custom_install {
+                        telemetry::tool_requested(name, version, telemetry::Source::Config);
+                    }
+
                     let custom_count = tool_groups.custom_install.len();
                     let effective_jobs = parallel_jobs.min(custom_count);
 
@@ -1043,28 +1013,9 @@ fn main() {
                         }
 
                         // Report errors to telemetry
-                        if posthog::telemetry_enabled() {
-                            if let Ok(guard) = error_collector.lock() {
-                                for (name, version, error) in guard.iter() {
-                                    let msg = format!(
-                                        "Failed to install {} ({}): {}",
-                                        name, version, error
-                                    );
-                                    let mut props = serde_json::Map::new();
-                                    props.insert(
-                                        "tool".to_string(),
-                                        serde_json::Value::String(name.clone()),
-                                    );
-                                    props.insert(
-                                        "version_hint".to_string(),
-                                        serde_json::Value::String(version.clone()),
-                                    );
-                                    props.insert(
-                                        "error".to_string(),
-                                        serde_json::Value::String(error.clone()),
-                                    );
-                                    posthog::capture_error("tool_install_failed", &msg, props);
-                                }
+                        if let Ok(guard) = error_collector.lock() {
+                            for (name, version, error) in guard.iter() {
+                                telemetry::tool_failed(name, version, error);
                             }
                         }
                     } else {
@@ -1086,22 +1037,7 @@ fn main() {
                                         name, version, e
                                     );
                                     eprintln!("{}", msg);
-                                    if posthog::telemetry_enabled() {
-                                        let mut props = serde_json::Map::new();
-                                        props.insert(
-                                            "tool".to_string(),
-                                            serde_json::Value::String(name.clone()),
-                                        );
-                                        props.insert(
-                                            "version_hint".to_string(),
-                                            serde_json::Value::String(version.clone()),
-                                        );
-                                        props.insert(
-                                            "error".to_string(),
-                                            serde_json::Value::String(format!("{:?}", e)),
-                                        );
-                                        posthog::capture_error("tool_install_failed", &msg, props);
-                                    }
+                                    telemetry::tool_failed(name, version, &format!("{:?}", e));
                                 }
                             }
                         }
@@ -1372,6 +1308,14 @@ fn main() {
                 if hooks_config.post_setup.is_some() {
                     println!("  - post_setup: executed");
                 }
+            }
+
+            // Emit setup_completed telemetry (note: setup_start may not exist in dry-run)
+            // We only emit this if there was an actual setup (not dry-run)
+
+            // Mark as initialized after successful setup (first-run complete)
+            if !dry_run {
+                let _ = mark_initialized();
             }
         }
         Some(Commands::Bootstrap {}) => {
@@ -1688,7 +1632,7 @@ fn main() {
                 println!("\nEnvironment configuration applied:");
                 println!("  - Variables: {}", vars.len());
                 if secrets_count > 0 {
-                    println!("  - Secrets: {}", secrets_count);
+                    println!("  - Secrets: configured");
                 }
             }
         }
@@ -2009,6 +1953,29 @@ fn main() {
             use crate::output::Outputable;
             std::process::exit(result.exit_code().code());
         }
+        Some(Commands::Init {
+            template,
+            non_interactive,
+            stdout,
+            output,
+        }) => {
+            let options = commands::init::InitOptions {
+                template: template.clone(),
+                non_interactive: *non_interactive,
+                stdout: *stdout,
+                output: output.as_ref().map(|s| std::path::PathBuf::from(s)),
+            };
+
+            let result = commands::init::run_init(options);
+
+            use crate::output::Outputable;
+            let content = result.to_human();
+            if !content.is_empty() {
+                print!("{}", content);
+            }
+
+            std::process::exit(result.exit_code().code());
+        }
         Some(Commands::Search {
             query,
             all,
@@ -2085,6 +2052,55 @@ fn main() {
             let completions =
                 commands::completions::generate_completions_string(&mut cmd, shell_type);
             println!("{}", completions);
+        }
+        Some(Commands::Templates { action }) => {
+            use crate::output::Outputable;
+            match action {
+                TemplatesSubcommand::List {} => {
+                    let result = commands::templates::list_templates();
+                    println!("{}", result.to_human());
+                    std::process::exit(result.exit_code().code());
+                }
+                TemplatesSubcommand::Show { name } => {
+                    let result = commands::templates::show_template(name);
+                    println!("{}", result.to_human());
+                    std::process::exit(result.exit_code().code());
+                }
+                TemplatesSubcommand::Use { name, output, setup } => {
+                    let output_path = output.as_ref().map(|s| std::path::PathBuf::from(s));
+                    let result = commands::templates::use_template(name, output_path);
+                    println!("{}", result.to_human());
+
+                    // If setup requested and file was created, run setup
+                    if *setup && result.created {
+                        println!("\nRunning setup...\n");
+                        // TODO: Call setup command
+                    }
+
+                    std::process::exit(result.exit_code().code());
+                }
+            }
+        }
+        Some(Commands::Quickstart {
+            non_interactive,
+            skip_check,
+        }) => {
+            let options = commands::quickstart::QuickstartOptions {
+                non_interactive: *non_interactive,
+                skip_check: *skip_check,
+            };
+
+            let result = commands::quickstart::run_quickstart(options);
+
+            use crate::output::Outputable;
+            println!("{}", result.to_human());
+
+            // Mark as initialized after quickstart (first-run complete)
+            if !result.aborted {
+                let _ = mark_initialized();
+            }
+
+            std::process::exit(result.exit_code().code());
         }
         Some(Commands::Telemetry { action }) => {
             handle_telemetry_command(action, &global_config);
@@ -2463,6 +2479,64 @@ fn user_select() {
         return;
     }
 
+    // Check if this is the first run
+    if is_first_run() {
+        // Show welcome banner for first-time users
+        let use_colors = std::io::IsTerminal::is_terminal(&std::io::stdout());
+        show_welcome_banner(&WelcomeBannerConfig {
+            enabled: true,
+            use_colors,
+        });
+
+        // Offer first-run options
+        let options = vec![
+            "Run quickstart (guided setup)",
+            "Create a config (jarvy init)",
+            "Browse templates",
+            "Skip for now",
+        ];
+
+        let selection: Result<&str, InquireError> =
+            Select::new("How would you like to get started?", options).prompt();
+
+        match selection {
+            Ok(choice) => match choice {
+                "Run quickstart (guided setup)" => {
+                    let options = commands::quickstart::QuickstartOptions::default();
+                    let result = commands::quickstart::run_quickstart(options);
+                    use crate::output::Outputable;
+                    println!("{}", result.to_human());
+                    // Mark as initialized after quickstart
+                    let _ = mark_initialized();
+                }
+                "Create a config (jarvy init)" => {
+                    let options = commands::init::InitOptions::default();
+                    let result = commands::init::run_init(options);
+                    use crate::output::Outputable;
+                    print!("{}", result.to_human());
+                    // Mark as initialized after init
+                    let _ = mark_initialized();
+                }
+                "Browse templates" => {
+                    let result = commands::templates::list_templates();
+                    use crate::output::Outputable;
+                    println!("{}", result.to_human());
+                }
+                _ => {
+                    println!("\nYou can always run these later:");
+                    println!("  \x1b[36mjarvy quickstart\x1b[0m  - Guided setup");
+                    println!("  \x1b[36mjarvy init\x1b[0m        - Create a config");
+                    println!("  \x1b[36mjarvy templates\x1b[0m   - Browse templates\n");
+                }
+            },
+            Err(_) => {
+                println!("No choice was made");
+            }
+        }
+        return;
+    }
+
+    // Normal flow for returning users
     print_logo();
 
     println!("\t\tHi, I'm Jarvy! I'm here to help you get your development environment set up.");

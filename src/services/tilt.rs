@@ -4,6 +4,7 @@ use super::{
     ServiceBackend, ServiceBackendOps, ServiceError, ServiceResult, ServiceStatus, command_exists,
     run_command,
 };
+use crate::telemetry;
 use std::path::{Path, PathBuf};
 
 /// Tilt backend implementation
@@ -41,6 +42,7 @@ impl ServiceBackendOps for TiltBackend {
         let output = run_command("tilt", &args, working_dir)?;
 
         if output.status.success() {
+            telemetry::service_operation("tilt", "start", true);
             Ok(ServiceResult {
                 success: true,
                 message: "Tilt services started. Access dashboard at http://localhost:10350"
@@ -48,6 +50,7 @@ impl ServiceBackendOps for TiltBackend {
                 backend: ServiceBackend::Tilt,
             })
         } else {
+            telemetry::service_operation("tilt", "start", false);
             Err(ServiceError::CommandFailed {
                 backend: ServiceBackend::Tilt,
                 operation: "start",
@@ -73,12 +76,14 @@ impl ServiceBackendOps for TiltBackend {
         let output = run_command("tilt", &args, working_dir)?;
 
         if output.status.success() {
+            telemetry::service_operation("tilt", "stop", true);
             Ok(ServiceResult {
                 success: true,
                 message: "Tilt services stopped".to_string(),
                 backend: ServiceBackend::Tilt,
             })
         } else {
+            telemetry::service_operation("tilt", "stop", false);
             Err(ServiceError::CommandFailed {
                 backend: ServiceBackend::Tilt,
                 operation: "stop",

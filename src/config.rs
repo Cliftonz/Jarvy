@@ -7,6 +7,7 @@ use std::{fs, process};
 
 use crate::roles::definition::{RoleAssignment, RolesConfig};
 use crate::team::Extends;
+use crate::telemetry;
 use crate::tools::{Os, current_os};
 
 /// Default timeout for hooks in seconds (5 minutes)
@@ -280,6 +281,9 @@ pub struct Config {
     /// Role definitions section
     #[serde(default, rename = "roles")]
     pub roles_config: RolesConfig,
+    /// Network/proxy configuration
+    #[serde(default)]
+    pub network: crate::network::NetworkConfig,
 }
 
 #[derive(Deserialize, Debug, Default)]
@@ -325,15 +329,27 @@ impl Config {
     pub fn new(config_path: &str) -> Self {
         let config_content = match fs::read_to_string(config_path) {
             Ok(content) => content,
-            Err(_) => {
+            Err(e) => {
+                telemetry::config_parse_error(config_path, &e.to_string());
                 println!("Failed to read config file at: {}", config_path);
                 process::exit(crate::error_codes::CONFIG_ERROR);
             }
         };
 
-        match toml::from_str(&config_content) {
-            Ok(config) => config,
+        match toml::from_str::<Config>(&config_content) {
+            Ok(config) => {
+                // Emit telemetry on successful load
+                telemetry::config_loaded(
+                    config_path,
+                    config.tools.len(),
+                    config.has_hooks(),
+                    config.has_env(),
+                    config.services.enabled,
+                );
+                config
+            }
             Err(e) => {
+                telemetry::config_parse_error(config_path, &e.to_string());
                 println!("Failed to parse config file: {}", e);
                 process::exit(crate::error_codes::CONFIG_ERROR);
             }

@@ -3,6 +3,7 @@
 //! Detects installed tools and generates a valid jarvy.toml configuration.
 
 use crate::output::{ExitCode, Format, Outputable, colors};
+use crate::telemetry;
 use crate::tools::common::has;
 use crate::tools::spec::{get_tool_spec, iter_tools};
 use serde::Serialize;
@@ -151,6 +152,9 @@ pub fn export_tools(
     detected_tools.sort_by(|a, b| a.name.cmp(&b.name));
 
     let count = detected_tools.len();
+
+    // Emit telemetry
+    telemetry::export_completed(count, "toml");
 
     ExportResult {
         tools: detected_tools,

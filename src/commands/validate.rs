@@ -8,6 +8,7 @@
 //! - Duplicate tool entries
 
 use crate::output::{ExitCode, Format, Outputable, colors, header, icons};
+use crate::telemetry;
 use crate::tools::spec::{
     get_tool_dependencies, get_tool_flexible_dependencies, get_tool_spec, list_tool_names,
 };
@@ -200,7 +201,12 @@ pub fn validate_config(path: &str, strict: bool) -> ValidationResult {
         }
     }
 
-    build_result(path, issues, strict)
+    let result = build_result(path, issues, strict);
+
+    // Emit telemetry
+    telemetry::validate_result(result.error_count, result.warning_count);
+
+    result
 }
 
 fn build_result(path: &str, issues: Vec<ValidationIssue>, strict: bool) -> ValidationResult {

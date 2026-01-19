@@ -27,13 +27,17 @@
 | PRD-012 | Release Distribution | 2026-01-15 | Homebrew, crates.io, APT, RPM, AUR, winget, Chocolatey, install scripts |
 | PRD-020 | Security Scanning | 2026-01-16 | SAST, SBOM, Sigstore signing, OpenSSF Scorecard, pre-commit hooks |
 | PRD-016 | Developer Experience Commands | 2026-01-16 | doctor, diff, export, upgrade, search, validate, completions |
-| PRD-022 | Remote Telemetry | 2026-01-16 | Unified OTEL module, `jarvy telemetry` subcommand, CI-aware |
+| PRD-022 | Remote Telemetry | 2026-01-18 | Unified OTEL module, PostHog removed, hooks/services/DX commands/config/CI/env instrumented |
 | PRD-021 | MCP Server | 2026-01-16 | JSON-RPC 2.0, 5 tools, 3 resources, 2 prompts, rate limiting, audit |
 | PRD-027 | Observability & Debugging | 2026-01-16 | Structured logging, profiler, sanitizer, `jarvy diagnose`, network tracing |
 | PRD-015 | Config Validation & Remote Loading | 2026-01-16 | `jarvy validate`, `--from URL`, `--header`, 1MB size limit |
-| PRD-013 | Expand Tool Coverage | 2026-01-17 | 156 tools total, 35 new tools added |
+| PRD-013 | Expand Tool Coverage | 2026-01-18 | 174 tools total, Phase 1-4 complete |
 | PRD-033 | Role-Based Configurations | 2026-01-17 | Role inheritance, `jarvy roles list/show/diff`, `--role` flag |
 | PRD-034 | Enhanced Dependency System | 2026-01-18 | `depends_on` (strict) + `depends_on_one_of` (flexible), doctor/diff/validate integration, --ignore-missing-deps flag |
+| PRD-032 | Support & Community Infrastructure | 2026-01-18 | FAQ system, contributors CLI, discussion templates, 22 integration tests |
+| PRD-018 | Quality and Testing Infrastructure | 2026-01-18 | Coverage (cargo-llvm-cov + Codecov), proptest, cargo-fuzz, criterion benchmarks, mutation testing |
+| PRD-019 | Corporate Proxy Support | 2026-01-18 | `[network]` config section, HTTP/HTTPS/SOCKS proxies, CA bundles, per-tool overrides |
+| PRD-023 | User Onboarding & Education | 2026-01-18 | `jarvy init`, `jarvy quickstart`, `jarvy templates`, first-run detection, 20 built-in templates |
 
 ---
 
@@ -41,16 +45,16 @@
 
 | Metric | Count |
 |--------|-------|
-| Total tools | 156 |
-| Tools with default hooks | 29 |
-| Tools with dependencies | 19 |
-| macOS support | 156 |
-| Linux support | ~145 |
-| Windows support | ~85 |
+| Total tools | 174 |
+| Tools with default hooks | 32 |
+| Tools with dependencies | 24 |
+| macOS support | 174 |
+| Linux support | ~163 |
+| Windows support | ~95 |
 
 ---
 
-## Test Summary (400+ tests)
+## Test Summary (420+ tests)
 
 | Module | Tests |
 |--------|-------|
@@ -63,6 +67,7 @@
 | DX Commands | 37 |
 | MCP Server | 61 |
 | Roles | 37 |
+| Community | 22 |
 | Observability | 185+ |
 
 ---
@@ -102,6 +107,9 @@ K8s Tools: kubectl→minikube|kind|k3d|docker|podman, krew→kubectl, k9s→kube
 JVM Languages: kotlin→java, scala→java
 BEAM Languages: elixir→erlang
 Git Security: gitleaks→git, trufflehog→git
+Lua Ecosystem: luarocks→lua
+Ansible Ecosystem: molecule→ansible
+CI/CD Engines: dagger→docker|podman, earthly→docker|podman, localstack→docker|podman
 ```
 
 **Dependency Types**:
@@ -134,12 +142,54 @@ node = "20"
 
 ---
 
+## Community Features (PRD-032)
+
+### FAQ System
+- **Database**: `data/faq.json` with 15 FAQs across 5 categories
+- **Documentation**: `docs/faq/` with getting-started, troubleshooting, advanced guides
+- **Search**: Full-text search across questions, answers, and tags
+
+```bash
+jarvy faq categories       # List all FAQ categories
+jarvy faq list             # List all FAQs
+jarvy faq list -c getting-started  # Filter by category
+jarvy faq search "install" # Search FAQs
+jarvy faq show what-is-jarvy       # Show specific FAQ
+```
+
+### Contributors System
+- **Database**: `data/contributors.json` with role tracking
+- **Roles**: Maintainer, Contributor, Tool Author, Documentation, Tester, Community
+- **Workflow**: `.github/workflows/contributors.yml` auto-updates weekly
+
+```bash
+jarvy contributors list           # List all contributors
+jarvy contributors list --role maintainer  # Filter by role
+jarvy contributors list --active  # Active only
+jarvy contributors show <username>  # Show details
+jarvy contributors tool docker    # Show tool authors
+jarvy contributors stats          # Show statistics
+```
+
+### GitHub Templates
+- Discussion template for Q&A with pre-submission checklist
+- Auto-update workflow for CONTRIBUTORS.md
+
+---
+
 ## Outstanding Work
 
-### Remaining Telemetry Tasks (T7-T18)
-- T7: Remove PostHog dependency
-- T8-T11: Add traces, tests, documentation
-- T12-T18: Instrument all modules (hooks, services, commands, config, CI, env, package managers)
+### PRD-022 Telemetry Completion (2026-01-19)
+**Completed Tasks:**
+- T5: Instrument tool operations - `tool_requested()`, `tool_installed()`, `tool_failed()` calls in main.rs
+- T7: Remove PostHog - Deleted src/posthog.rs, replaced all posthog:: calls with telemetry::
+- T9: Unit tests - 6 tests in src/telemetry.rs covering config, source, redaction
+- T10: Integration tests - tests/telemetry_smoke.rs with mock OTLP collector
+- T11: Documentation - CLAUDE.md already has comprehensive Telemetry section
+
+**Remaining (Low Priority):**
+- T8: Optional traces (nice-to-have)
+- T12-T18: Module instrumentation (hooks, services, commands, config, CI, env, package managers) - event functions exist in telemetry.rs, modules not yet calling them
 
 ### PRD-034 Deferred Tasks (Completed 2026-01-18)
 - T10: `jarvy doctor` shows dependency satisfaction (DependencyInfo struct)
@@ -147,6 +197,143 @@ node = "20"
 - T12: `jarvy validate` checks dependency configuration
 - T13: `--ignore-missing-deps` flag for advanced users
 - T15: Integration tests for dependency resolution (tests/dependency_resolution.rs)
+
+### PRD-013 Phase-4 Tools (Completed 2026-01-18)
+Added 18 tools: choose, grex, broot, lsd, dog, gping, julia, nim, crystal, ocaml, haskell, luarocks, sdkman, molecule, infracost, localstack, dagger, earthly
+
+**New features**:
+- broot: Default hook for shell integration (br function)
+- sdkman: Default hook for shell initialization
+- luarocks: Depends on lua
+- molecule: Depends on ansible
+- dagger, earthly, localstack: Flexible dependency on docker|podman
+
+### PRD-018 Quality & Testing Infrastructure (Completed 2026-01-18)
+**Coverage Infrastructure:**
+- `cargo-llvm-cov` for code coverage measurement
+- Codecov integration with PR comments
+- Coverage badge in README
+- Target: 80% line coverage
+
+**Property-Based Testing:**
+- `proptest` crate for fuzzing valid inputs
+- `tests/property/config_properties.rs` - Config parsing properties
+- `tests/property/version_properties.rs` - Version matching properties
+
+**Fuzz Testing:**
+- `cargo-fuzz` with libfuzzer (nightly required)
+- 4 fuzz targets: config_parser, version_parser, toml_input, tool_spec
+- CI runs short fuzz sessions on PRs
+- Weekly scheduled extended fuzz runs
+
+**Benchmarks:**
+- `criterion` crate for benchmarking
+- 3 benchmark suites: config_parsing, registry_lookup, version_comparison
+- PR comparison using critcmp
+- Regression detection with alerting
+
+**Mutation Testing:**
+- `cargo-mutants` for test quality verification
+- Weekly scheduled runs
+- Critical modules: config.rs, tools/common.rs
+- Target: 60% mutation score
+
+**Test Containers:**
+- Dockerfiles for Ubuntu, Fedora, Alpine
+- Isolated integration testing
+- CI matrix across platforms
+
+### PRD-019 Corporate Proxy Support (Completed 2026-01-18)
+**Network Module** (`src/network/`):
+- `config.rs` - NetworkConfig, ProxyAuth, TlsConfig, NetworkOverride types
+- `resolve.rs` - ProxyResolver with priority handling (env > tool > global)
+- `auth.rs` - Credential injection and secure password handling
+- `propagate.rs` - Environment variable generation for child processes
+- `package_managers.rs` - Git, npm, apt, dnf proxy configuration helpers
+- `testing.rs` - Proxy connectivity validation
+
+**Configuration Example:**
+```toml
+[network]
+https_proxy = "http://proxy.corp.com:8080"
+no_proxy = ["localhost", "127.0.0.1", ".corp.com"]
+
+[network.auth]
+username = "jdoe"
+password = { env = "PROXY_PASSWORD" }
+
+[network.tls]
+ca_bundle = "/etc/ssl/certs/corporate-ca.crt"
+
+[network.overrides.git]
+https_proxy = "http://git-proxy.corp.com:8888"
+```
+
+**Key Features:**
+- HTTP/HTTPS/SOCKS5 proxy support
+- Custom CA certificate propagation
+- Per-tool proxy overrides
+- Secure credential handling (env, file, prompt)
+- Environment variables propagated to child processes
+
+**Tool Integration** (`src/tools/common.rs`):
+- `run_with_network()` - Execute commands with proxy env vars applied
+- `run_maybe_sudo_with_network()` - Sudo-aware execution with proxy support
+- Proxy vars are applied via `apply_network_config()` from `src/network/propagate.rs`
+- sudo runs use `-E` flag to preserve environment (proxy vars)
+
+**Automatic System Proxy Detection:**
+The `ProxyResolver` automatically checks environment variables first:
+- If `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` are already set in the environment, they are used
+- Config file `[network]` section is only used if env vars are not set
+- Tool-specific overrides can further customize per-tool behavior
+
+### PRD-023 User Onboarding & Education (Completed 2026-01-18)
+**New Commands:**
+
+| Command | Purpose |
+|---------|---------|
+| `jarvy init` | Interactive config wizard, template support |
+| `jarvy quickstart` | Guided 3-step first-run experience |
+| `jarvy templates` | Browse and use 20 built-in templates |
+
+**Modules Added:**
+- `src/onboarding/` - First-run detection, project type detection, welcome banner
+- `src/templates/` - Template schema, 20 built-in templates
+- `src/commands/init.rs` - Interactive wizard with stack categories
+- `src/commands/quickstart.rs` - Guided setup flow
+- `src/commands/templates.rs` - Template list/show/use commands
+
+**Built-in Templates:**
+- **Frontend**: react, vue, nextjs, angular, svelte
+- **Backend**: node-api, go-api, rust-cli, python-api, java-spring
+- **Data**: python-ml, jupyter
+- **DevOps**: k8s-admin, terraform, docker-dev, cicd
+- **Mobile**: flutter, react-native
+- **General**: essential, shell-power
+
+**First-Run Features:**
+- Automatic detection via marker file (`~/.jarvy/.jarvy_initialized`)
+- Welcome banner with quick action suggestions
+- CI environment detection (skips first-run prompts)
+- Project type detection (Node.js, Rust, Go, Python, Java, etc.)
+
+**CLI Examples:**
+```bash
+jarvy init                           # Interactive wizard
+jarvy init --template react          # Use template
+jarvy init --template essential --stdout  # Output to stdout
+jarvy templates list                 # List all templates
+jarvy templates show react           # Show template details
+jarvy templates use react            # Create jarvy.toml from template
+jarvy quickstart                     # Guided first-run flow
+```
+
+**Integration Tests:**
+- 18 tests in `tests/onboarding_integration.rs`
+- Template content validation
+- File collision handling
+- CLI argument parsing
 
 ### Future Enhancements
 - `jarvy search --category` (category filtering)

@@ -6,11 +6,12 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use wait_timeout::ChildExt;
 
 use crate::config::{DEFAULT_HOOK_TIMEOUT, HookSettings};
+use crate::telemetry;
 use crate::tools::Os;
 
 /// Errors that can occur during hook execution
@@ -190,6 +191,14 @@ impl Hook {
     pub fn execute(&self) -> HookResult<String> {
         println!("  Running hook: {}", self.description);
 
+        // Determine hook type for telemetry
+        let hook_type = self.determine_hook_type();
+        let tool = self.env.tool.as_deref();
+
+        // Emit hook started telemetry
+        telemetry::hook_started(&self.description, &hook_type, tool);
+        let start = Instant::now();
+
         let (shell, args) = build_shell_command(&self.config.shell, &self.script)?;
 
         let mut child = Command::new(&shell)
@@ -237,6 +246,7 @@ impl Hook {
                 // Timeout - kill the process
                 let _ = child.kill();
                 let _ = child.wait();
+                telemetry::hook_timeout(&self.description, &hook_type, self.config.timeout);
                 return Err(HookError::Timeout(self.config.timeout));
             }
         };
@@ -245,16 +255,35 @@ impl Hook {
         let stdout_output = stdout_handle.join().unwrap_or_default();
         let stderr_output = stderr_handle.join().unwrap_or_default();
 
+        let duration = start.elapsed();
         if status.success() {
             println!("  Hook completed successfully");
+            telemetry::hook_completed(&self.description, &hook_type, duration, 0);
             Ok(stdout_output)
         } else {
             let code = status.code().unwrap_or(-1);
             if code == -1 {
+                telemetry::hook_failed(&self.description, &hook_type, "terminated by signal", "terminated");
                 Err(HookError::Terminated)
             } else {
+                telemetry::hook_failed(&self.description, &hook_type, &stderr_output, "exit_code");
                 Err(HookError::Failed(code, stderr_output))
             }
+        }
+    }
+
+    /// Determine hook type from description
+    fn determine_hook_type(&self) -> String {
+        if self.description.contains("pre_setup") {
+            "pre_setup".to_string()
+        } else if self.description.contains("post_setup") {
+            "post_setup".to_string()
+        } else if self.description.contains("post_install") {
+            "post_install".to_string()
+        } else if self.description.contains("default_hook") {
+            "default_hook".to_string()
+        } else {
+            "custom".to_string()
         }
     }
 
