@@ -5,8 +5,13 @@
 use crate::config::Config;
 use crate::output::{ExitCode, Format, Outputable, colors, header, icons, subheader};
 use crate::tools::common::{cmd_satisfies, has};
-use crate::tools::spec::{get_tool_default_hook, get_tool_install_info, get_tool_spec};
+use crate::tools::spec::{
+    DependencyCheckResult, check_tool_dependencies, get_tool_default_hook, get_tool_dependencies,
+    get_tool_flexible_dependencies, get_tool_install_info, get_tool_spec,
+    should_ignore_missing_deps,
+};
 use serde::Serialize;
+use std::collections::HashSet;
 
 /// A change that would be made during setup
 #[derive(Debug, Clone, Serialize)]
@@ -17,6 +22,26 @@ pub struct ToolChange {
     pub current_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub install_method: Option<String>,
+    /// Dependency resolution information
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependency_resolution: Option<DependencyResolution>,
+}
+
+/// How a tool's dependencies will be resolved
+#[derive(Debug, Clone, Serialize)]
+pub struct DependencyResolution {
+    /// Flexible dependency that will satisfy the requirement
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub will_use: Option<String>,
+    /// Whether the dependency comes from the config (will be installed)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_config: Option<bool>,
+    /// Missing strict dependencies
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub missing_required: Vec<String>,
+    /// Missing flexible dependency options (warning)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missing_options: Option<Vec<String>>,
 }
 
 /// A hook that would run during setup
@@ -97,6 +122,44 @@ impl Outputable for DiffResult {
                     tool.version,
                     method
                 ));
+
+                // Show dependency resolution if present (unless ignored)
+                if let Some(ref dep_res) = tool.dependency_resolution {
+                    if let Some(ref will_use) = dep_res.will_use {
+                        let from_config_str = if dep_res.from_config == Some(true) {
+                            " (in config, will install first)"
+                        } else {
+                            " (already installed)"
+                        };
+                        output.push_str(&format!(
+                            "      {}↳ will use: {}{}{}\n",
+                            colors::DIM,
+                            will_use,
+                            from_config_str,
+                            colors::RESET
+                        ));
+                    }
+                    if !should_ignore_missing_deps() {
+                        if !dep_res.missing_required.is_empty() {
+                            output.push_str(&format!(
+                                "      {}{}↳ REQUIRES: {}{}\n",
+                                colors::RED,
+                                icons::ERROR,
+                                dep_res.missing_required.join(", "),
+                                colors::RESET
+                            ));
+                        }
+                        if let Some(ref options) = dep_res.missing_options {
+                            output.push_str(&format!(
+                                "      {}{}↳ needs one of: {} (none in config){}\n",
+                                colors::YELLOW,
+                                icons::WARN,
+                                options.join(", "),
+                                colors::RESET
+                            ));
+                        }
+                    }
+                }
             }
         }
 
@@ -217,6 +280,22 @@ pub fn run_diff(config: &Config, changes_only: bool) -> DiffResult {
 
     let tools = config.get_tool_configs();
 
+    // Build sets for dependency checking
+    let config_tools: HashSet<String> = tools.iter().map(|(_, t)| t.name.to_lowercase()).collect();
+
+    let installed_tools: HashSet<String> = tools
+        .iter()
+        .filter_map(|(_, t)| {
+            let spec = get_tool_spec(&t.name);
+            let command = spec.map(|s| s.command).unwrap_or(t.name.as_str());
+            if has(command) {
+                Some(t.name.to_lowercase())
+            } else {
+                None
+            }
+        })
+        .collect();
+
     for (_, tool) in &tools {
         let spec = get_tool_spec(&tool.name);
         let is_known = spec.is_some() || crate::tools::get_tool(&tool.name).is_some();
@@ -227,6 +306,7 @@ pub fn run_diff(config: &Config, changes_only: bool) -> DiffResult {
                 version: tool.version.clone(),
                 current_version: None,
                 install_method: None,
+                dependency_resolution: None,
             });
             continue;
         }
@@ -244,12 +324,17 @@ pub fn run_diff(config: &Config, changes_only: bool) -> DiffResult {
         let install_method = get_tool_install_info(&tool.name, &tool.version)
             .map(|info| format!("{:?}", info.package_manager).to_lowercase());
 
+        // Check dependencies
+        let dependency_resolution =
+            get_dependency_resolution(&tool.name, &config_tools, &installed_tools);
+
         if !is_installed {
             to_install.push(ToolChange {
                 name: tool.name.clone(),
                 version: tool.version.clone(),
                 current_version: None,
                 install_method,
+                dependency_resolution,
             });
 
             // Check for default hook
@@ -279,6 +364,7 @@ pub fn run_diff(config: &Config, changes_only: bool) -> DiffResult {
                 version: tool.version.clone(),
                 current_version,
                 install_method,
+                dependency_resolution,
             });
         } else if !changes_only {
             satisfied.push(ToolChange {
@@ -286,6 +372,7 @@ pub fn run_diff(config: &Config, changes_only: bool) -> DiffResult {
                 version: tool.version.clone(),
                 current_version,
                 install_method: None,
+                dependency_resolution,
             });
         }
     }
@@ -335,6 +422,70 @@ pub fn run_diff(config: &Config, changes_only: bool) -> DiffResult {
     }
 }
 
+/// Get dependency resolution information for a tool
+fn get_dependency_resolution(
+    tool_name: &str,
+    config_tools: &HashSet<String>,
+    installed_tools: &HashSet<String>,
+) -> Option<DependencyResolution> {
+    let strict_deps = get_tool_dependencies(tool_name);
+    let flex_deps = get_tool_flexible_dependencies(tool_name);
+
+    // If tool has no dependencies, return None
+    if strict_deps.is_empty() && flex_deps.is_empty() {
+        return None;
+    }
+
+    let result = check_tool_dependencies(tool_name, config_tools, installed_tools);
+
+    match result {
+        DependencyCheckResult::Satisfied => {
+            // Check which flexible dep satisfies it
+            let will_use = if !flex_deps.is_empty() {
+                flex_deps
+                    .iter()
+                    .find(|dep| installed_tools.contains(&dep.to_lowercase()))
+                    .map(|s| s.to_string())
+            } else {
+                None
+            };
+
+            if will_use.is_some() {
+                Some(DependencyResolution {
+                    will_use,
+                    from_config: Some(false), // already installed
+                    missing_required: vec![],
+                    missing_options: None,
+                })
+            } else {
+                None // No interesting dependency info to show
+            }
+        }
+        DependencyCheckResult::MissingRequired(missing) => Some(DependencyResolution {
+            will_use: None,
+            from_config: None,
+            missing_required: missing,
+            missing_options: None,
+        }),
+        DependencyCheckResult::WillInstallFlexible(tool) => Some(DependencyResolution {
+            will_use: Some(tool),
+            from_config: Some(true), // will install from config
+            missing_required: vec![],
+            missing_options: None,
+        }),
+        DependencyCheckResult::MissingFlexible {
+            needed: _,
+            options,
+            suggestion: _,
+        } => Some(DependencyResolution {
+            will_use: None,
+            from_config: None,
+            missing_required: vec![],
+            missing_options: Some(options),
+        }),
+    }
+}
+
 fn get_installed_version(command: &str) -> Option<String> {
     for flag in ["--version", "-v", "-V", "version"] {
         if let Ok(output) = std::process::Command::new(command).arg(flag).output() {
@@ -379,6 +530,7 @@ mod tests {
                 version: "latest".to_string(),
                 current_version: None,
                 install_method: None,
+                dependency_resolution: None,
             }],
             to_update: vec![],
             satisfied: vec![],
@@ -398,12 +550,14 @@ mod tests {
                     version: "1".to_string(),
                     current_version: None,
                     install_method: None,
+                    dependency_resolution: None,
                 },
                 ToolChange {
                     name: "b".to_string(),
                     version: "2".to_string(),
                     current_version: None,
                     install_method: None,
+                    dependency_resolution: None,
                 },
             ],
             to_update: vec![ToolChange {
@@ -411,6 +565,7 @@ mod tests {
                 version: "3".to_string(),
                 current_version: Some("2".to_string()),
                 install_method: None,
+                dependency_resolution: None,
             }],
             satisfied: vec![],
             unknown: vec![],
@@ -418,6 +573,19 @@ mod tests {
             services: vec![],
         };
         assert_eq!(result.action_count(), 3);
+    }
+
+    #[test]
+    fn test_dependency_resolution_serialization() {
+        let dep_res = DependencyResolution {
+            will_use: Some("docker".to_string()),
+            from_config: Some(true),
+            missing_required: vec![],
+            missing_options: None,
+        };
+        let json = serde_json::to_string(&dep_res).unwrap();
+        assert!(json.contains("\"will_use\":\"docker\""));
+        assert!(json.contains("\"from_config\":true"));
     }
 
     #[test]
@@ -443,6 +611,7 @@ mod tests {
                 version: "latest".to_string(),
                 current_version: Some("2.43.0".to_string()),
                 install_method: None,
+                dependency_resolution: None,
             }],
             unknown: vec![],
             hooks_to_run: vec![],

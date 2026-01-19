@@ -20,6 +20,7 @@ This folder contains PRDs for improving Jarvy based on a comprehensive codebase 
 | 8 | [Environment Variables](008-environment-variables-support.md) | +30% adoption | 5 days | .env generation, shell rc updates |
 | 10 | [CI Detection](010-ci-detection-integration.md) | CI support | 4-5 days | Auto-detect GitHub Actions, GitLab, etc. |
 | 34 | [Enhanced Dependency System](034-enhanced-dependency-system.md) | Accuracy | 5-7 days | Strict vs flexible tool dependencies |
+| 35 | [Self-Updating](035-self-updating.md) | Freshness | 12 days | Auto-update via same install method, enabled by default |
 
 ### Tier 3: Quality & Stability
 
@@ -74,7 +75,8 @@ Phase 4: Advanced (4+ weeks)
 
 Phase 5: Distribution (2+ weeks)
 ├── PRD-011: Comprehensive Docs        ← User and developer guides
-└── PRD-012: Release Distribution      ← Package managers, binaries
+├── PRD-012: Release Distribution      ← Package managers, binaries
+└── PRD-035: Self-Updating             ← Auto-update enabled by default
 
 Phase 6: Security & Compliance (1+ week)
 └── PRD-020: Security Scanning         ← SAST, SBOM, signing, Scorecard
@@ -105,6 +107,7 @@ Phase 7: Ecosystem & Integrations (2+ weeks)
 | LLMs can't install tools safely | [021](021-mcp-server.md) |
 | No visibility into unsupported tool requests | [022](022-remote-telemetry-monitoring.md) |
 | Tool dependencies are too rigid | [034](034-enhanced-dependency-system.md) |
+| Users run outdated versions | [035](035-self-updating.md) |
 
 ### Dependencies Between PRDs
 
@@ -140,6 +143,10 @@ Enables operational monitoring, OTEL metrics/traces, tool request tracking
 PRD-034 (Dependencies) ←─────────────────── PRD-001 (Parallel) for dependency ordering
        ↓
 Enables flexible dependencies (kubectl needs any K8s cluster, not all of them)
+
+PRD-035 (Self-Update) ←────────────────────── PRD-012 (Distribution) for release binaries
+       ↓
+Keeps users on latest version automatically, enabled by default
 ```
 
 ## Analysis Sources

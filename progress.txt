@@ -33,7 +33,7 @@
 | PRD-015 | Config Validation & Remote Loading | 2026-01-16 | `jarvy validate`, `--from URL`, `--header`, 1MB size limit |
 | PRD-013 | Expand Tool Coverage | 2026-01-17 | 156 tools total, 35 new tools added |
 | PRD-033 | Role-Based Configurations | 2026-01-17 | Role inheritance, `jarvy roles list/show/diff`, `--role` flag |
-| PRD-034 | Enhanced Dependency System | 2026-01-17 | `depends_on` (strict) + `depends_on_one_of` (flexible) |
+| PRD-034 | Enhanced Dependency System | 2026-01-18 | `depends_on` (strict) + `depends_on_one_of` (flexible), doctor/diff/validate integration, --ignore-missing-deps flag |
 
 ---
 
@@ -140,6 +140,13 @@ node = "20"
 - T7: Remove PostHog dependency
 - T8-T11: Add traces, tests, documentation
 - T12-T18: Instrument all modules (hooks, services, commands, config, CI, env, package managers)
+
+### PRD-034 Deferred Tasks (Completed 2026-01-18)
+- T10: `jarvy doctor` shows dependency satisfaction (DependencyInfo struct)
+- T11: `jarvy diff` shows flexible dependency resolution (DependencyResolution struct)
+- T12: `jarvy validate` checks dependency configuration
+- T13: `--ignore-missing-deps` flag for advanced users
+- T15: Integration tests for dependency resolution (tests/dependency_resolution.rs)
 
 ### Future Enhancements
 - `jarvy search --category` (category filtering)

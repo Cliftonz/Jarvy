@@ -98,19 +98,22 @@
       "title": "Doctor Command Integration",
       "description": "As a user, I want jarvy doctor to show me which flexible dependencies are satisfied and which options are available.",
       "priority": "P1",
-      "status": "pending",
+      "status": "completed",
       "acceptanceCriteria": [
         {
           "criterion": "Doctor shows 'kubectl: needs K8s cluster (satisfied by: docker)'",
-          "passed": false
+          "passed": true,
+          "notes": "Shows '↳ dependencies satisfied by: docker'"
         },
         {
           "criterion": "Doctor shows 'kubectl: needs K8s cluster (MISSING - install one of: minikube, kind, docker)'",
-          "passed": false
+          "passed": true,
+          "notes": "Shows '↳ needs one of: ...' with suggested fix"
         },
         {
           "criterion": "JSON output includes dependency satisfaction status",
-          "passed": false
+          "passed": true,
+          "notes": "DependencyInfo struct serializes to JSON"
         }
       ]
     },
@@ -119,15 +122,17 @@
       "title": "Diff Command Integration",
       "description": "As a user, I want jarvy diff to show which flexible dependency will be installed to satisfy a requirement.",
       "priority": "P2",
-      "status": "pending",
+      "status": "completed",
       "acceptanceCriteria": [
         {
           "criterion": "Diff shows 'kubectl requires K8s cluster - will use: minikube (in config)'",
-          "passed": false
+          "passed": true,
+          "notes": "Shows '↳ will use: ... (in config, will install first)'"
         },
         {
           "criterion": "Diff warns if no flexible dependency will be satisfied",
-          "passed": false
+          "passed": true,
+          "notes": "Shows '↳ needs one of: ... (none in config)'"
         }
       ]
     }
@@ -199,34 +204,34 @@
     {
       "id": "T10",
       "description": "Update jarvy doctor to show dependency satisfaction",
-      "status": "deferred",
+      "status": "completed",
       "effort": "0.5 days",
       "files": ["src/commands/doctor.rs"],
-      "notes": "P1 - deferred to future iteration"
+      "notes": "Completed 2026-01-18: Added DependencyInfo struct, dependency checking, and human-readable output"
     },
     {
       "id": "T11",
       "description": "Update jarvy diff to show flexible dependency resolution",
-      "status": "deferred",
+      "status": "completed",
       "effort": "0.5 days",
       "files": ["src/commands/diff.rs"],
-      "notes": "P2 - deferred to future iteration"
+      "notes": "Completed 2026-01-18: Added DependencyResolution struct and output for install preview"
     },
     {
       "id": "T12",
       "description": "Update jarvy validate to check dependency configuration",
-      "status": "deferred",
+      "status": "completed",
       "effort": "0.25 days",
       "files": ["src/commands/validate.rs"],
-      "notes": "P2 - deferred to future iteration"
+      "notes": "Completed 2026-01-18: Added validate_tool_dependencies() function"
     },
     {
       "id": "T13",
       "description": "Add --ignore-missing-deps flag for advanced users",
-      "status": "deferred",
+      "status": "completed",
       "effort": "0.25 days",
-      "files": ["src/main.rs"],
-      "notes": "P2 - deferred to future iteration"
+      "files": ["src/main.rs", "src/tools/spec.rs"],
+      "notes": "Completed 2026-01-18: Added flag and should_ignore_missing_deps() helper"
     },
     {
       "id": "T14",
@@ -238,10 +243,10 @@
     {
       "id": "T15",
       "description": "Write integration tests for dependency resolution",
-      "status": "deferred",
+      "status": "completed",
       "effort": "0.5 days",
-      "files": ["tests/"],
-      "notes": "P2 - deferred to future iteration; unit tests provide adequate coverage"
+      "files": ["tests/dependency_resolution.rs"],
+      "notes": "Completed 2026-01-18: Added 11 integration tests for validate, diff, doctor commands"
     }
   ],
   "toolDependencyMappings": {

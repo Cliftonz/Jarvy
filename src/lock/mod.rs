@@ -165,6 +165,8 @@ pub enum InstallSource {
     Pacman,
     /// APK (Alpine)
     Apk,
+    /// Pkg (FreeBSD)
+    Pkg,
     /// Winget
     Winget,
     /// Chocolatey
@@ -184,6 +186,7 @@ impl std::fmt::Display for InstallSource {
             InstallSource::Dnf => write!(f, "dnf"),
             InstallSource::Pacman => write!(f, "pacman"),
             InstallSource::Apk => write!(f, "apk"),
+            InstallSource::Pkg => write!(f, "pkg"),
             InstallSource::Winget => write!(f, "winget"),
             InstallSource::Choco => write!(f, "choco"),
             InstallSource::Custom(name) => write!(f, "custom:{}", name),

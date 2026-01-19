@@ -8,9 +8,11 @@
 //! - Duplicate tool entries
 
 use crate::output::{ExitCode, Format, Outputable, colors, header, icons};
-use crate::tools::spec::{get_tool_spec, list_tool_names};
+use crate::tools::spec::{
+    get_tool_dependencies, get_tool_flexible_dependencies, get_tool_spec, list_tool_names,
+};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -252,7 +254,16 @@ fn validate_structure(parsed: &toml::Value, content: &str, issues: &mut Vec<Vali
     }
 
     // Check for unknown top-level keys
-    let known_keys = ["provisioner", "privileges", "hooks", "env", "services", "roles", "role", "extends"];
+    let known_keys = [
+        "provisioner",
+        "privileges",
+        "hooks",
+        "env",
+        "services",
+        "roles",
+        "role",
+        "extends",
+    ];
     if let Some(table) = parsed.as_table() {
         for key in table.keys() {
             if !known_keys.contains(&key.as_str()) {
@@ -269,6 +280,9 @@ fn validate_structure(parsed: &toml::Value, content: &str, issues: &mut Vec<Vali
 
 fn validate_tools(tools: &toml::map::Map<String, toml::Value>, issues: &mut Vec<ValidationIssue>) {
     let known_tools = list_tool_names();
+
+    // Build a set of configured tool names for dependency checking
+    let config_tools: HashSet<String> = tools.keys().map(|k| k.to_lowercase()).collect();
 
     for (tool_name, value) in tools {
         let tool_lower = tool_name.to_lowercase();
@@ -323,6 +337,54 @@ fn validate_tools(tools: &toml::map::Map<String, toml::Value>, issues: &mut Vec<
                     "Use 'latest', a specific version (1.2.3), or a semver range (>=1.0)"
                         .to_string(),
                 ),
+            });
+        }
+
+        // Validate dependencies
+        validate_tool_dependencies(tool_name, &config_tools, issues);
+    }
+}
+
+/// Validate that a tool's dependencies are configured
+fn validate_tool_dependencies(
+    tool_name: &str,
+    config_tools: &HashSet<String>,
+    issues: &mut Vec<ValidationIssue>,
+) {
+    let strict_deps = get_tool_dependencies(tool_name);
+    let flex_deps = get_tool_flexible_dependencies(tool_name);
+
+    // Check strict dependencies (ALL must be in config)
+    for dep in strict_deps {
+        let dep_lower = dep.to_lowercase();
+        if !config_tools.contains(&dep_lower) {
+            issues.push(ValidationIssue {
+                severity: Severity::Warning,
+                message: format!(
+                    "Tool '{}' requires '{}' but it is not in [provisioner]",
+                    tool_name, dep
+                ),
+                line: None,
+                suggestion: Some(format!("Add {} = \"latest\" to [provisioner] section", dep)),
+            });
+        }
+    }
+
+    // Check flexible dependencies (at least ONE should be in config)
+    if !flex_deps.is_empty() {
+        let has_any = flex_deps
+            .iter()
+            .any(|dep| config_tools.contains(&dep.to_lowercase()));
+
+        if !has_any {
+            let options = flex_deps.join(", ");
+            let suggestion = flex_deps.first().map(|s| s.to_string());
+            issues.push(ValidationIssue {
+                severity: Severity::Info,
+                message: format!("Tool '{}' works best with one of: {}", tool_name, options),
+                line: None,
+                suggestion: suggestion
+                    .map(|s| format!("Consider adding {} = \"latest\" to [provisioner]", s)),
             });
         }
     }

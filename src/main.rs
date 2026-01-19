@@ -95,6 +95,11 @@ enum Commands {
         /// Force sequential installation (equivalent to --jobs 1). Useful for deterministic output.
         #[clap(long)]
         sequential: bool,
+        /// Ignore missing dependency warnings (advanced use).
+        /// Normally, jarvy warns when installing tools whose dependencies are missing.
+        /// Use this flag to suppress those warnings (e.g., if dependencies are pre-installed elsewhere).
+        #[clap(long)]
+        ignore_missing_deps: bool,
         /// Skip SSL certificate verification for --from URL (not recommended)
         #[clap(long)]
         insecure: bool,
@@ -699,12 +704,19 @@ fn main() {
             no_ci,
             jobs,
             sequential,
+            ignore_missing_deps,
             insecure,
             header,
             ..  // Ignore observability fields (quiet, verbose, profile, etc.)
         }) => {
             // Determine effective parallelism level
             let parallel_jobs = if *sequential { 1 } else { *jobs.max(&1) };
+
+            // Set env var for dependency warning suppression
+            if *ignore_missing_deps {
+                // SAFETY: Setting env var at startup before spawning threads
+                unsafe { std::env::set_var("JARVY_IGNORE_MISSING_DEPS", "1") };
+            }
             // Handle CI mode detection with CLI overrides
             // SAFETY: We're setting env vars at startup before any threads are spawned
             let ci_env = if *ci {

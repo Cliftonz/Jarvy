@@ -13,9 +13,13 @@
 use crate::config::Config;
 use crate::output::{ExitCode, Format, Outputable, colors, header, icons, subheader};
 use crate::tools::common::{cmd_satisfies, has};
-use crate::tools::spec::{get_tool_default_hook, get_tool_spec, list_tool_names};
+use crate::tools::spec::{
+    DependencyCheckResult, check_tool_dependencies, get_tool_default_hook, get_tool_dependencies,
+    get_tool_flexible_dependencies, get_tool_spec, list_tool_names, should_ignore_missing_deps,
+};
 use serde::Serialize;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::env;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -57,6 +61,9 @@ pub struct ToolHealth {
     pub status: ToolStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    /// Dependency satisfaction status
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependencies: Option<DependencyInfo>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -66,6 +73,35 @@ pub enum ToolStatus {
     Outdated,
     NotInstalled,
     Unknown,
+}
+
+/// Dependency satisfaction status for a tool
+#[derive(Debug, Clone, Serialize)]
+pub struct DependencyInfo {
+    /// Whether all dependencies are satisfied
+    pub satisfied: bool,
+    /// For flexible deps: which installed tool satisfies the requirement
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub satisfied_by: Option<String>,
+    /// Missing strict dependencies
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub missing_required: Vec<String>,
+    /// Missing flexible dependency options
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missing_flexible: Option<FlexibleDepInfo>,
+    /// A flexible dependency will be installed from config
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub will_install: Option<String>,
+}
+
+/// Info about missing flexible dependencies
+#[derive(Debug, Clone, Serialize)]
+pub struct FlexibleDepInfo {
+    /// Available options to satisfy the dependency
+    pub options: Vec<String>,
+    /// Suggested option to install
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestion: Option<String>,
 }
 
 /// Hook status check
@@ -183,6 +219,51 @@ impl Outputable for DoctorResult {
                     installed_str,
                     status_msg
                 ));
+
+                // Show dependency status if present
+                if let Some(ref deps) = tool.dependencies {
+                    if deps.satisfied {
+                        if let Some(ref satisfied_by) = deps.satisfied_by {
+                            output.push_str(&format!(
+                                "      {}↳ dependencies satisfied by: {}{}\n",
+                                colors::DIM,
+                                satisfied_by,
+                                colors::RESET
+                            ));
+                        }
+                    } else if !deps.missing_required.is_empty() {
+                        output.push_str(&format!(
+                            "      {}{}↳ MISSING required: {}{}\n",
+                            colors::RED,
+                            icons::ERROR,
+                            deps.missing_required.join(", "),
+                            colors::RESET
+                        ));
+                    } else if let Some(ref will_install) = deps.will_install {
+                        output.push_str(&format!(
+                            "      {}↳ will install dependency: {}{}\n",
+                            colors::CYAN,
+                            will_install,
+                            colors::RESET
+                        ));
+                    } else if let Some(ref flex) = deps.missing_flexible {
+                        output.push_str(&format!(
+                            "      {}{}↳ needs one of: {}{}\n",
+                            colors::YELLOW,
+                            icons::WARN,
+                            flex.options.join(", "),
+                            colors::RESET
+                        ));
+                        if let Some(ref suggestion) = flex.suggestion {
+                            output.push_str(&format!(
+                                "      {}  suggested: jarvy setup --only {}{}\n",
+                                colors::DIM,
+                                suggestion,
+                                colors::RESET
+                            ));
+                        }
+                    }
+                }
             }
         }
 
@@ -254,7 +335,7 @@ pub fn run_doctor(config: Option<&Config>, specific_tools: Option<Vec<String>>) 
     let path_checks = check_path_entries();
 
     // Get tools to check
-    let tools_to_check = if let Some(tools) = specific_tools {
+    let tools_to_check: Vec<(String, String)> = if let Some(tools) = specific_tools {
         // Specific tools requested
         tools
             .iter()
@@ -275,16 +356,32 @@ pub fn run_doctor(config: Option<&Config>, specific_tools: Option<Vec<String>>) 
         ]
     };
 
-    let tools = check_tool_health(&tools_to_check);
+    // Build set of tools in config for dependency checking
+    let config_tools: HashSet<String> = tools_to_check
+        .iter()
+        .map(|(name, _)| name.to_lowercase())
+        .collect();
+
+    let tools = check_tool_health(&tools_to_check, &config_tools);
     let hooks = check_hook_status(config);
     let recommendations = generate_recommendations(&path_checks, &tools, &hooks);
 
-    // Calculate exit code
+    // Calculate exit code - also consider dependency issues
     let has_errors = tools.iter().any(|t| t.status == ToolStatus::NotInstalled)
+        || tools.iter().any(|t| {
+            t.dependencies
+                .as_ref()
+                .is_some_and(|d| !d.missing_required.is_empty())
+        })
         || recommendations
             .iter()
             .any(|r| r.severity == RecommendationSeverity::Error);
     let has_warnings = tools.iter().any(|t| t.status == ToolStatus::Outdated)
+        || tools.iter().any(|t| {
+            t.dependencies
+                .as_ref()
+                .is_some_and(|d| d.missing_flexible.is_some())
+        })
         || recommendations
             .iter()
             .any(|r| r.severity == RecommendationSeverity::Warning);
@@ -484,7 +581,25 @@ fn get_expected_paths() -> Vec<String> {
     paths
 }
 
-fn check_tool_health(tools: &[(String, String)]) -> Vec<ToolHealth> {
+fn check_tool_health(
+    tools: &[(String, String)],
+    config_tools: &HashSet<String>,
+) -> Vec<ToolHealth> {
+    // First pass: collect which tools are installed
+    let installed_tools: HashSet<String> = tools
+        .iter()
+        .filter_map(|(name, _)| {
+            let spec = get_tool_spec(name);
+            let command = spec.map(|s| s.command).unwrap_or(name.as_str());
+            if has(command) {
+                Some(name.to_lowercase())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Second pass: check health and dependencies
     tools
         .iter()
         .map(|(name, version)| {
@@ -498,6 +613,7 @@ fn check_tool_health(tools: &[(String, String)]) -> Vec<ToolHealth> {
                     installed: None,
                     status: ToolStatus::Unknown,
                     path: None,
+                    dependencies: None,
                 };
             }
 
@@ -513,15 +629,86 @@ fn check_tool_health(tools: &[(String, String)]) -> Vec<ToolHealth> {
                 ToolStatus::Outdated
             };
 
+            // Check dependencies
+            let dependencies = check_tool_dependency_status(name, config_tools, &installed_tools);
+
             ToolHealth {
                 name: name.clone(),
                 required: version.clone(),
                 installed,
                 status,
                 path,
+                dependencies,
             }
         })
         .collect()
+}
+
+/// Check dependencies for a tool and return DependencyInfo
+fn check_tool_dependency_status(
+    tool_name: &str,
+    config_tools: &HashSet<String>,
+    installed_tools: &HashSet<String>,
+) -> Option<DependencyInfo> {
+    let strict_deps = get_tool_dependencies(tool_name);
+    let flex_deps = get_tool_flexible_dependencies(tool_name);
+
+    // If tool has no dependencies, return None
+    if strict_deps.is_empty() && flex_deps.is_empty() {
+        return None;
+    }
+
+    let result = check_tool_dependencies(tool_name, config_tools, installed_tools);
+
+    match result {
+        DependencyCheckResult::Satisfied => {
+            // Check if it was satisfied by a flexible dependency
+            let satisfied_by = if !flex_deps.is_empty() {
+                flex_deps
+                    .iter()
+                    .find(|dep| installed_tools.contains(&dep.to_lowercase()))
+                    .map(|s| s.to_string())
+            } else {
+                None
+            };
+
+            Some(DependencyInfo {
+                satisfied: true,
+                satisfied_by,
+                missing_required: vec![],
+                missing_flexible: None,
+                will_install: None,
+            })
+        }
+        DependencyCheckResult::MissingRequired(missing) => Some(DependencyInfo {
+            satisfied: false,
+            satisfied_by: None,
+            missing_required: missing,
+            missing_flexible: None,
+            will_install: None,
+        }),
+        DependencyCheckResult::WillInstallFlexible(tool) => Some(DependencyInfo {
+            satisfied: false,
+            satisfied_by: None,
+            missing_required: vec![],
+            missing_flexible: None,
+            will_install: Some(tool),
+        }),
+        DependencyCheckResult::MissingFlexible {
+            needed: _,
+            options,
+            suggestion,
+        } => Some(DependencyInfo {
+            satisfied: false,
+            satisfied_by: None,
+            missing_required: vec![],
+            missing_flexible: Some(FlexibleDepInfo {
+                options,
+                suggestion,
+            }),
+            will_install: None,
+        }),
+    }
 }
 
 fn get_installed_version(command: &str) -> Option<String> {
@@ -651,6 +838,39 @@ fn generate_recommendations(
                 message: format!("Update {} to {}", tool.name, tool.required),
                 fix: Some(format!("jarvy upgrade {}", tool.name)),
             });
+        }
+
+        // Recommendations for dependency issues (unless ignored)
+        if let Some(ref deps) = tool.dependencies {
+            if !should_ignore_missing_deps() {
+                if !deps.missing_required.is_empty() {
+                    recommendations.push(Recommendation {
+                        severity: RecommendationSeverity::Error,
+                        message: format!(
+                            "{} requires: {}",
+                            tool.name,
+                            deps.missing_required.join(", ")
+                        ),
+                        fix: Some(format!(
+                            "jarvy setup --only {}",
+                            deps.missing_required.join(" ")
+                        )),
+                    });
+                }
+
+                if let Some(ref flex) = deps.missing_flexible {
+                    let suggestion = flex
+                        .suggestion
+                        .as_ref()
+                        .map(|s| s.as_str())
+                        .unwrap_or(flex.options.first().map(|s| s.as_str()).unwrap_or(""));
+                    recommendations.push(Recommendation {
+                        severity: RecommendationSeverity::Warning,
+                        message: format!("{} needs one of: {}", tool.name, flex.options.join(", ")),
+                        fix: Some(format!("jarvy setup --only {}", suggestion)),
+                    });
+                }
+            }
         }
     }
 
@@ -1406,9 +1626,42 @@ mod tests {
             installed: Some("2.43.0".to_string()),
             status: ToolStatus::Ok,
             path: Some("/usr/bin/git".to_string()),
+            dependencies: None,
         };
         let json = serde_json::to_string(&health).unwrap();
         assert!(json.contains("\"status\":\"ok\""));
+    }
+
+    #[test]
+    fn test_dependency_info_serialization() {
+        let deps = DependencyInfo {
+            satisfied: true,
+            satisfied_by: Some("docker".to_string()),
+            missing_required: vec![],
+            missing_flexible: None,
+            will_install: None,
+        };
+        let json = serde_json::to_string(&deps).unwrap();
+        assert!(json.contains("\"satisfied\":true"));
+        assert!(json.contains("\"satisfied_by\":\"docker\""));
+    }
+
+    #[test]
+    fn test_dependency_info_missing_flexible() {
+        let deps = DependencyInfo {
+            satisfied: false,
+            satisfied_by: None,
+            missing_required: vec![],
+            missing_flexible: Some(FlexibleDepInfo {
+                options: vec!["docker".to_string(), "podman".to_string()],
+                suggestion: Some("docker".to_string()),
+            }),
+            will_install: None,
+        };
+        let json = serde_json::to_string(&deps).unwrap();
+        assert!(json.contains("\"satisfied\":false"));
+        assert!(json.contains("\"missing_flexible\""));
+        assert!(json.contains("\"options\""));
     }
 
     #[test]

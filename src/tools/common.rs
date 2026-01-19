@@ -28,6 +28,7 @@ pub enum Os {
     Linux,
     Macos,
     Windows,
+    Bsd,
 }
 
 // Determine the current OS as our enum
@@ -43,6 +44,10 @@ pub fn current_os() -> Os {
     #[cfg(target_os = "windows")]
     {
         Os::Windows
+    }
+    #[cfg(target_os = "freebsd")]
+    {
+        Os::Bsd
     }
 }
 
@@ -106,7 +111,7 @@ pub fn run(cmd: &str, args: &[&str]) -> Result<Output, InstallError> {
 pub fn run_maybe_sudo(use_sudo: bool, cmd: &str, args: &[&str]) -> Result<Output, InstallError> {
     match current_os() {
         Os::Windows => run(cmd, args),
-        Os::Linux | Os::Macos => {
+        Os::Linux | Os::Macos | Os::Bsd => {
             if use_sudo {
                 // sudo <cmd> <args...>
                 let mut all = Vec::with_capacity(1 + args.len());
@@ -192,6 +197,7 @@ pub enum PackageManager {
     BrewCask, // Homebrew casks (GUI apps)
     Winget,
     Choco,
+    Pkg, // FreeBSD pkg
 }
 
 #[cfg(target_os = "linux")]
@@ -226,6 +232,23 @@ pub fn detect_linux_pm() -> Option<PackageManager> {
     }
     if has("apk") {
         return Some(PackageManager::Apk);
+    }
+    None
+}
+
+#[cfg(target_os = "freebsd")]
+pub fn detect_bsd_pm() -> Option<PackageManager> {
+    use std::process::Command;
+    let has = |c| {
+        Command::new(c)
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+
+    if has("pkg") {
+        return Some(PackageManager::Pkg);
     }
     None
 }
@@ -460,6 +483,12 @@ impl PkgOps {
                 run("choco", &args)?;
                 Ok(())
             }
+            PackageManager::Pkg => {
+                require("pkg", "FreeBSD pkg is required to install packages")?;
+                let mut args = vec!["install", "-y"];
+                args.extend(packages);
+                Self::run_with_sudo_strategy(use_sudo, "pkg", &args)
+            }
         }
     }
 
@@ -631,6 +660,26 @@ impl PkgOps {
                 }
             }
             PackageManager::Apk => { /* `apk add` refreshes on demand */ }
+            PackageManager::Pkg => {
+                require("pkg", "FreeBSD pkg is required to update packages")?;
+                match use_sudo {
+                    Some(flag) => {
+                        if flag {
+                            require("sudo", "sudo is required to update packages")?;
+                        }
+                        run_maybe_sudo(flag, "pkg", &["update"])?;
+                    }
+                    None => {
+                        if let Err(e) = run_maybe_sudo(false, "pkg", &["update"]) {
+                            if has("sudo") {
+                                run_maybe_sudo(true, "pkg", &["update"])?;
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -791,6 +840,26 @@ impl PkgOps {
             PackageManager::Choco => {
                 require("choco", "Chocolatey is required to install packages")?;
                 run("choco", &["install", "-y", pkg])?;
+            }
+            PackageManager::Pkg => {
+                require("pkg", "FreeBSD pkg is required to install packages")?;
+                match use_sudo {
+                    Some(flag) => {
+                        if flag {
+                            require("sudo", "sudo is required to install packages")?;
+                        }
+                        run_maybe_sudo(flag, "pkg", &["install", "-y", pkg])?;
+                    }
+                    None => {
+                        if let Err(e) = run_maybe_sudo(false, "pkg", &["install", "-y", pkg]) {
+                            if has("sudo") {
+                                run_maybe_sudo(true, "pkg", &["install", "-y", pkg])?;
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                    }
+                }
             }
         };
         Ok(())

@@ -112,6 +112,7 @@ fn detect_install_source(name: &str) -> InstallSource {
         Os::Macos => detect_macos_source(name),
         Os::Linux => detect_linux_source(name),
         Os::Windows => detect_windows_source(name),
+        Os::Bsd => detect_bsd_source(name),
     }
 }
 
@@ -190,6 +191,23 @@ fn detect_windows_source(name: &str) -> InstallSource {
     // Check chocolatey
     if command_succeeds("choco", &["list", "--local-only", name]) {
         return InstallSource::Choco;
+    }
+
+    // Check for custom installers
+    if let Some(spec) = get_tool_spec(name) {
+        if spec.custom_install.is_some() {
+            return InstallSource::Custom(name.to_string());
+        }
+    }
+
+    InstallSource::Unknown
+}
+
+/// Detect install source on BSD (FreeBSD)
+fn detect_bsd_source(name: &str) -> InstallSource {
+    // Check pkg (FreeBSD package manager)
+    if command_succeeds("pkg", &["info", name]) {
+        return InstallSource::Pkg;
     }
 
     // Check for custom installers
