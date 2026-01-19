@@ -1,6 +1,7 @@
 <img src="assets/Vertical_Logo.svg" alt="Jarvy Vertical Logo" width="200" />
 
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/bearbinary/jarvy/badge)](https://securityscorecards.dev/viewer/?uri=github.com/bearbinary/jarvy)
+[![codecov](https://codecov.io/gh/bearbinary/jarvy/graph/badge.svg)](https://codecov.io/gh/bearbinary/jarvy)
 
 
 # Rust-based Dev Environment CLI
