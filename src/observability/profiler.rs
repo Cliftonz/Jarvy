@@ -402,7 +402,7 @@ impl ProfileReport {
     }
 
     /// Export as JSON to file
-    pub fn to_json_file(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn to_json_file(&self, path: &str) -> Result<(), super::error::ObservabilityError> {
         let json = self.to_json()?;
         std::fs::write(path, json)?;
         Ok(())

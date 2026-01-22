@@ -1,2 +1,2 @@
-#![allow(clippy::module_inception)]
-pub mod curl;
+mod definition;
+pub use definition::*;

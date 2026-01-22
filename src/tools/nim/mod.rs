@@ -1,2 +1,2 @@
-mod nim;
-pub use nim::*;
+mod definition;
+pub use definition::*;

@@ -1,3 +1,2 @@
-#![allow(clippy::module_inception)]
-mod erlang;
-pub use erlang::*;
+mod definition;
+pub use definition::*;

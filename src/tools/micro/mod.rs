@@ -1,3 +1,2 @@
-#![allow(clippy::module_inception)]
-mod micro;
-pub use micro::*;
+mod definition;
+pub use definition::*;

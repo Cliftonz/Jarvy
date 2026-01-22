@@ -1,3 +1,2 @@
-#![allow(clippy::module_inception)]
-mod dfc;
-pub use dfc::*;
+mod definition;
+pub use definition::*;

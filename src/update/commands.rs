@@ -196,13 +196,18 @@ fn run_install(
 
 /// Rollback to previous version
 fn run_rollback() -> Result<(), UpdateError> {
+    let Some(info) = RollbackManager::info() else {
+        println!("No rollback available.");
+        println!("Rollback is only available immediately after an update.");
+        return Ok(());
+    };
+
     if !RollbackManager::can_rollback() {
         println!("No rollback available.");
         println!("Rollback is only available immediately after an update.");
         return Ok(());
     }
 
-    let info = RollbackManager::info().unwrap();
     println!(
         "Rolling back from {} to {}...",
         info.new_version, info.previous_version

@@ -1,2 +1,2 @@
-mod earthly;
-pub use earthly::*;
+mod definition;
+pub use definition::*;

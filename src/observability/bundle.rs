@@ -252,14 +252,14 @@ impl DiagnosticBundle {
     }
 
     /// Export to JSON file
-    pub fn to_json_file(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn to_json_file(&self, path: &str) -> Result<(), super::error::ObservabilityError> {
         let json = self.to_json()?;
         std::fs::write(path, json)?;
         Ok(())
     }
 
     /// Export as ZIP archive
-    pub fn to_zip_file(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn to_zip_file(&self, path: &str) -> Result<(), super::error::ObservabilityError> {
         let file = std::fs::File::create(path)?;
         let mut zip = zip::ZipWriter::new(file);
 

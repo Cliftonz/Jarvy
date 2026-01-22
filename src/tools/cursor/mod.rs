@@ -1,3 +1,2 @@
-#![allow(clippy::module_inception)]
-mod cursor;
-pub use cursor::*;
+mod definition;
+pub use definition::*;

@@ -74,8 +74,8 @@ impl TemplateTools {
     }
 
     /// Iterate over tools
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &String)> {
-        self.tools.iter()
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.tools.iter().map(|(k, v)| (k.as_str(), v.as_str()))
     }
 }
 

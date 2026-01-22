@@ -71,6 +71,7 @@ pub fn default_use_sudo() -> Option<bool> {
     }
 }
 
+#[must_use = "this Result may contain an error that should be handled"]
 pub fn run(cmd: &str, args: &[&str]) -> Result<Output, InstallError> {
     // Fast, deterministic tests: allow skipping external command execution.
     // Integration tests can opt-in via JARVY_FAST_TEST; unit tests default to skip unless explicitly overridden.
@@ -114,6 +115,7 @@ pub fn run(cmd: &str, args: &[&str]) -> Result<Output, InstallError> {
 ///
 /// This variant applies HTTP_PROXY, HTTPS_PROXY, NO_PROXY, and CA bundle
 /// environment variables to the spawned process based on the NetworkConfig.
+#[must_use = "this Result may contain an error that should be handled"]
 pub fn run_with_network(
     cmd: &str,
     args: &[&str],
@@ -164,7 +166,8 @@ pub fn run_with_network(
     Ok(out)
 }
 
-// Run a command, prefixing with sudo if configured and applicable (non-Windows)
+/// Run a command, prefixing with sudo if configured and applicable (non-Windows)
+#[must_use = "this Result may contain an error that should be handled"]
 pub fn run_maybe_sudo(use_sudo: bool, cmd: &str, args: &[&str]) -> Result<Output, InstallError> {
     match current_os() {
         Os::Windows => run(cmd, args),
@@ -185,6 +188,7 @@ pub fn run_maybe_sudo(use_sudo: bool, cmd: &str, args: &[&str]) -> Result<Output
 /// Run a command with sudo and network/proxy configuration.
 ///
 /// Combines sudo elevation with proxy settings propagation.
+#[must_use = "this Result may contain an error that should be handled"]
 pub fn run_maybe_sudo_with_network(
     use_sudo: bool,
     cmd: &str,
@@ -479,8 +483,8 @@ impl PkgOps {
             }
             Err(_) => {
                 // Batch failed, retry individually to find which packages failed
-                let mut succeeded = Vec::new();
-                let mut failed = Vec::new();
+                let mut succeeded = Vec::with_capacity(packages.len());
+                let mut failed = Vec::with_capacity(packages.len());
 
                 for pkg in packages {
                     match Self::install(pm, pkg, use_sudo) {
@@ -627,8 +631,8 @@ impl PkgOps {
             }),
             Err(_) => {
                 // Retry individually
-                let mut succeeded = Vec::new();
-                let mut failed = Vec::new();
+                let mut succeeded = Vec::with_capacity(packages.len());
+                let mut failed = Vec::with_capacity(packages.len());
                 for pkg in packages {
                     match run("brew", &["install", "--cask", pkg]) {
                         Ok(_) => succeeded.push(pkg.to_string()),
@@ -661,8 +665,8 @@ impl PkgOps {
             }),
             Err(_) => {
                 // Retry individually
-                let mut succeeded = Vec::new();
-                let mut failed = Vec::new();
+                let mut succeeded = Vec::with_capacity(packages.len());
+                let mut failed = Vec::with_capacity(packages.len());
                 for pkg in packages {
                     match run("choco", &["install", "-y", pkg]) {
                         Ok(_) => succeeded.push(pkg.to_string()),

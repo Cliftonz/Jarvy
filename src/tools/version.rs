@@ -29,6 +29,7 @@ pub struct ExtractedVersion {
 
 impl ExtractedVersion {
     /// Convert to a semver::Version for comparison.
+    #[inline]
     pub fn to_semver(&self) -> Option<Version> {
         let version_str = if let Some(ref pre) = self.prerelease {
             format!("{}.{}.{}-{}", self.major, self.minor, self.patch, pre)
@@ -80,6 +81,7 @@ pub fn extract_version(output: &str) -> Option<ExtractedVersion> {
 ///
 /// # Returns
 /// `true` if the installed version satisfies the requirement
+#[inline]
 pub fn version_satisfies(installed_output: &str, requirement: &str) -> bool {
     let requirement = requirement.trim();
 

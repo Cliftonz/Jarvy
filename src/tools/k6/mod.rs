@@ -1,2 +1,2 @@
-#![allow(clippy::module_inception)]
-pub mod k6;
+mod definition;
+pub use definition::*;

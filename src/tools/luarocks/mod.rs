@@ -1,2 +1,2 @@
-mod luarocks;
-pub use luarocks::*;
+mod definition;
+pub use definition::*;

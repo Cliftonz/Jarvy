@@ -8,12 +8,14 @@
 //! - Diagnostic bundle export
 
 pub mod bundle;
+pub mod error;
 pub mod logging;
 pub mod network_trace;
 pub mod profiler;
 pub mod sanitizer;
 
 pub use bundle::{BundleScope, DiagnosticBundle, SystemInfo as BundleSystemInfo};
+pub use error::ObservabilityError;
 pub use logging::{LogConfig, LogFormat, LogLevel, init_debug_logging};
 pub use network_trace::{DomainStats, NetworkSummary, NetworkTiming, NetworkTracer};
 pub use profiler::{PhaseTiming, ProfileReport, Profiler};

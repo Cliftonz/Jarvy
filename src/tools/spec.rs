@@ -838,11 +838,14 @@ impl VersionCheckSummary {
 fn check_tool_version(name: &str, version: &str) -> ToolVersionStatus {
     let name_lower = name.to_lowercase();
 
-    // Check if tool is known
+    // Check if tool is known - look up spec and manual tool command in one pass
     let spec = get_tool_spec(&name_lower);
-    let is_manual = MANUAL_TOOLS.iter().any(|(n, _)| *n == name_lower);
+    let manual_cmd = MANUAL_TOOLS
+        .iter()
+        .find_map(|(n, cmd)| if *n == name_lower { Some(*cmd) } else { None });
 
-    if spec.is_none() && !is_manual {
+    // If neither a registered tool nor a manual tool, it's unknown
+    if spec.is_none() && manual_cmd.is_none() {
         return ToolVersionStatus {
             name: name.to_string(),
             version: version.to_string(),
@@ -852,12 +855,11 @@ fn check_tool_version(name: &str, version: &str) -> ToolVersionStatus {
     }
 
     // Check if version is satisfied
-    let satisfied = if let Some(spec) = spec {
-        spec.is_satisfied(version)
-    } else {
-        // Manual tools (nvm, rust, brew) - check if command exists
-        let (_, cmd) = MANUAL_TOOLS.iter().find(|(n, _)| *n == name_lower).unwrap();
-        has(cmd)
+    let satisfied = match (spec, manual_cmd) {
+        (Some(spec), _) => spec.is_satisfied(version),
+        (None, Some(cmd)) => has(cmd),
+        // This case is unreachable due to the early return above
+        (None, None) => false,
     };
 
     ToolVersionStatus {

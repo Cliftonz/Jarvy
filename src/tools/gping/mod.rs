@@ -1,2 +1,2 @@
-mod gping;
-pub use gping::*;
+mod definition;
+pub use definition::*;

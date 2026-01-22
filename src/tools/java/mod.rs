@@ -1,3 +1,2 @@
-#![allow(clippy::module_inception)]
-mod java;
-pub use java::*;
+mod definition;
+pub use definition::*;

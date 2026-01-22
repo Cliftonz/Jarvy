@@ -1,2 +1,2 @@
-#![allow(clippy::module_inception)]
-pub mod vault;
+mod definition;
+pub use definition::*;

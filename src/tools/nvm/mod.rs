@@ -1,2 +1,2 @@
-#![allow(clippy::module_inception)]
-pub mod nvm;
+mod definition;
+pub use definition::*;

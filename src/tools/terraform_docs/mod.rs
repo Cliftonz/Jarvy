@@ -1,2 +1,2 @@
-#![allow(clippy::module_inception)]
-pub mod terraform_docs;
+mod definition;
+pub use definition::*;

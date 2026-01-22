@@ -1,3 +1,2 @@
-#![allow(clippy::module_inception)]
-mod semgrep;
-pub use semgrep::*;
+mod definition;
+pub use definition::*;

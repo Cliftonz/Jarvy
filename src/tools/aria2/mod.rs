@@ -1,3 +1,2 @@
-#![allow(clippy::module_inception)]
-mod aria2;
-pub use aria2::*;
+mod definition;
+pub use definition::*;

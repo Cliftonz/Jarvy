@@ -202,7 +202,7 @@ pub fn register_all() {
 
     // Manual registration for tools with custom installers
     // These tools don't use the ToolSpec pattern due to complex installation logic
-    let _ = register_tool("nvm", crate::tools::nvm::nvm::add_handler);
-    let _ = register_tool("rust", crate::tools::rust::rust::add_handler);
-    let _ = register_tool("brew", crate::tools::brew::brew::add_handler);
+    let _ = register_tool("nvm", crate::tools::nvm::add_handler);
+    let _ = register_tool("rust", crate::tools::rust::add_handler);
+    let _ = register_tool("brew", crate::tools::brew::add_handler);
 }

@@ -1,3 +1,2 @@
-#![allow(clippy::module_inception)]
-mod zed;
-pub use zed::*;
+mod definition;
+pub use definition::*;

@@ -1,2 +1,2 @@
-mod haskell;
-pub use haskell::*;
+mod definition;
+pub use definition::*;

@@ -32,10 +32,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             telemetry: true,
-            fingerprint: match get_hwid_fingerprint() {
-                Ok(hw_id) => Some(hw_id),
-                Err(_) => Some(Uuid::now_v7().to_string()),
-            },
+            fingerprint: get_hwid_fingerprint().or_else(|| Some(Uuid::now_v7().to_string())),
         }
     }
 }
@@ -98,7 +95,7 @@ pub(crate) fn initialize() -> CliConfig {
     config
 }
 
-fn get_hwid_fingerprint() -> Result<String, Box<dyn std::error::Error>> {
+fn get_hwid_fingerprint() -> Option<String> {
     let mut builder = IdBuilder::new(Encryption::SHA256);
 
     // Add components for the fingerprint.
@@ -111,8 +108,5 @@ fn get_hwid_fingerprint() -> Result<String, Box<dyn std::error::Error>> {
     // Build the ID with a custom key.
     const SALT: &str = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15ac1e289f66085";
     // The key should be constant for your application to ensure consistency.
-    match builder.build(SALT) {
-        Ok(hwid) => Ok(hwid),
-        _ => Err("No such HWID".into()),
-    }
+    builder.build(SALT).ok()
 }

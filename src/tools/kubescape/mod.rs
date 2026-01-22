@@ -1,3 +1,2 @@
-#![allow(clippy::module_inception)]
-mod kubescape;
-pub use kubescape::*;
+mod definition;
+pub use definition::*;

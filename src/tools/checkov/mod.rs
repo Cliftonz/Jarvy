@@ -1,3 +1,2 @@
-#![allow(clippy::module_inception)]
-mod checkov;
-pub use checkov::*;
+mod definition;
+pub use definition::*;

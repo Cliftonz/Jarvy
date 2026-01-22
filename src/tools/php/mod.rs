@@ -1,2 +1,2 @@
-#![allow(clippy::module_inception)]
-pub mod php;
+mod definition;
+pub use definition::*;

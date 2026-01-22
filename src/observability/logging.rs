@@ -120,7 +120,7 @@ impl Write for &FileWriter {
 ///
 /// This should be called early in main() when debug flags are present.
 /// Returns Ok(true) if debug logging was enabled, Ok(false) if using default logging.
-pub fn init_debug_logging(config: &LogConfig) -> Result<bool, Box<dyn std::error::Error>> {
+pub fn init_debug_logging(config: &LogConfig) -> Result<bool, super::error::ObservabilityError> {
     // Only initialize if we have non-default settings
     if config.level == LogLevel::Normal
         && config.format == LogFormat::Text

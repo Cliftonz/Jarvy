@@ -147,13 +147,17 @@ impl NetworkConfig {
     }
 
     /// Get the effective proxy URL for HTTP requests
-    pub fn effective_http_proxy(&self) -> Option<&String> {
-        self.http_proxy.as_ref().or(self.https_proxy.as_ref())
+    pub fn effective_http_proxy(&self) -> Option<&str> {
+        self.http_proxy
+            .as_deref()
+            .or(self.https_proxy.as_deref())
     }
 
     /// Get the effective proxy URL for HTTPS requests
-    pub fn effective_https_proxy(&self) -> Option<&String> {
-        self.https_proxy.as_ref().or(self.http_proxy.as_ref())
+    pub fn effective_https_proxy(&self) -> Option<&str> {
+        self.https_proxy
+            .as_deref()
+            .or(self.http_proxy.as_deref())
     }
 
     /// Check if a host should bypass the proxy
@@ -215,13 +219,7 @@ mod tests {
         config.https_proxy = Some("https://proxy:8080".to_string());
 
         // HTTP falls back to HTTPS proxy
-        assert_eq!(
-            config.effective_http_proxy(),
-            Some(&"https://proxy:8080".to_string())
-        );
-        assert_eq!(
-            config.effective_https_proxy(),
-            Some(&"https://proxy:8080".to_string())
-        );
+        assert_eq!(config.effective_http_proxy(), Some("https://proxy:8080"));
+        assert_eq!(config.effective_https_proxy(), Some("https://proxy:8080"));
     }
 }

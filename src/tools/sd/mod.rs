@@ -1,3 +1,2 @@
-#![allow(clippy::module_inception)]
-mod sd;
-pub use sd::*;
+mod definition;
+pub use definition::*;

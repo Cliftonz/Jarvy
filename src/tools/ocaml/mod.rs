@@ -1,2 +1,2 @@
-mod ocaml;
-pub use ocaml::*;
+mod definition;
+pub use definition::*;

@@ -1,21 +1,36 @@
+//! Tool registry for mapping tool names to installation handlers.
+//!
+//! # Thread Safety
+//!
+//! The registry uses an `RwLock` for thread-safe access. Lock poisoning is treated
+//! as a fatal error (panic) because:
+//!
+//! 1. This is a CLI tool, not a long-running service - recovery is unnecessary
+//! 2. A poisoned lock indicates a prior panic during registration, which is a bug
+//! 3. Continuing with potentially corrupted state would be unsafe
+//!
+//! The `expect()` calls on lock acquisition are intentional and document this design.
+
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 
 use crate::tools::common::InstallError;
 
-// Public function type for tool "add" handlers
+/// Function signature for tool installation handlers.
 pub type ToolAdder = fn(version: &str) -> Result<(), InstallError>;
 
-// Global registry mapping tool name -> handler
-// Keys are stored in the lowercase for case-insensitive lookups.
+/// Global registry mapping tool name -> handler.
+/// Keys are stored in lowercase for case-insensitive lookups.
 static REGISTRY: OnceLock<RwLock<HashMap<String, ToolAdder>>> = OnceLock::new();
 
+#[inline]
 fn registry() -> &'static RwLock<HashMap<String, ToolAdder>> {
     REGISTRY.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
 /// Register a tool handler under the given name.
 /// Returns true if a new entry was inserted, false if an existing entry was replaced.
+#[must_use = "indicates whether entry was new or replaced"]
 pub fn register_tool(name: &str, handler: ToolAdder) -> bool {
     let key = name.to_ascii_lowercase();
     let mut map = registry().write().expect("registry rwlock poisoned");
@@ -24,6 +39,7 @@ pub fn register_tool(name: &str, handler: ToolAdder) -> bool {
 
 /// Retrieve a registered tool handler by name, if present.
 /// Lookup is case-insensitive.
+#[inline]
 pub fn get_tool(name: &str) -> Option<ToolAdder> {
     let key = name.to_ascii_lowercase();
     let map = registry().read().expect("registry rwlock poisoned");
@@ -41,6 +57,7 @@ pub fn registered_tool_names() -> Vec<String> {
 /// Dispatch an added request to a registered tool by name and version.
 /// Example: add("git", "latest") or add("docker", "24.01").
 /// Returns InstallError::Parse("unknown tool") if no handler is registered.
+#[must_use = "this Result may contain an error that should be handled"]
 pub fn add(name: &str, version: &str) -> Result<(), InstallError> {
     let key = name.to_ascii_lowercase();
     let map = registry().read().expect("registry rwlock poisoned");

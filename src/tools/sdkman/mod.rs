@@ -1,2 +1,2 @@
-mod sdkman;
-pub use sdkman::*;
+mod definition;
+pub use definition::*;

@@ -1,2 +1,2 @@
-#![allow(clippy::module_inception)]
-pub mod rancher_desktop;
+mod definition;
+pub use definition::*;

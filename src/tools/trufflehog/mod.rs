@@ -1,3 +1,2 @@
-#![allow(clippy::module_inception)]
-mod trufflehog;
-pub use trufflehog::*;
+mod definition;
+pub use definition::*;

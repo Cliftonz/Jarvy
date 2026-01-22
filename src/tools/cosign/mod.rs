@@ -1,2 +1,2 @@
-#![allow(clippy::module_inception)]
-pub mod cosign;
+mod definition;
+pub use definition::*;

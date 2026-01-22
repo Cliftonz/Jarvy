@@ -1,2 +1,2 @@
-#![allow(clippy::module_inception)]
-pub mod pgcli;
+mod definition;
+pub use definition::*;

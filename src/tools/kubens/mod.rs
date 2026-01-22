@@ -1,3 +1,2 @@
-#![allow(clippy::module_inception)]
-mod kubens;
-pub use kubens::*;
+mod definition;
+pub use definition::*;

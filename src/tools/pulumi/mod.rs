@@ -1,2 +1,2 @@
-#![allow(clippy::module_inception)]
-pub mod pulumi;
+mod definition;
+pub use definition::*;
