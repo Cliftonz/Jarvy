@@ -28,6 +28,7 @@ pub mod dagger;
 pub mod dbmate;
 pub mod delta;
 pub mod deno;
+pub mod dfc;
 pub mod direnv;
 pub mod dive;
 pub mod docker;
