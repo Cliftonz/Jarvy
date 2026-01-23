@@ -5,6 +5,8 @@
 //! - Starting, stopping, and checking status of services
 //! - Integration with jarvy setup flow
 
+#![allow(dead_code)] // Public API for service management
+
 mod docker_compose;
 mod tilt;
 

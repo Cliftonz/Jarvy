@@ -6,7 +6,7 @@
 //! - `jarvy roles diff <a> <b>` - Compare two roles
 
 use super::definition::RolesConfig;
-use super::resolver::{RoleDiff, RoleResolver, RoleResolverError, diff_roles};
+use super::resolver::{RoleDiff, RoleResolver, diff_roles};
 use clap::Subcommand;
 use std::collections::HashMap;
 
@@ -373,7 +373,7 @@ fn print_diff_pretty(diff: &RoleDiff) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::roles::definition::{RoleDefinition, RoleDefinitionWrapper, RoleExtends};
+    use crate::roles::definition::{RoleDefinition, RoleDefinitionWrapper};
 
     fn create_test_config() -> RolesConfig {
         let mut roles = HashMap::new();

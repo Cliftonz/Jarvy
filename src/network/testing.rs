@@ -2,8 +2,10 @@
 //!
 //! Provides functionality to test proxy configuration and connectivity.
 
+#![allow(dead_code)] // Public API for proxy testing
+
 use super::config::{NetworkConfig, TlsConfig};
-use super::resolve::{ProxyResolver, ResolvedProxy};
+use super::resolve::ProxyResolver;
 use std::time::Duration;
 
 /// Result of a proxy connectivity test
@@ -53,7 +55,7 @@ pub fn test_proxy_connectivity(config: &NetworkConfig) -> Vec<ProxyTestResult> {
 }
 
 /// Test a single proxy URL
-fn test_single_proxy(proxy_url: &str, proxy_type: &str) -> ProxyTestResult {
+fn test_single_proxy(proxy_url: &str, _proxy_type: &str) -> ProxyTestResult {
     // Parse proxy URL to extract host and port
     let result = parse_proxy_url(proxy_url);
 

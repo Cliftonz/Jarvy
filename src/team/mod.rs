@@ -6,12 +6,16 @@
 //! - Team config registry for shared sources
 //! - Diamond dependency and circular reference detection
 
+#![allow(dead_code)] // Public API for team collaboration
+
 pub mod cache;
 pub mod inheritance;
 pub mod registry;
 
 pub use cache::ConfigCache;
+#[allow(unused_imports)]
 pub use inheritance::{InheritanceError, InheritanceResolver, ResolutionTrace};
+#[allow(unused_imports)]
 pub use registry::{Registry, Source};
 
 /// Extends configuration - supports single string or array of strings

@@ -8,6 +8,8 @@
 //!
 //! [roles.frontend.tools]
 //! node = "20"
+
+#![allow(dead_code)] // Public API for role definitions
 //! bun = "latest"
 //! ```
 

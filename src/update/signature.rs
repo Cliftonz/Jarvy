@@ -2,6 +2,8 @@
 //!
 //! Provides secure verification of downloaded binaries.
 
+#![allow(dead_code)] // Public API for signature verification
+
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::Read;

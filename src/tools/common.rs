@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Public API for tool installation utilities
+
 use std::process::{Command, Output};
 use std::sync::OnceLock;
 

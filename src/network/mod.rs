@@ -32,11 +32,17 @@ pub mod propagate;
 pub mod resolve;
 pub mod testing;
 
+// Public API exports - these modules are part of the network module's interface
+#[allow(unused_imports)]
 pub use auth::*;
 pub use config::*;
+#[allow(unused_imports)]
 pub use package_managers::*;
+#[allow(unused_imports)]
 pub use propagate::*;
+#[allow(unused_imports)]
 pub use resolve::*;
+#[allow(unused_imports)]
 pub use testing::*;
 
 #[cfg(test)]
@@ -94,6 +100,7 @@ mod tests {
 }
 
 /// Redact credentials from a proxy URL for safe logging
+#[allow(dead_code)] // Public API for safe proxy URL logging
 pub fn redact_credentials(url: &str) -> String {
     // Pattern: http://user:password@host:port
     if let Some(at_pos) = url.find('@') {

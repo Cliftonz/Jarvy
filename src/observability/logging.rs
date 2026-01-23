@@ -8,6 +8,8 @@
 //! - `Normal`: Info and above (default)
 //! - `Verbose`: Includes warnings
 //! - `Debug`: Full debug logs
+
+#![allow(dead_code)] // Public API for logging configuration
 //! - `Trace`: Trace-level detail
 //!
 //! ## Usage
@@ -24,7 +26,6 @@ use std::io::Write;
 use std::sync::Mutex;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::format::FmtSpan;
-use tracing_subscriber::prelude::*;
 
 /// Log verbosity level
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -44,7 +45,7 @@ pub enum LogLevel {
 
 impl LogLevel {
     /// Convert to tracing EnvFilter string
-    pub fn to_filter_string(&self) -> &'static str {
+    pub fn as_filter_string(self) -> &'static str {
         match self {
             LogLevel::Quiet => "error",
             LogLevel::Normal => "info",
@@ -133,13 +134,13 @@ pub fn init_debug_logging(config: &LogConfig) -> Result<bool, super::error::Obse
     // Build filter string
     let filter_str = if let Some(ref module_filter) = config.filter {
         // Apply module filter on top of level
-        format!("{},{}", config.level.to_filter_string(), module_filter)
+        format!("{},{}", config.level.as_filter_string(), module_filter)
     } else {
-        config.level.to_filter_string().to_string()
+        config.level.as_filter_string().to_string()
     };
 
     let env_filter = EnvFilter::try_new(&filter_str)
-        .unwrap_or_else(|_| EnvFilter::new(config.level.to_filter_string()));
+        .unwrap_or_else(|_| EnvFilter::new(config.level.as_filter_string()));
 
     // Build subscriber based on format and output
     match (config.format, &config.file) {
@@ -199,10 +200,10 @@ mod tests {
 
     #[test]
     fn test_log_level_to_filter() {
-        assert_eq!(LogLevel::Quiet.to_filter_string(), "error");
-        assert_eq!(LogLevel::Normal.to_filter_string(), "info");
-        assert_eq!(LogLevel::Debug.to_filter_string(), "debug");
-        assert_eq!(LogLevel::Trace.to_filter_string(), "trace");
+        assert_eq!(LogLevel::Quiet.as_filter_string(), "error");
+        assert_eq!(LogLevel::Normal.as_filter_string(), "info");
+        assert_eq!(LogLevel::Debug.as_filter_string(), "debug");
+        assert_eq!(LogLevel::Trace.as_filter_string(), "trace");
     }
 
     #[test]

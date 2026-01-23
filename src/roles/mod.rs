@@ -12,7 +12,9 @@ pub mod definition;
 pub mod resolver;
 
 pub use commands::{RolesAction, handle_roles_command};
+#[allow(unused_imports)]
 pub use definition::{RoleAssignment, RoleDefinition, RolesConfig};
+#[allow(unused_imports)]
 pub use resolver::{ResolvedRole, RoleResolver, RoleResolverError};
 
 /// Maximum inheritance depth to prevent infinite recursion

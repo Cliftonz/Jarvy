@@ -2,6 +2,8 @@
 //!
 //! Provides commands for checking, installing, and managing updates.
 
+#![allow(dead_code)] // Public API for update commands
+
 use crate::update::checker::{CURRENT_VERSION, CheckResult, UpdateChecker};
 use crate::update::config::{Channel, UpdateConfig, is_interactive};
 use crate::update::installer::BinaryInstaller;
@@ -128,8 +130,8 @@ fn run_install(
     channel: Option<Channel>,
     method: Option<InstallMethod>,
 ) -> Result<(), UpdateError> {
-    // Determine channel
-    let channel = channel.unwrap_or(UpdateConfig::load().channel);
+    // Determine channel (reserved for future use with channel-specific releases)
+    let _channel = channel.unwrap_or(UpdateConfig::load().channel);
 
     // Determine installation method
     let method = method.unwrap_or_else(InstallMethod::detect);

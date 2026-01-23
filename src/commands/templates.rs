@@ -3,16 +3,14 @@
 //! Browse and use pre-built configuration templates.
 
 use crate::output::{ExitCode, Outputable};
-use crate::templates::builtin::{
-    BuiltinTemplate, all_categories, get_builtin_template, list_builtin_templates,
-    templates_by_category,
-};
+use crate::templates::builtin::{all_categories, get_builtin_template, list_builtin_templates};
 use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
 
 /// Actions for the templates command
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Public API for programmatic templates access
 pub enum TemplatesAction {
     /// List all available templates
     List,
@@ -24,6 +22,7 @@ pub enum TemplatesAction {
 
 /// Options for the templates command
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Public API for programmatic templates access
 pub struct TemplatesOptions {
     /// The action to perform
     pub action: TemplatesAction,

@@ -30,6 +30,7 @@ pub enum HookError {
     SpawnError(#[from] std::io::Error),
 
     #[error("Shell not found: {0}")]
+    #[allow(dead_code)] // Reserved for shell validation feature
     ShellNotFound(String),
 }
 
@@ -110,6 +111,7 @@ impl HookEnv {
     }
 
     /// Add a custom environment variable
+    #[allow(dead_code)] // Builder API for hook environment
     pub fn with_var(mut self, key: &str, value: &str) -> Self {
         self.custom.insert(key.to_string(), value.to_string());
         self
@@ -159,6 +161,7 @@ pub struct Hook {
 
 impl Hook {
     /// Create a new hook with default configuration
+    #[allow(dead_code)] // Public API for programmatic hook creation
     pub fn new(script: &str, description: &str) -> Self {
         Self {
             script: script.to_string(),
@@ -380,6 +383,7 @@ fn build_shell_command(shell: &str, script: &str) -> HookResult<(String, Vec<Str
 }
 
 /// Execute a list of hooks, respecting continue_on_error settings
+#[allow(dead_code)] // Public API for batch hook execution
 pub fn execute_hooks(hooks: &[Hook], dry_run: bool) -> HookResult<()> {
     for hook in hooks {
         if dry_run {

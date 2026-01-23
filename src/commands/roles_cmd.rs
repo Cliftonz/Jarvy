@@ -12,8 +12,7 @@ pub fn run_roles(file: &str, action: &roles::RolesAction) {
         Some(config.get_roles_config()),
         config
             .get_assigned_roles()
-            .map(|v| v.first().copied())
-            .flatten(),
+            .and_then(|v| v.first().copied()),
     ) {
         eprintln!("Error: {}", e);
         std::process::exit(1);

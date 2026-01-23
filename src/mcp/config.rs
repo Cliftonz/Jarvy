@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// MCP server configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct McpConfig {
     /// MCP-specific settings
     #[serde(default)]
@@ -97,14 +97,6 @@ impl Default for McpSettings {
     }
 }
 
-impl Default for McpConfig {
-    fn default() -> Self {
-        Self {
-            mcp: McpSettings::default(),
-        }
-    }
-}
-
 impl McpConfig {
     /// Load configuration from the default path (~/.jarvy/mcp-config.toml)
     pub fn load_default() -> McpResult<Self> {
@@ -133,10 +125,10 @@ impl McpConfig {
     /// Get the expanded audit log path
     pub fn audit_log_path(&self) -> McpResult<PathBuf> {
         let path = &self.mcp.audit_log;
-        if path.starts_with("~/") {
+        if let Some(stripped) = path.strip_prefix("~/") {
             let home = dirs::home_dir()
                 .ok_or_else(|| McpError::config_error("Could not determine home directory"))?;
-            Ok(home.join(&path[2..]))
+            Ok(home.join(stripped))
         } else {
             Ok(PathBuf::from(path))
         }
@@ -176,6 +168,7 @@ impl McpConfig {
     }
 
     /// Add a tool to the always_allow list and save the config
+    #[allow(dead_code)] // Public API for MCP configuration
     pub fn add_always_allow(&mut self, tool: &str) -> McpResult<()> {
         if !self.skip_confirmation(tool) {
             self.mcp.always_allow.push(tool.to_string());
@@ -185,6 +178,7 @@ impl McpConfig {
     }
 
     /// Save the configuration to the default path
+    #[allow(dead_code)] // Public API for MCP configuration
     pub fn save(&self) -> McpResult<()> {
         let config_path = Self::default_config_path()?;
 

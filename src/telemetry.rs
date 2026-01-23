@@ -13,6 +13,8 @@
 //!
 //! Use the event functions to emit structured telemetry:
 //! - `tool_requested()`, `tool_installed()`, `tool_failed()`, `tool_not_supported()`
+
+#![allow(dead_code)] // Public API for telemetry - many functions reserved for future use
 //! - `hook_started()`, `hook_completed()`, `hook_failed()`
 //! - `command_executed()`, `setup_completed()`
 

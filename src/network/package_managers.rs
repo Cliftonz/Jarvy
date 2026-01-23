@@ -5,9 +5,10 @@
 //! - Some need explicit config commands (git, apt)
 //! - Some need config files (apt, dnf)
 
+#![allow(dead_code)] // Public API for package manager proxy configuration
+
 use super::resolve::ResolvedProxy;
 use std::collections::HashMap;
-use std::process::Command;
 
 /// Configure git proxy settings via git config
 pub fn configure_git_proxy(proxy: &ResolvedProxy) -> Vec<String> {

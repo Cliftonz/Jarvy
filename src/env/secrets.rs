@@ -189,6 +189,7 @@ fn prompt_secret(
 }
 
 /// Load a secret from a file path
+#[allow(dead_code)] // Public API for secret loading
 pub fn load_secret_from_file(path: &Path) -> Result<String, SecretError> {
     if !path.exists() {
         return Err(SecretError::FileNotFound(path.display().to_string()));
@@ -199,6 +200,7 @@ pub fn load_secret_from_file(path: &Path) -> Result<String, SecretError> {
 
 /// Preview secrets that would be collected (for dry-run)
 /// Returns secret names without actual values
+#[allow(dead_code)] // Public API for dry-run secret preview
 pub fn preview_secrets(secrets: &HashMap<String, SecretValue>) -> Vec<String> {
     secrets.keys().cloned().collect()
 }

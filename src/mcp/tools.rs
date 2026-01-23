@@ -11,7 +11,7 @@ use crate::mcp::audit::AuditLog;
 use crate::mcp::config::McpConfig;
 use crate::mcp::error::{McpError, McpResult};
 use crate::mcp::safety::{self, ConfirmationResult, RateLimiter};
-use crate::tools::spec::{ToolIndexEntry, generate_tool_index, get_tool_spec, list_tool_names};
+use crate::tools::spec::{ToolIndexEntry, generate_tool_index, get_tool_spec};
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
@@ -161,7 +161,7 @@ pub fn handle_get_install_instructions(
     }
 
     let params: Params = arguments
-        .map(|a| serde_json::from_value(a))
+        .map(serde_json::from_value)
         .transpose()?
         .unwrap_or_default();
 
@@ -312,7 +312,7 @@ pub fn handle_list_tools(arguments: Option<serde_json::Value>) -> McpResult<serd
     }
 
     let params: Params = arguments
-        .map(|a| serde_json::from_value(a))
+        .map(serde_json::from_value)
         .transpose()?
         .unwrap_or_default();
 
@@ -368,7 +368,7 @@ pub fn handle_get_tool(arguments: Option<serde_json::Value>) -> McpResult<serde_
     }
 
     let params: Params = arguments
-        .map(|a| serde_json::from_value(a))
+        .map(serde_json::from_value)
         .transpose()?
         .ok_or_else(|| McpError::invalid_params("Missing 'name' parameter"))?;
 
@@ -378,40 +378,38 @@ pub fn handle_get_tool(arguments: Option<serde_json::Value>) -> McpResult<serde_
     let index = generate_tool_index();
     let tool_entry = index.tools.iter().find(|t| t.name == params.name);
 
-    let current_platform_info = tool_entry
-        .map(|t| match current_platform.as_str() {
-            "macos" => t.macos.as_ref().map(|m| {
-                serde_json::json!({
-                    "os": "macos",
-                    "install_method": if m.cask.is_some() { "cask" } else { "brew" },
-                    "package_name": m.cask.or(m.brew).unwrap_or("unknown"),
-                    "package_manager": "homebrew"
-                })
-            }),
-            "linux" => t.linux.as_ref().map(|l| {
-                serde_json::json!({
-                    "os": "linux",
-                    "install_method": "package_manager",
-                    "package_name": l.apt
-                        .or(l.dnf)
-                        .or(l.pacman)
-                        .or(l.apk)
-                        .or(l.brew)
-                        .unwrap_or("unknown"),
-                    "package_manager": "system"
-                })
-            }),
-            "windows" => t.windows.as_ref().map(|w| {
-                serde_json::json!({
-                    "os": "windows",
-                    "install_method": "winget",
-                    "package_name": w.winget.unwrap_or("unknown"),
-                    "package_manager": "winget"
-                })
-            }),
-            _ => None,
-        })
-        .flatten();
+    let current_platform_info = tool_entry.and_then(|t| match current_platform.as_str() {
+        "macos" => t.macos.as_ref().map(|m| {
+            serde_json::json!({
+                "os": "macos",
+                "install_method": if m.cask.is_some() { "cask" } else { "brew" },
+                "package_name": m.cask.or(m.brew).unwrap_or("unknown"),
+                "package_manager": "homebrew"
+            })
+        }),
+        "linux" => t.linux.as_ref().map(|l| {
+            serde_json::json!({
+                "os": "linux",
+                "install_method": "package_manager",
+                "package_name": l.apt
+                    .or(l.dnf)
+                    .or(l.pacman)
+                    .or(l.apk)
+                    .or(l.brew)
+                    .unwrap_or("unknown"),
+                "package_manager": "system"
+            })
+        }),
+        "windows" => t.windows.as_ref().map(|w| {
+            serde_json::json!({
+                "os": "windows",
+                "install_method": "winget",
+                "package_name": w.winget.unwrap_or("unknown"),
+                "package_manager": "winget"
+            })
+        }),
+        _ => None,
+    });
 
     Ok(serde_json::json!({
         "name": params.name,
@@ -434,7 +432,7 @@ pub fn handle_check_tool(arguments: Option<serde_json::Value>) -> McpResult<serd
     }
 
     let params: Params = arguments
-        .map(|a| serde_json::from_value(a))
+        .map(serde_json::from_value)
         .transpose()?
         .ok_or_else(|| McpError::invalid_params("Missing 'name' parameter"))?;
 
@@ -460,7 +458,7 @@ pub fn handle_check_multiple(arguments: Option<serde_json::Value>) -> McpResult<
     }
 
     let params: Params = arguments
-        .map(|a| serde_json::from_value(a))
+        .map(serde_json::from_value)
         .transpose()?
         .ok_or_else(|| McpError::invalid_params("Missing 'tools' parameter"))?;
 
@@ -518,7 +516,7 @@ pub fn handle_install_tool(
     }
 
     let params: Params = arguments
-        .map(|a| serde_json::from_value(a))
+        .map(serde_json::from_value)
         .transpose()?
         .ok_or_else(|| McpError::invalid_params("Missing 'name' parameter"))?;
 
@@ -548,9 +546,8 @@ pub fn handle_install_tool(
     }
 
     // Rate limit check for actual installs
-    rate_limiter.check_install_limit().map_err(|e| {
+    rate_limiter.check_install_limit().inspect_err(|_e| {
         audit_log.log_rate_limited(client_name, "install_tool");
-        e
     })?;
 
     // Check if confirmation should be skipped
@@ -701,10 +698,11 @@ fn extract_version(output: &str) -> Option<String> {
     // Look for patterns like x.y.z, vx.y.z
     for word in output.split_whitespace() {
         let word = word.trim_start_matches('v').trim_end_matches(',');
-        if word.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-            if word.contains('.') && word.chars().all(|c| c.is_ascii_digit() || c == '.') {
-                return Some(word.to_string());
-            }
+        if word.chars().next().is_some_and(|c| c.is_ascii_digit())
+            && word.contains('.')
+            && word.chars().all(|c| c.is_ascii_digit() || c == '.')
+        {
+            return Some(word.to_string());
         }
     }
     None

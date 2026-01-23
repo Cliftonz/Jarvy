@@ -2,8 +2,6 @@
 //!
 //! These tests verify the network/proxy configuration parsing and propagation.
 
-use std::collections::HashMap;
-use std::process::Command;
 
 /// Test that TOML with [network] section can be parsed
 #[test]

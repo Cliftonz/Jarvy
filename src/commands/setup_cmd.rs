@@ -27,6 +27,8 @@ use crate::telemetry;
 use crate::tools;
 
 /// Run the setup command
+#[allow(unsafe_code)] // SAFETY: env vars set at startup before spawning threads
+#[allow(clippy::too_many_arguments)]
 pub fn run_setup(
     file: &str,
     from: Option<&str>,
@@ -131,8 +133,8 @@ pub fn run_setup(
     println!("Checking tool versions...");
     let version_check = tools::spec::check_tools_parallel(
         tool_configs
-            .iter()
-            .map(|(_, t)| (t.name.as_str(), t.version.as_str())),
+            .values()
+            .map(|t| (t.name.as_str(), t.version.as_str())),
     );
 
     // Report version check results

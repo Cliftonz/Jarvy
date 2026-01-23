@@ -166,6 +166,7 @@ impl AuditLog {
     }
 
     /// Log a denied tool access
+    #[allow(dead_code)] // Public API for MCP audit logging
     pub fn log_denied(&self, client: Option<&str>, tool: &str, reason: &str) {
         let _ = self.log(
             AuditEntry::new(AuditAction::Denied)
@@ -193,12 +194,16 @@ pub enum AuditAction {
     /// Rate limited
     RateLimited,
     /// Tool denied (allowlist/denylist)
+    #[allow(dead_code)] // Used by log_denied
     Denied,
     /// Get tool info
+    #[allow(dead_code)] // Reserved for MCP tool info logging
     GetTool,
     /// Read resource
+    #[allow(dead_code)] // Reserved for MCP resource logging
     ReadResource,
     /// Get prompt
+    #[allow(dead_code)] // Reserved for MCP prompt logging
     GetPrompt,
 }
 

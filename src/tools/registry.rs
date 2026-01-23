@@ -11,6 +11,8 @@
 //!
 //! The `expect()` calls on lock acquisition are intentional and document this design.
 
+#![allow(dead_code)] // Public API for tool registration and lookup
+
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 

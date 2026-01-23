@@ -71,7 +71,7 @@ impl ServiceBackendOps for DockerComposeBackend {
             args.push("-d");
         }
 
-        let args_ref: Vec<&str> = args.iter().map(|s| *s).collect();
+        let args_ref: Vec<&str> = args.to_vec();
         let output = run_command(cmd, &args_ref, working_dir)?;
 
         if output.status.success() {
@@ -108,7 +108,7 @@ impl ServiceBackendOps for DockerComposeBackend {
         let (cmd, mut args) = Self::compose_command();
         args.extend(["-f", config_file, "down"]);
 
-        let args_ref: Vec<&str> = args.iter().map(|s| *s).collect();
+        let args_ref: Vec<&str> = args.to_vec();
         let output = run_command(cmd, &args_ref, working_dir)?;
 
         if output.status.success() {
@@ -148,7 +148,7 @@ impl ServiceBackendOps for DockerComposeBackend {
         let (cmd, mut args) = Self::compose_command();
         args.extend(["-f", config_file, "ps"]);
 
-        let args_ref: Vec<&str> = args.iter().map(|s| *s).collect();
+        let args_ref: Vec<&str> = args.to_vec();
         let output = run_command(cmd, &args_ref, working_dir)?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();

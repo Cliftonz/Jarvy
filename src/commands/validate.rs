@@ -7,13 +7,13 @@
 //! - Hook references to undefined tools
 //! - Duplicate tool entries
 
-use crate::output::{ExitCode, Format, Outputable, colors, header, icons};
+use crate::output::{ExitCode, Outputable, colors, header, icons};
 use crate::telemetry;
 use crate::tools::spec::{
-    get_tool_dependencies, get_tool_flexible_dependencies, get_tool_spec, list_tool_names,
+    get_tool_dependencies, get_tool_flexible_dependencies, list_tool_names,
 };
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
@@ -214,7 +214,7 @@ fn build_result(path: &str, issues: Vec<ValidationIssue>, strict: bool) -> Valid
         .iter()
         .filter(|i| i.severity == Severity::Error)
         .count();
-    let mut warning_count = issues
+    let warning_count = issues
         .iter()
         .filter(|i| i.severity == Severity::Warning)
         .count();
@@ -241,7 +241,7 @@ fn build_result(path: &str, issues: Vec<ValidationIssue>, strict: bool) -> Valid
 
 fn extract_line_from_toml_error(e: &toml::de::Error) -> Option<usize> {
     // TOML errors sometimes include span info
-    e.span().map(|s| {
+    e.span().map(|_s| {
         // span gives byte offset, we need to convert to line number
         // This is a simplification - in practice we'd count newlines
         1
@@ -546,10 +546,8 @@ fn find_similar_tool(name: &str, known_tools: &[String]) -> Option<String> {
 
     for tool in known_tools {
         let similarity = strsim::jaro_winkler(name, tool);
-        if similarity > 0.6 {
-            if best_match.is_none() || similarity > best_match.unwrap().1 {
-                best_match = Some((tool, similarity));
-            }
+        if similarity > 0.6 && (best_match.is_none() || similarity > best_match.unwrap().1) {
+            best_match = Some((tool, similarity));
         }
     }
 

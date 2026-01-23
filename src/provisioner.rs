@@ -1,7 +1,6 @@
 use std::env;
 use std::process::Command;
 use std::str;
-use std::time::Duration;
 
 use crate::telemetry;
 
@@ -135,10 +134,12 @@ pub fn start_docker_infra() {
 }
 
 // Minimal stubs to satisfy references from setup.rs during tests
+#[allow(dead_code)] // Test stub
 pub fn install_nvm_mac() {
     // no-op in test context
 }
 
+#[allow(dead_code)] // Test stub
 pub fn install_pnpm() {
     // no-op in test context
 }

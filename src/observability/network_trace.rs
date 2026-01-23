@@ -8,6 +8,8 @@
 //! - Bandwidth tracking
 //! - Domain aggregation for summary
 //! - Export to JSON for analysis
+
+#![allow(dead_code)] // Public API for network tracing
 //!
 //! ## Usage
 //!

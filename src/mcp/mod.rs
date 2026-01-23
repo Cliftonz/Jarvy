@@ -36,6 +36,7 @@ pub mod tools;
 pub mod transport;
 
 pub use config::McpConfig;
+#[allow(unused_imports)]
 pub use error::{McpError, McpResult};
 pub use server::McpServer;
 

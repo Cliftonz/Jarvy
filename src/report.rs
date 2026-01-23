@@ -29,9 +29,7 @@ pub fn collect_reports(config: &Config) -> Vec<ToolReport> {
         let status = match &installed {
             None => Status::NotInstalled,
             Some(inst) => {
-                if expected == "latest" {
-                    Status::Match
-                } else if inst.contains(&expected) {
+                if expected == "latest" || inst.contains(&expected) {
                     Status::Match
                 } else {
                     Status::Mismatch

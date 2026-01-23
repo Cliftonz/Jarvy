@@ -3,7 +3,7 @@
 //! Shows what tools would be installed, updated, or are already satisfied.
 
 use crate::config::Config;
-use crate::output::{ExitCode, Format, Outputable, colors, header, icons, subheader};
+use crate::output::{ExitCode, Outputable, colors, header, icons, subheader};
 use crate::telemetry;
 use crate::tools::common::{cmd_satisfies, has};
 use crate::tools::spec::{
@@ -83,6 +83,7 @@ impl DiffResult {
     }
 
     /// Total number of tools that need action
+    #[allow(dead_code)] // Public API utility method
     pub fn action_count(&self) -> usize {
         self.to_install.len() + self.to_update.len()
     }
@@ -168,11 +169,7 @@ impl Outputable for DiffResult {
         if !self.to_update.is_empty() {
             output.push_str(&subheader("Tools to Update"));
             for tool in &self.to_update {
-                let current = tool
-                    .current_version
-                    .as_ref()
-                    .map(|v| v.as_str())
-                    .unwrap_or("unknown");
+                let current = tool.current_version.as_deref().unwrap_or("unknown");
                 output.push_str(&format!(
                     "  {}{}{} {} {} -> {} (requires: {})\n",
                     colors::YELLOW,
@@ -282,11 +279,11 @@ pub fn run_diff(config: &Config, changes_only: bool) -> DiffResult {
     let tools = config.get_tool_configs();
 
     // Build sets for dependency checking
-    let config_tools: HashSet<String> = tools.iter().map(|(_, t)| t.name.to_lowercase()).collect();
+    let config_tools: HashSet<String> = tools.values().map(|t| t.name.to_lowercase()).collect();
 
     let installed_tools: HashSet<String> = tools
-        .iter()
-        .filter_map(|(_, t)| {
+        .values()
+        .filter_map(|t| {
             let spec = get_tool_spec(&t.name);
             let command = spec.map(|s| s.command).unwrap_or(t.name.as_str());
             if has(command) {
@@ -297,7 +294,7 @@ pub fn run_diff(config: &Config, changes_only: bool) -> DiffResult {
         })
         .collect();
 
-    for (_, tool) in &tools {
+    for tool in tools.values() {
         let spec = get_tool_spec(&tool.name);
         let is_known = spec.is_some() || crate::tools::get_tool(&tool.name).is_some();
 

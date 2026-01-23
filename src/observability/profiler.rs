@@ -8,6 +8,8 @@
 //! use jarvy::observability::Profiler;
 //!
 //! let mut profiler = Profiler::new();
+
+#![allow(dead_code)] // Public API for performance profiling
 //! profiler.start_phase("config_parsing");
 //! // ... do work ...
 //! profiler.end_phase();

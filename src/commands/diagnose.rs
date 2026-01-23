@@ -123,6 +123,7 @@ pub struct Issue {
 pub enum IssueSeverity {
     Error,
     Warning,
+    #[allow(dead_code)] // Reserved for informational diagnostics
     Info,
 }
 
@@ -140,7 +141,7 @@ pub struct Fix {
 }
 
 /// Run the diagnose command
-pub fn run_diagnose(tool: &str, fix: bool, export: bool, scope: &str, output_format: &str) {
+pub fn run_diagnose(tool: &str, fix: bool, export: bool, _scope: &str, output_format: &str) {
     // Check if tool exists in registry - spec is required for diagnosis
     let tool_spec = match get_tool_spec(tool) {
         Some(spec) => spec,
@@ -164,7 +165,7 @@ pub fn run_diagnose(tool: &str, fix: bool, export: bool, scope: &str, output_for
     println!();
 
     // Generate diagnostic report
-    let report = diagnose_tool(tool, &tool_spec);
+    let report = diagnose_tool(tool, tool_spec);
 
     // Output report
     if output_format == "json" {
@@ -280,7 +281,7 @@ fn diagnose_tool(tool_name: &str, spec: &ToolSpec) -> DiagnosticReport {
 }
 
 /// Check installation status
-fn check_installation(tool_name: &str, spec: &ToolSpec) -> InstallationStatus {
+fn check_installation(_tool_name: &str, spec: &ToolSpec) -> InstallationStatus {
     let command = spec.command;
 
     // Try to find the binary

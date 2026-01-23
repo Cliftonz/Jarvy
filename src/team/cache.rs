@@ -147,17 +147,16 @@ impl ConfigCache {
         }
 
         let mut count = 0;
-        for entry in fs::read_dir(&self.cache_dir).map_err(|e| CacheError::IoError {
-            path: self.cache_dir.display().to_string(),
-            error: e.to_string(),
-        })? {
-            if let Ok(entry) = entry {
-                let path = entry.path();
-                if path.extension().is_some_and(|ext| ext == "toml") {
-                    if fs::remove_file(&path).is_ok() {
-                        count += 1;
-                    }
-                }
+        for entry in fs::read_dir(&self.cache_dir)
+            .map_err(|e| CacheError::IoError {
+                path: self.cache_dir.display().to_string(),
+                error: e.to_string(),
+            })?
+            .flatten()
+        {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "toml") && fs::remove_file(&path).is_ok() {
+                count += 1;
             }
         }
         Ok(count)

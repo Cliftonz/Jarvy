@@ -8,15 +8,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use super::Extends;
 use super::cache::ConfigCache;
-use crate::config::{
-    Config, EnvConfig, EnvSettings, EnvValue, HookSettings, HooksConfig, SecretValue,
-    ServicesConfig, Tool, ToolConfig, ToolEnvConfig, ToolHooks,
-};
+use crate::config::{Config, EnvConfig, HooksConfig, ServicesConfig, ToolConfig, ToolHooks};
 
 /// Maximum inheritance depth to prevent stack overflow
 pub const MAX_DEPTH: usize = 10;

@@ -45,12 +45,14 @@ impl EnvContext {
     }
 
     /// Add a tool path to the context
+    #[allow(dead_code)] // Builder API for env context
     pub fn with_tool_path(mut self, tool: &str, path: PathBuf) -> Self {
         self.tool_paths.insert(tool.to_string(), path);
         self
     }
 
     /// Add a custom variable
+    #[allow(dead_code)] // Builder API for env context
     pub fn with_var(mut self, key: &str, value: &str) -> Self {
         self.custom_vars.insert(key.to_string(), value.to_string());
         self

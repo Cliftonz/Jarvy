@@ -9,7 +9,10 @@
 mod config;
 mod output;
 
+// Public API exports - these may not be used internally but are part of the module's interface
+#[allow(unused_imports)]
 pub use config::{CiConfigError, CiConfigTemplate, generate_ci_config};
+#[allow(unused_imports)]
 pub use output::{CiOutput, GroupGuard};
 
 use crate::telemetry;
@@ -315,11 +318,13 @@ fn detect_provider() -> Option<CiProvider> {
 }
 
 /// Returns true if running in a CI environment
+#[allow(dead_code)] // Public API for library consumers
 pub fn is_ci() -> bool {
     detect().is_some()
 }
 
 /// Returns true if running in a CI environment or test mode
+#[allow(dead_code)] // Public API for library consumers
 pub fn is_non_interactive() -> bool {
     is_ci() || env::var("JARVY_TEST_MODE").as_deref() == Ok("1")
 }

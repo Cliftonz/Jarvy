@@ -9,6 +9,7 @@ pub mod generate;
 pub mod verify;
 
 pub use generate::generate_lock;
+#[allow(unused_imports)]
 pub use verify::{VerificationResult, VerificationStatus, verify_lock};
 
 use std::collections::HashMap;
@@ -21,6 +22,7 @@ use serde::{Deserialize, Serialize};
 pub const LOCK_VERSION: &str = "1";
 
 /// Lock file name
+#[allow(dead_code)] // Public constant for lock file operations
 pub const LOCK_FILE_NAME: &str = "jarvy.lock";
 
 /// Lock file structure
@@ -86,11 +88,13 @@ impl LockFile {
     }
 
     /// Add or update a tool
+    #[allow(dead_code)] // Public API for lock file manipulation
     pub fn set_tool(&mut self, name: &str, tool: LockedTool) {
         self.tools.insert(name.to_string(), tool);
     }
 
     /// Add or update a platform-specific tool
+    #[allow(dead_code)] // Public API for lock file manipulation
     pub fn set_platform_tool(&mut self, platform: &str, name: &str, tool: LockedTool) {
         self.platforms
             .entry(platform.to_string())
@@ -205,14 +209,17 @@ pub enum LockError {
     /// Serialization error
     SerializeError { error: String },
     /// Tool not found
+    #[allow(dead_code)] // Reserved for lock verification
     ToolNotFound { name: String },
     /// Version mismatch
+    #[allow(dead_code)] // Reserved for lock verification
     VersionMismatch {
         tool: String,
         locked: String,
         installed: String,
     },
     /// Checksum mismatch
+    #[allow(dead_code)] // Reserved for lock verification
     ChecksumMismatch {
         tool: String,
         locked: String,

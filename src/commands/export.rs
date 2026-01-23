@@ -2,7 +2,7 @@
 //!
 //! Detects installed tools and generates a valid jarvy.toml configuration.
 
-use crate::output::{ExitCode, Format, Outputable, colors};
+use crate::output::{ExitCode, Outputable};
 use crate::telemetry;
 use crate::tools::common::has;
 use crate::tools::spec::{get_tool_spec, iter_tools};
@@ -82,7 +82,7 @@ impl Outputable for ExportResult {
 /// Export currently installed tools to jarvy.toml format
 pub fn export_tools(
     filter_tools: Option<Vec<String>>,
-    include_all: bool,
+    _include_all: bool,
     verbose: bool,
 ) -> ExportResult {
     let mut detected_tools = Vec::new();

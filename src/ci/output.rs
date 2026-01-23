@@ -11,6 +11,7 @@ pub struct CiOutput {
     provider: CiProvider,
 }
 
+#[allow(dead_code)] // Public API for CI output formatting
 impl CiOutput {
     /// Creates a new CI output helper for the given provider
     pub fn new(provider: CiProvider) -> Self {
@@ -275,6 +276,7 @@ impl CiOutput {
 }
 
 /// RAII guard that closes a log group when dropped
+#[allow(dead_code)] // Public API for CI output formatting
 pub struct GroupGuard {
     output: CiOutput,
     name: String,

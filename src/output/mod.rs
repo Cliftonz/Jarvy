@@ -3,6 +3,8 @@
 //! Provides traits and implementations for outputting command results in
 //! different formats: human-readable, JSON, and quiet mode.
 
+#![allow(dead_code)] // Public API for output formatting
+
 use serde::Serialize;
 
 /// Output format options for CLI commands

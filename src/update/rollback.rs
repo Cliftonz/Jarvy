@@ -2,6 +2,8 @@
 //!
 //! Provides ability to restore previous version after a failed update.
 
+#![allow(dead_code)] // Public API for update rollback
+
 use crate::update::method::UpdateError;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -160,7 +162,6 @@ pub struct RollbackResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
     #[test]
     fn test_rollback_info_serialization() {

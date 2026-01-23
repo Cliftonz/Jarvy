@@ -3,6 +3,8 @@
 //! Detects if this is a first-time user and what type of project
 //! is in the current directory.
 
+#![allow(dead_code)] // Public API for project detection
+
 use std::fs;
 use std::path::Path;
 

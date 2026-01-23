@@ -2,6 +2,8 @@
 //!
 //! Defines the structure for Jarvy configuration templates.
 
+#![allow(dead_code)] // Public API for template schema
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -127,7 +129,7 @@ impl Template {
 
         // Sort tools for consistent output
         let mut tools: Vec<_> = self.tools.iter().collect();
-        tools.sort_by_key(|(name, _)| name.as_str());
+        tools.sort_by_key(|(name, _)| *name);
 
         for (name, version) in tools {
             content.push_str(&format!("{} = \"{}\"\n", name, version));

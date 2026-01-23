@@ -5,7 +5,6 @@
 //! - diagnose_missing_tools: Check which common tools are missing and suggest installations
 
 use crate::mcp::error::{McpError, McpResult};
-use crate::tools::spec::list_tool_names;
 use serde::Serialize;
 
 /// Prompt definition for MCP prompts/list response

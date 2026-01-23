@@ -14,15 +14,22 @@ pub mod network_trace;
 pub mod profiler;
 pub mod sanitizer;
 
+// Public API exports - some may not be used internally but are part of the module's interface
+#[allow(unused_imports)]
 pub use bundle::{BundleScope, DiagnosticBundle, SystemInfo as BundleSystemInfo};
+#[allow(unused_imports)]
 pub use error::ObservabilityError;
+#[allow(unused_imports)]
 pub use logging::{LogConfig, LogFormat, LogLevel, init_debug_logging};
+#[allow(unused_imports)]
 pub use network_trace::{DomainStats, NetworkSummary, NetworkTiming, NetworkTracer};
+#[allow(unused_imports)]
 pub use profiler::{PhaseTiming, ProfileReport, Profiler};
 pub use sanitizer::Sanitizer;
 
 /// Global observability configuration
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)] // Public API for observability configuration
 pub struct ObservabilityConfig {
     /// Logging configuration
     pub log: LogConfig,
@@ -36,8 +43,10 @@ pub struct ObservabilityConfig {
     pub network_log: Option<String>,
 }
 
+#[allow(dead_code)] // Public API for observability configuration
 impl ObservabilityConfig {
     /// Create from CLI flags
+    #[allow(clippy::too_many_arguments)]
     pub fn from_flags(
         quiet: bool,
         verbose: u8,

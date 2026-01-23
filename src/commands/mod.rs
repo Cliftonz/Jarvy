@@ -54,16 +54,29 @@ pub mod team_cmd;
 pub mod telemetry_cmd;
 pub mod tools_cmd;
 
+// Public API re-exports - these modules may not be used directly by main.rs
+// but are part of the commands module's public interface
+#[allow(unused_imports)]
 pub use completions::*;
+#[allow(unused_imports)]
 pub use diagnose::*;
+#[allow(unused_imports)]
 pub use diff::*;
+#[allow(unused_imports)]
 pub use doctor::*;
+#[allow(unused_imports)]
 pub use export::*;
+#[allow(unused_imports)]
 pub use init::*;
+#[allow(unused_imports)]
 pub use quickstart::*;
+#[allow(unused_imports)]
 pub use search::*;
+#[allow(unused_imports)]
 pub use templates::*;
+#[allow(unused_imports)]
 pub use upgrade::*;
+#[allow(unused_imports)]
 pub use validate::*;
 
 // Re-exports for new command modules

@@ -8,6 +8,8 @@
 //! - Bearer tokens
 //! - Passwords and secrets
 //! - Email addresses
+
+#![allow(dead_code)] // Public API for data sanitization
 //! - Home directory paths (normalized to ~/)
 //!
 //! ## Usage

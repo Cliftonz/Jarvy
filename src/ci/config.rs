@@ -13,6 +13,7 @@ pub enum CiConfigError {
     /// IO error when writing config file
     IoError(std::io::Error),
     /// Unsupported provider for config generation
+    #[allow(dead_code)] // Returned by generate_ci_config which is public API
     UnsupportedProvider(CiProvider),
 }
 
@@ -478,6 +479,7 @@ pipelines:
 }
 
 /// Generates CI config for the specified provider
+#[allow(dead_code)] // Public API for library consumers
 pub fn generate_ci_config(
     provider: CiProvider,
     base_path: &Path,
@@ -489,6 +491,7 @@ pub fn generate_ci_config(
 }
 
 /// Returns a list of providers that support config generation
+#[allow(dead_code)] // Public API for library consumers
 pub fn supported_providers() -> Vec<CiProvider> {
     vec![
         CiProvider::GitHubActions,

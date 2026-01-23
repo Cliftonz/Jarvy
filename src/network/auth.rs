@@ -6,13 +6,14 @@
 //! - File path
 //! - Interactive prompt
 
-use super::config::{NetworkConfig, PasswordSource, ProxyAuth};
+use super::config::{NetworkConfig, ProxyAuth};
 use std::io::{self, Write};
 
 /// Inject authentication credentials into a proxy URL
 ///
 /// Takes a proxy URL like "http://proxy:8080" and credentials,
 /// returns "http://user:pass@proxy:8080"
+#[allow(dead_code)] // Public API for proxy authentication
 pub fn inject_credentials(proxy_url: &str, auth: &ProxyAuth) -> Result<String, String> {
     let password = auth.password.resolve()?;
 
@@ -37,6 +38,7 @@ pub fn inject_credentials(proxy_url: &str, auth: &ProxyAuth) -> Result<String, S
 /// Prompt user for password interactively
 ///
 /// Uses rpassword for hidden input if available, falls back to plain input
+#[allow(dead_code)] // Public API for interactive password prompting
 pub fn prompt_password(prompt: &str) -> io::Result<String> {
     print!("{}", prompt);
     io::stdout().flush()?;
@@ -49,6 +51,7 @@ pub fn prompt_password(prompt: &str) -> io::Result<String> {
 }
 
 /// Get the proxy URL with credentials injected if authentication is configured
+#[allow(dead_code)] // Public API for proxy authentication
 pub fn get_authenticated_proxy(
     proxy_url: Option<&String>,
     auth: Option<&ProxyAuth>,
@@ -68,6 +71,7 @@ pub fn get_authenticated_proxy(
 }
 
 /// Resolve all proxy URLs with authentication for a NetworkConfig
+#[allow(dead_code)] // Public API for proxy authentication
 pub struct AuthenticatedProxies {
     pub http_proxy: Option<String>,
     pub https_proxy: Option<String>,
@@ -76,6 +80,7 @@ pub struct AuthenticatedProxies {
 
 impl AuthenticatedProxies {
     /// Create authenticated proxies from NetworkConfig
+    #[allow(dead_code)] // Public API for proxy authentication
     pub fn from_config(config: &NetworkConfig) -> Result<Self, String> {
         Ok(Self {
             http_proxy: get_authenticated_proxy(config.http_proxy.as_ref(), config.auth.as_ref())?,
@@ -94,6 +99,7 @@ impl AuthenticatedProxies {
 // Simple URL encoding module (to avoid adding urlencoding dependency)
 mod urlencoding {
     /// URL-encode a string for use in proxy URLs
+    #[allow(dead_code)] // Used by inject_credentials
     pub fn encode(input: &str) -> String {
         let mut result = String::new();
         for c in input.chars() {
@@ -115,6 +121,7 @@ mod urlencoding {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::network::config::PasswordSource;
 
     #[test]
     fn test_inject_credentials() {

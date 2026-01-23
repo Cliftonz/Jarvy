@@ -5,7 +5,9 @@
 //! 2. Tool-specific overrides in [network.overrides.<tool>]
 //! 3. Global config in [network] section
 
-use super::config::{NetworkConfig, NetworkOverride, NoProxy};
+#![allow(dead_code)] // Public API for proxy resolution
+
+use super::config::{NetworkConfig, NetworkOverride};
 use std::collections::HashMap;
 use std::env;
 
@@ -43,7 +45,7 @@ impl<'a> ProxyResolver<'a> {
     /// Resolve proxy configuration for a specific tool
     pub fn resolve_for_tool(&self, tool_name: &str) -> ResolvedProxy {
         // Check environment variables first (highest priority)
-        if let Some(proxy) = self.from_environment() {
+        if let Some(proxy) = self.env_proxy() {
             return proxy;
         }
 
@@ -58,7 +60,7 @@ impl<'a> ProxyResolver<'a> {
                     };
                 }
 
-                let resolved = self.from_override(override_config, tool_name);
+                let resolved = self.override_proxy(override_config, tool_name);
                 if resolved.http_proxy.is_some() || resolved.https_proxy.is_some() {
                     return resolved;
                 }
@@ -66,11 +68,11 @@ impl<'a> ProxyResolver<'a> {
         }
 
         // Fall back to global config
-        self.from_global_config()
+        self.global_proxy()
     }
 
     /// Get proxy from environment variables
-    fn from_environment(&self) -> Option<ResolvedProxy> {
+    fn env_proxy(&self) -> Option<ResolvedProxy> {
         let http = env::var("HTTP_PROXY")
             .or_else(|_| env::var("http_proxy"))
             .ok();
@@ -98,7 +100,7 @@ impl<'a> ProxyResolver<'a> {
     }
 
     /// Get proxy from tool-specific override
-    fn from_override(&self, override_config: &NetworkOverride, tool_name: &str) -> ResolvedProxy {
+    fn override_proxy(&self, override_config: &NetworkOverride, tool_name: &str) -> ResolvedProxy {
         let global = self.config;
 
         ResolvedProxy {
@@ -124,7 +126,7 @@ impl<'a> ProxyResolver<'a> {
     }
 
     /// Get proxy from global config
-    fn from_global_config(&self) -> ResolvedProxy {
+    fn global_proxy(&self) -> ResolvedProxy {
         match self.config {
             Some(config) if config.has_proxy() => ResolvedProxy {
                 http_proxy: config.http_proxy.clone(),

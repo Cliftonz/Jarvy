@@ -13,6 +13,8 @@
 //!
 //! ## Usage
 //!
+
+#![allow(dead_code)] // Public API for diagnostic bundle export
 //! ```bash
 //! jarvy diagnose --export                    # Create diagnostic bundle
 //! jarvy diagnose docker --export             # Tool-specific bundle
@@ -21,7 +23,6 @@
 
 use crate::observability::Sanitizer;
 use serde::Serialize;
-use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
 

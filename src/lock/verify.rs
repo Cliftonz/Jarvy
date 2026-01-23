@@ -2,8 +2,6 @@
 //!
 //! Verifies that installed tool versions match the lock file.
 
-use std::collections::HashMap;
-
 use super::{LockError, LockFile, LockedTool};
 use crate::tools::common::has;
 
@@ -30,6 +28,7 @@ pub enum VerificationStatus {
     /// Tool not installed
     NotInstalled,
     /// Tool installed but not in lock file
+    #[allow(dead_code)] // Reserved for unlocked tool detection
     NotLocked,
     /// Unable to determine version
     Unknown,
@@ -94,6 +93,7 @@ impl VerificationResult {
     }
 
     /// Get all mismatched tools
+    #[allow(dead_code)] // Public API for lock verification results
     pub fn mismatches(&self) -> Vec<&ToolVerification> {
         self.tools
             .iter()
@@ -102,6 +102,7 @@ impl VerificationResult {
     }
 
     /// Get all missing tools
+    #[allow(dead_code)] // Public API for lock verification results
     pub fn missing_tools(&self) -> Vec<&ToolVerification> {
         self.tools
             .iter()
@@ -215,6 +216,7 @@ fn normalize_version(version: &str) -> String {
 }
 
 /// Verify and optionally update tools to match lock file
+#[allow(dead_code)] // Public API for lock verification with output
 pub fn verify_and_report(
     lock: &LockFile,
     platform: &str,
@@ -255,7 +257,6 @@ pub fn verify_and_report(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lock::InstallSource;
 
     #[test]
     fn test_versions_match_exact() {

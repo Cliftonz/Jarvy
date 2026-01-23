@@ -2,9 +2,9 @@
 //!
 //! Provides fuzzy searching, category filtering, and detailed tool information.
 
-use crate::output::{ExitCode, Format, Outputable, colors, header, icons};
+use crate::output::{ExitCode, Outputable, colors, header};
 use crate::telemetry;
-use crate::tools::spec::{ToolIndex, generate_tool_index};
+use crate::tools::spec::generate_tool_index;
 use serde::Serialize;
 
 /// A single search result
@@ -186,7 +186,7 @@ fn calculate_relevance(name: &str, query: &str) -> f64 {
 
     // Boost score if query appears as substring of any word
     let boost = if name_lower
-        .split(|c: char| c == '-' || c == '_')
+        .split(['-', '_'])
         .any(|part| part.starts_with(&query_lower))
     {
         0.1

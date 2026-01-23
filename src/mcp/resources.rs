@@ -258,10 +258,8 @@ fn extract_version_number(output: &str) -> Option<String> {
     // Extract first version-like string
     for word in output.split_whitespace() {
         let word = word.trim_start_matches('v').trim_end_matches(',');
-        if word.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-            if word.contains('.') {
-                return Some(word.to_string());
-            }
+        if word.chars().next().is_some_and(|c| c.is_ascii_digit()) && word.contains('.') {
+            return Some(word.to_string());
         }
     }
     // Fallback: return first line trimmed

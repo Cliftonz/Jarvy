@@ -22,11 +22,6 @@ include = [
 [badges]
 maintenance = { status = "actively-developed" }
 
-[build]
-jobs=16
-rustc-wrapper="sccache"
-pipelining=true
-
 [dependencies]
 clap = { version = "4.5.6", features = ["derive"] }
 clap_complete = "4.5"

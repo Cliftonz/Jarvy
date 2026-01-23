@@ -4,7 +4,7 @@
 //! Uses clap_complete to generate completions from the CLI definition.
 
 use clap::Command;
-use clap_complete::{Generator, Shell, generate};
+use clap_complete::{Shell, generate};
 use std::io;
 
 /// Supported shells for completion generation

@@ -27,7 +27,7 @@ pub fn run_config(action: &ConfigAction) {
                         let trace = resolver.trace();
                         println!("Extends Chain for {}", file);
                         println!("========================");
-                        for (i, entry) in trace.entries.iter().enumerate() {
+                        for entry in trace.entries.iter() {
                             let indent = "  ".repeat(entry.depth);
                             println!("{}↳ {}", indent, entry.source);
                         }

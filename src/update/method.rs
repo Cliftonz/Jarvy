@@ -3,9 +3,12 @@
 //! Detects how Jarvy was installed (Homebrew, Cargo, apt, etc.)
 //! and executes updates via the appropriate package manager.
 
+#![allow(dead_code)] // Public API for installation method detection
+
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::{Path, PathBuf};
+#[allow(unused_imports)] // Stdio used only on Linux/Windows for package manager checks
 use std::process::{Command, Stdio};
 
 /// Installation method for Jarvy
@@ -119,12 +122,12 @@ impl InstallMethod {
     }
 
     /// Detect from package manager queries
+    #[allow(unused_variables)] // binary_path only used on Linux/Windows
     fn detect_from_package_managers(binary_path: &Path) -> Option<Self> {
-        let path_str = binary_path.to_string_lossy();
-
         // Linux: Check dpkg (Debian/Ubuntu)
         #[cfg(target_os = "linux")]
         {
+            let path_str = binary_path.to_string_lossy();
             if Self::check_dpkg(&path_str) {
                 return Some(InstallMethod::Apt);
             }

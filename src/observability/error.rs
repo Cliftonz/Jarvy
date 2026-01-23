@@ -1,5 +1,7 @@
 //! Error types for the observability module
 
+#![allow(dead_code)] // Public API for observability error handling
+
 use thiserror::Error;
 
 /// Errors that can occur during observability operations

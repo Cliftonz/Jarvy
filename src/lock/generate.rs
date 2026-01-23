@@ -3,7 +3,6 @@
 //! Generates jarvy.lock from the current environment.
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::process::Command;
 
 use super::{InstallSource, LockError, LockFile, LockMeta, LockedTool};
@@ -20,7 +19,7 @@ pub fn generate_lock(tools: &HashMap<String, Tool>) -> Result<LockFile, LockErro
         platforms: HashMap::new(),
     };
 
-    for (name, _tool) in tools {
+    for name in tools.keys() {
         if let Some(locked) = lock_tool(name) {
             lock.tools.insert(name.clone(), locked);
         }

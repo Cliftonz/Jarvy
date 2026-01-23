@@ -3,6 +3,8 @@
 //! This module handles applying proxy settings to spawned commands and
 //! generating environment variables for different tools.
 
+#![allow(dead_code)] // Public API for proxy propagation
+
 use super::config::{NetworkConfig, TlsConfig};
 use super::resolve::ResolvedProxy;
 use std::collections::HashMap;

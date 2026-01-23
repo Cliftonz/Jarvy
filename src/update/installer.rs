@@ -3,6 +3,8 @@
 //! Downloads and installs Jarvy binaries directly from GitHub releases
 //! when package manager updates are not available.
 
+#![allow(dead_code)] // Public API for binary installation
+
 use crate::update::method::UpdateError;
 use crate::update::release::{GitHubRelease, ReleaseAsset};
 use crate::update::rollback::RollbackManager;
@@ -160,7 +162,7 @@ impl BinaryInstaller {
             .lines()
             .find(|line| line.contains(archive_name))
             .and_then(|line| line.split_whitespace().next())
-            .ok_or_else(|| UpdateError::ChecksumMismatch)?;
+            .ok_or(UpdateError::ChecksumMismatch)?;
 
         // Calculate actual checksum
         let actual = calculate_file_checksum(archive_path)?;
@@ -246,11 +248,9 @@ impl BinaryInstaller {
         }
 
         // Search recursively
-        for entry in walkdir(dir) {
-            if let Ok(entry) = entry {
-                if entry.file_name().to_string_lossy() == name {
-                    return Ok(entry.path().to_path_buf());
-                }
+        for entry in walkdir(dir).flatten() {
+            if entry.file_name().to_string_lossy() == name {
+                return Ok(entry.path().to_path_buf());
             }
         }
 
@@ -371,13 +371,11 @@ fn walkdir(dir: &Path) -> impl Iterator<Item = io::Result<fs::DirEntry>> {
     std::iter::from_fn(move || {
         while let Some(current) = stack.pop() {
             if let Ok(entries) = fs::read_dir(&current) {
-                for entry in entries {
-                    if let Ok(entry) = entry {
-                        if entry.path().is_dir() {
-                            stack.push(entry.path());
-                        } else {
-                            return Some(Ok(entry));
-                        }
+                for entry in entries.flatten() {
+                    if entry.path().is_dir() {
+                        stack.push(entry.path());
+                    } else {
+                        return Some(Ok(entry));
                     }
                 }
             }

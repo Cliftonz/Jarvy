@@ -40,9 +40,11 @@ pub struct ClientInfo {
 #[serde(rename_all = "camelCase")]
 struct InitializeParams {
     /// Protocol version the client supports
+    #[allow(dead_code)] // Required by MCP protocol spec for future use
     protocol_version: String,
     /// Client capabilities
     #[serde(default)]
+    #[allow(dead_code)] // Required by MCP protocol spec for future use
     capabilities: serde_json::Value,
     /// Client information
     #[serde(default)]
@@ -281,9 +283,8 @@ impl McpServer {
                 }))
             }
             "jarvy_check_tool" => {
-                self.rate_limiter.check_check_limit().map_err(|e| {
+                self.rate_limiter.check_check_limit().inspect_err(|_e| {
                     self.audit_log.log_rate_limited(client_name, "check_tool");
-                    e
                 })?;
 
                 let result = tools::handle_check_tool(params.arguments)?;
@@ -301,10 +302,9 @@ impl McpServer {
                 }))
             }
             "jarvy_check_multiple" => {
-                self.rate_limiter.check_check_limit().map_err(|e| {
+                self.rate_limiter.check_check_limit().inspect_err(|_e| {
                     self.audit_log
                         .log_rate_limited(client_name, "check_multiple");
-                    e
                 })?;
 
                 let result = tools::handle_check_multiple(params.arguments)?;

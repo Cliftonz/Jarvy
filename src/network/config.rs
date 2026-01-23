@@ -42,6 +42,7 @@ pub enum NoProxy {
 
 impl NoProxy {
     /// Convert to a vector of hosts
+    #[allow(dead_code)] // Public API for proxy configuration
     pub fn to_hosts(&self) -> Vec<String> {
         match self {
             NoProxy::String(s) => s.split(',').map(|h| h.trim().to_string()).collect(),
@@ -50,6 +51,7 @@ impl NoProxy {
     }
 
     /// Convert to comma-separated string for environment variable
+    #[allow(dead_code)] // Public API for proxy configuration
     pub fn to_env_string(&self) -> String {
         self.to_hosts().join(",")
     }
@@ -87,6 +89,7 @@ pub enum PasswordSource {
 /// Custom deserializer for PasswordSource to handle object format
 impl PasswordSource {
     /// Resolve the password to its actual value
+    #[allow(dead_code)] // Public API for proxy authentication
     pub fn resolve(&self) -> Result<String, String> {
         match self {
             PasswordSource::Plain(p) => {
@@ -140,6 +143,7 @@ pub struct NetworkOverride {
     pub no_proxy_all: bool,
 }
 
+#[allow(dead_code)] // Public API for proxy configuration access
 impl NetworkConfig {
     /// Check if any proxy is configured
     pub fn has_proxy(&self) -> bool {

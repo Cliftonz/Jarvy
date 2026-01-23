@@ -142,6 +142,7 @@ impl StdioTransport {
 
     /// Write a message to stderr (for confirmation prompts, logs, etc.)
     /// This does not interfere with the MCP protocol on stdout
+    #[allow(dead_code)] // Public API for MCP transport
     pub fn write_stderr(&self, message: &str) -> McpResult<()> {
         let mut stderr = std::io::stderr().lock();
         writeln!(stderr, "{}", message)?;
@@ -151,6 +152,7 @@ impl StdioTransport {
 
     /// Read a line from stdin (for confirmation prompts)
     /// Note: This should only be used when the terminal is interactive
+    #[allow(dead_code)] // Public API for MCP transport
     pub fn read_confirmation(&mut self) -> McpResult<String> {
         let mut line = String::new();
         self.reader.read_line(&mut line)?;

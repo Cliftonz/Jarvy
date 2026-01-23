@@ -77,15 +77,18 @@ impl RateLimiter {
     }
 
     /// Get current check count in the last minute
+    #[allow(dead_code)] // Public API for rate limiter stats
     pub fn check_count(&self) -> usize {
         self.get_count(&self.check_times)
     }
 
     /// Get current install count in the last minute
+    #[allow(dead_code)] // Public API for rate limiter stats
     pub fn install_count(&self) -> usize {
         self.get_count(&self.install_times)
     }
 
+    #[allow(dead_code)] // Used by check_count and install_count
     fn get_count(&self, times: &Mutex<VecDeque<Instant>>) -> usize {
         let times = match times.lock() {
             Ok(t) => t,

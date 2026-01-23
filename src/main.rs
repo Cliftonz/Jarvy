@@ -38,7 +38,7 @@ mod tools;
 mod update;
 
 use analytics::init_logging;
-use cli::{Cli, Commands, OutputFormat, parse_install_method, parse_update_channel};
+use cli::{Cli, Commands, parse_install_method, parse_update_channel};
 use config::Config;
 use init::initialize;
 use onboarding::mark_initialized;
@@ -405,7 +405,7 @@ fn handle_init(
         template: template.clone(),
         non_interactive,
         stdout,
-        output: output.as_ref().map(|s| std::path::PathBuf::from(s)),
+        output: output.as_ref().map(std::path::PathBuf::from),
     };
     let result = commands::init::run_init(options);
     let content = result.to_human();
@@ -489,7 +489,7 @@ fn handle_templates(action: &cli::TemplatesSubcommand) {
             output,
             setup,
         } => {
-            let output_path = output.as_ref().map(|s| std::path::PathBuf::from(s));
+            let output_path = output.as_ref().map(std::path::PathBuf::from);
             let result = commands::templates::use_template(name, output_path);
             println!("{}", result.to_human());
             if *setup && result.created {

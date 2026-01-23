@@ -2,6 +2,8 @@
 //!
 //! Handles background update checking with configurable intervals.
 
+#![allow(dead_code)] // Public API for update checking
+
 use crate::update::config::{Channel, UpdateConfig};
 use crate::update::release::{GitHubRelease, ReleaseClient, ReleaseError};
 use serde::{Deserialize, Serialize};

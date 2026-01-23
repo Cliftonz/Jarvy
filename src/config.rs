@@ -49,6 +49,7 @@ impl EnvValue {
     }
 
     /// Check if this should append to existing values
+    #[allow(dead_code)] // Public API for env value manipulation
     pub fn should_append(&self) -> bool {
         match self {
             EnvValue::Complex { append, .. } => *append,
@@ -198,7 +199,6 @@ impl Default for HookSettings {
     }
 }
 
-/// Configuration for all hooks in jarvy.toml
 // ============================================================================
 // Services Configuration
 // ============================================================================
@@ -260,6 +260,7 @@ pub struct HooksConfig {
 pub struct Config {
     /// Parent configs to extend (URL or local path)
     #[serde(default)]
+    #[allow(dead_code)] // Used during config inheritance resolution
     pub extends: Option<Extends>,
     /// Role assignment for this config (single or multiple roles)
     /// Use `role = "name"` for single role or `role = ["a", "b"]` for multiple
@@ -283,6 +284,7 @@ pub struct Config {
     pub roles_config: RolesConfig,
     /// Network/proxy configuration
     #[serde(default)]
+    #[allow(dead_code)] // Used for proxy configuration in corporate environments
     pub network: crate::network::NetworkConfig,
 }
 
@@ -325,6 +327,33 @@ pub enum ToolConfig {
     Simple(String),
 }
 
+/// Build a Tool from config, returning (key, tool) with minimal cloning.
+/// This helper consolidates tool construction logic and reduces redundant clones.
+fn build_tool_entry(name: &str, config: &ToolConfig) -> (String, Tool) {
+    let name_owned = name.to_string();
+    let (version, version_manager, use_sudo) = match config {
+        ToolConfig::Detailed {
+            version,
+            version_manager,
+            use_sudo,
+        } => (
+            version.clone(),
+            version_manager.unwrap_or(true),
+            *use_sudo,
+        ),
+        ToolConfig::Simple(version) => (version.clone(), true, None),
+    };
+
+    let tool = Tool {
+        name: name_owned.clone(),
+        version,
+        version_manager,
+        use_sudo,
+    };
+
+    (name_owned, tool)
+}
+
 impl Config {
     pub fn new(config_path: &str) -> Self {
         let config_content = match fs::read_to_string(config_path) {
@@ -359,27 +388,7 @@ impl Config {
     pub fn get_tool_configs(&self) -> HashMap<String, Tool> {
         self.tools
             .iter()
-            .map(|(name, config)| {
-                let tool = match config {
-                    ToolConfig::Detailed {
-                        version,
-                        version_manager,
-                        use_sudo,
-                    } => Tool {
-                        name: name.clone(),
-                        version: version.clone(),
-                        version_manager: version_manager.unwrap_or(true),
-                        use_sudo: *use_sudo,
-                    },
-                    ToolConfig::Simple(version) => Tool {
-                        name: name.clone(),
-                        version: version.clone(),
-                        version_manager: true,
-                        use_sudo: None,
-                    },
-                };
-                (name.clone(), tool)
-            })
+            .map(|(name, config)| build_tool_entry(name, config))
             .collect()
     }
 
@@ -419,6 +428,7 @@ impl Config {
     }
 
     /// Get environment variables for a specific tool
+    #[allow(dead_code)] // Public API for tool-specific environment access
     pub fn get_tool_env(&self, tool_name: &str) -> Option<&ToolEnvConfig> {
         self.env.tool_env.get(tool_name)
     }
@@ -446,6 +456,7 @@ impl Config {
     }
 
     /// Check if a role is assigned
+    #[allow(dead_code)] // Public API for role configuration access
     pub fn has_assigned_role(&self) -> bool {
         self.role.as_ref().map(|r| !r.is_empty()).unwrap_or(false)
     }
@@ -453,6 +464,7 @@ impl Config {
     /// Get tool configs with roles applied
     /// This merges role tools with directly configured tools
     /// Direct tools override role tools
+    #[allow(dead_code)] // Public API for role-based tool configuration
     pub fn get_tool_configs_with_roles(&self) -> HashMap<String, Tool> {
         use crate::roles::resolver::RoleResolver;
 
@@ -479,27 +491,10 @@ impl Config {
             }
         }
 
-        // Direct tools override role tools
+        // Direct tools override role tools - use helper for minimal cloning
         for (name, config) in &self.tools {
-            let tool = match config {
-                ToolConfig::Detailed {
-                    version,
-                    version_manager,
-                    use_sudo,
-                } => Tool {
-                    name: name.clone(),
-                    version: version.clone(),
-                    version_manager: version_manager.unwrap_or(true),
-                    use_sudo: *use_sudo,
-                },
-                ToolConfig::Simple(version) => Tool {
-                    name: name.clone(),
-                    version: version.clone(),
-                    version_manager: true,
-                    use_sudo: None,
-                },
-            };
-            result.insert(name.clone(), tool);
+            let (key, tool) = build_tool_entry(name, config);
+            result.insert(key, tool);
         }
 
         result
@@ -517,54 +512,36 @@ impl Config {
         let mut result = HashMap::new();
 
         // Determine which role(s) to use: CLI override takes precedence
-        let effective_role: Option<RoleAssignment> = if let Some(role_name) = role_override {
-            Some(RoleAssignment::Single(role_name.to_string()))
-        } else {
-            self.role.clone()
+        // Avoid cloning self.role by computing role_names directly
+        let role_names: Vec<&str> = match (role_override, &self.role) {
+            (Some(name), _) => vec![name],
+            (None, Some(assignment)) => assignment.as_vec(),
+            (None, None) => vec![],
         };
 
         // If roles are assigned, resolve and add those tools first
-        if let Some(role_assignment) = &effective_role {
-            let role_names = role_assignment.as_vec();
-            if !role_names.is_empty() && self.has_roles() {
-                let mut resolver = RoleResolver::new(&self.roles_config);
-                if let Ok(resolved) = resolver.resolve_multiple(&role_names) {
-                    for (name, tool) in resolved.tools {
-                        result.insert(
-                            name.clone(),
-                            Tool {
-                                name,
-                                version: tool.version,
-                                version_manager: tool.version_manager,
-                                use_sudo: tool.use_sudo,
-                            },
-                        );
-                    }
+        if !role_names.is_empty() && self.has_roles() {
+            let mut resolver = RoleResolver::new(&self.roles_config);
+            if let Ok(resolved) = resolver.resolve_multiple(&role_names) {
+                for (name, tool) in resolved.tools {
+                    // Move name into Tool.name, only clone for HashMap key
+                    result.insert(
+                        name.clone(),
+                        Tool {
+                            name,
+                            version: tool.version,
+                            version_manager: tool.version_manager,
+                            use_sudo: tool.use_sudo,
+                        },
+                    );
                 }
             }
         }
 
-        // Direct tools override role tools
+        // Direct tools override role tools - use helper for minimal cloning
         for (name, config) in &self.tools {
-            let tool = match config {
-                ToolConfig::Detailed {
-                    version,
-                    version_manager,
-                    use_sudo,
-                } => Tool {
-                    name: name.clone(),
-                    version: version.clone(),
-                    version_manager: version_manager.unwrap_or(true),
-                    use_sudo: *use_sudo,
-                },
-                ToolConfig::Simple(version) => Tool {
-                    name: name.clone(),
-                    version: version.clone(),
-                    version_manager: true,
-                    use_sudo: None,
-                },
-            };
-            result.insert(name.clone(), tool);
+            let (key, tool) = build_tool_entry(name, config);
+            result.insert(key, tool);
         }
 
         result

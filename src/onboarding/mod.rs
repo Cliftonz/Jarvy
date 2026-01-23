@@ -8,6 +8,8 @@
 pub mod detection;
 pub mod welcome;
 
+// Public API exports
+#[allow(unused_imports)]
 pub use detection::{
     DetectedProject, ProjectType, detect_project_type, is_first_run, mark_initialized,
 };

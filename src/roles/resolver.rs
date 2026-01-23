@@ -3,8 +3,10 @@
 //! Resolves role definitions by following inheritance chains and merging tools.
 //! Implements depth-first resolution with cycle detection.
 
+#![allow(dead_code)] // Public API for role resolution
+
 use super::MAX_INHERITANCE_DEPTH;
-use super::definition::{RoleDefinitionWrapper, RoleToolSpec, RolesConfig};
+use super::definition::{RoleDefinitionWrapper, RolesConfig};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -155,27 +157,31 @@ impl<'a> RoleResolver<'a> {
         }
 
         // Resolve all roles
-        let mut resolved_roles = Vec::new();
+        let mut resolved_roles = Vec::with_capacity(role_names.len());
         for name in role_names {
             resolved_roles.push(self.resolve(name)?);
         }
 
         // Merge tools - last role wins for conflicts
+        // Use moves instead of clones by taking ownership of resolved_roles
         let mut merged_tools = HashMap::new();
-        let mut merged_chain = Vec::new();
+        let mut merged_chain = Vec::with_capacity(resolved_roles.len());
 
-        for role in &resolved_roles {
-            merged_chain.push(role.name.clone());
-            for (tool_name, tool) in &role.tools {
-                merged_tools.insert(tool_name.clone(), tool.clone());
-            }
-        }
-
-        // Use description from last role that has one
+        // First pass: collect description from last role that has one (before consuming)
         let description = resolved_roles
             .iter()
             .rev()
-            .find_map(|r| r.description.clone());
+            .find_map(|r| r.description.as_ref())
+            .cloned();
+
+        // Second pass: consume resolved_roles, moving data instead of cloning
+        for role in resolved_roles {
+            merged_chain.push(role.name); // Move instead of clone
+            for (tool_name, tool) in role.tools {
+                // Move both key and value
+                merged_tools.insert(tool_name, tool);
+            }
+        }
 
         Ok(ResolvedRole {
             name: role_names.join("+"),

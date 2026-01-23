@@ -6,12 +6,11 @@
 use crate::onboarding::detection::{ProjectType, detect_project_type};
 use crate::output::{ExitCode, Outputable};
 use crate::tools::spec::iter_tools;
-use inquire::{MultiSelect, Select, Text};
+use inquire::{MultiSelect, Select};
 use serde::Serialize;
-use std::collections::HashMap;
 use std::fs;
-use std::io::{self, IsTerminal, Write};
-use std::path::{Path, PathBuf};
+use std::io::{self, IsTerminal};
+use std::path::PathBuf;
 
 /// Development stack categories
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,7 +76,7 @@ impl std::fmt::Display for StackCategory {
 }
 
 /// Options for the init command
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct InitOptions {
     /// Template name to use (skips interactive mode)
     pub template: Option<String>,
@@ -87,17 +86,6 @@ pub struct InitOptions {
     pub stdout: bool,
     /// Output file path
     pub output: Option<PathBuf>,
-}
-
-impl Default for InitOptions {
-    fn default() -> Self {
-        Self {
-            template: None,
-            non_interactive: false,
-            stdout: false,
-            output: None,
-        }
-    }
 }
 
 /// Result of the init command

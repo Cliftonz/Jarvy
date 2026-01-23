@@ -11,19 +11,18 @@
 //! - Detailed tool version comparison
 
 use crate::config::Config;
-use crate::output::{ExitCode, Format, Outputable, colors, header, icons, subheader};
+use crate::output::{ExitCode, Outputable, colors, header, icons, subheader};
 use crate::telemetry;
 use crate::tools::common::{cmd_satisfies, has};
 use crate::tools::spec::{
     DependencyCheckResult, check_tool_dependencies, get_tool_default_hook, get_tool_dependencies,
-    get_tool_flexible_dependencies, get_tool_spec, list_tool_names, should_ignore_missing_deps,
+    get_tool_flexible_dependencies, get_tool_spec, should_ignore_missing_deps,
 };
 use serde::Serialize;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::env;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// System information
 #[derive(Debug, Clone, Serialize)]
@@ -345,8 +344,8 @@ pub fn run_doctor(config: Option<&Config>, specific_tools: Option<Vec<String>>) 
     } else if let Some(cfg) = config {
         // From config file
         cfg.get_tool_configs()
-            .iter()
-            .map(|(_, t)| (t.name.clone(), t.version.clone()))
+            .values()
+            .map(|t| (t.name.clone(), t.version.clone()))
             .collect()
     } else {
         // Default: check common tools
@@ -774,7 +773,7 @@ fn which_command(command: &str) -> Option<String> {
     }
 }
 
-fn check_hook_status(config: Option<&Config>) -> Vec<HookStatus> {
+fn check_hook_status(_config: Option<&Config>) -> Vec<HookStatus> {
     let mut statuses = Vec::new();
     let home = env::var("HOME").unwrap_or_default();
 
@@ -865,8 +864,7 @@ fn generate_recommendations(
                 if let Some(ref flex) = deps.missing_flexible {
                     let suggestion = flex
                         .suggestion
-                        .as_ref()
-                        .map(|s| s.as_str())
+                        .as_deref()
                         .unwrap_or(flex.options.first().map(|s| s.as_str()).unwrap_or(""));
                     recommendations.push(Recommendation {
                         severity: RecommendationSeverity::Warning,
@@ -917,7 +915,7 @@ fn generate_recommendations(
 // =============================================================================
 
 /// Extended system metrics for --extended flag
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct ExtendedMetrics {
     /// System uptime in seconds
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -943,21 +941,6 @@ pub struct ExtendedMetrics {
     /// Outdated packages count
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outdated_count: Option<usize>,
-}
-
-impl Default for ExtendedMetrics {
-    fn default() -> Self {
-        Self {
-            uptime_secs: None,
-            load_avg: None,
-            memory_total: None,
-            memory_used: None,
-            disk_total: None,
-            disk_available: None,
-            package_count: None,
-            outdated_count: None,
-        }
-    }
 }
 
 /// Complete doctor result with extended metrics

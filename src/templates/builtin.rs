@@ -2,7 +2,9 @@
 //!
 //! These templates are embedded in the binary and available offline.
 
-use super::schema::{Template, TemplateHook, TemplateMeta, TemplateTools};
+#![allow(dead_code)] // Public API for template management
+
+use super::schema::{Template, TemplateMeta, TemplateTools};
 use std::collections::HashMap;
 
 /// A built-in template with metadata

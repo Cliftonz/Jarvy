@@ -3,7 +3,7 @@
 //! Checks for newer versions and upgrades tools using appropriate methods.
 
 use crate::config::Config;
-use crate::output::{ExitCode, Format, Outputable, colors, header, icons, subheader};
+use crate::output::{ExitCode, Outputable, colors, header, icons};
 use crate::telemetry;
 use crate::tools::common::PackageManager;
 use crate::tools::common::{has, run};
@@ -127,8 +127,8 @@ pub fn run_upgrade(
     } else if let Some(cfg) = config {
         // From config file
         cfg.get_tool_configs()
-            .iter()
-            .map(|(_, t)| (t.name.clone(), t.version.clone()))
+            .values()
+            .map(|t| (t.name.clone(), t.version.clone()))
             .collect()
     } else {
         // No config, nothing to upgrade

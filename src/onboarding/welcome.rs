@@ -3,6 +3,8 @@
 //! Displays a friendly welcome message with quick action suggestions
 //! when Jarvy is run for the first time.
 
+#![allow(dead_code)] // Public API for onboarding welcome banner
+
 use std::io::{self, Write};
 
 /// Configuration for the welcome banner

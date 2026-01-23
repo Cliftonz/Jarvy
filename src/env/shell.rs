@@ -82,6 +82,7 @@ pub struct ShellConfig {
     /// Whether to backup the rc file before modification
     pub backup: bool,
     /// Whether to validate syntax after modification
+    #[allow(dead_code)] // Reserved for shell syntax validation feature
     pub validate: bool,
 }
 
@@ -327,6 +328,7 @@ pub fn preview_shell_rc(
 }
 
 /// Get the path to the shell rc file for the given shell type
+#[allow(dead_code)] // Public API for shell rc path resolution
 pub fn get_rc_path(shell: ShellType) -> Result<PathBuf, ShellError> {
     let home = dirs::home_dir().ok_or(ShellError::NoHomeDirectory)?;
     Ok(shell.rc_file(&home))
@@ -335,7 +337,6 @@ pub fn get_rc_path(shell: ShellType) -> Result<PathBuf, ShellError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
 
     #[test]
     fn test_detect_shell() {

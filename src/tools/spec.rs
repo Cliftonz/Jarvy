@@ -2,6 +2,8 @@
 //!
 //! This module provides the `ToolSpec` struct and `define_tool!` macro that
 //! eliminates ~80% of code duplication across tool implementations.
+
+#![allow(dead_code)] // Public API for tool specification and installation
 //!
 //! Tools defined with `define_tool!` are automatically registered via the
 //! `inventory` crate, eliminating the need for manual registration in
@@ -519,10 +521,12 @@ macro_rules! define_tool {
             depends_on_one_of: define_tool!(@depends_on_one_of $($flex_deps)?),
         };
 
+        #[allow(dead_code)] // Public API for tool installation
         pub fn ensure(min_hint: &str) -> Result<(), $crate::tools::common::InstallError> {
             $name.ensure(min_hint)
         }
 
+        #[allow(dead_code)] // Used by inventory submission
         pub fn add_handler(min_hint: &str) -> Result<(), $crate::tools::common::InstallError> {
             $name.ensure(min_hint)
         }
@@ -632,6 +636,7 @@ macro_rules! define_tool {
     (@depends_on_one_of $deps:expr) => { Some($deps) };
 }
 
+#[allow(unused_imports)]
 pub use define_tool;
 
 // ============================================================================

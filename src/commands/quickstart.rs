@@ -2,7 +2,6 @@
 //!
 //! Provides a step-by-step onboarding flow for first-time Jarvy users.
 
-use crate::onboarding::detection::detect_project_type;
 use crate::output::{ExitCode, Outputable};
 use crate::templates::builtin::list_builtin_templates;
 use crate::tools::common::{Os, current_os};
@@ -11,21 +10,13 @@ use serde::Serialize;
 use std::io::{self, IsTerminal};
 
 /// Options for quickstart command
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct QuickstartOptions {
     /// Non-interactive mode
     pub non_interactive: bool,
     /// Skip system check
+    #[allow(dead_code)] // Reserved for future system check bypass
     pub skip_check: bool,
-}
-
-impl Default for QuickstartOptions {
-    fn default() -> Self {
-        Self {
-            non_interactive: false,
-            skip_check: false,
-        }
-    }
 }
 
 /// System check result
@@ -203,13 +194,10 @@ pub fn run_quickstart(options: QuickstartOptions) -> QuickstartResult {
     println!("\x1b[1mStep 3 of 3: Install your tools\x1b[0m");
     println!("────────────────────────────────");
 
-    let run_setup = match Confirm::new("Install tools now?")
+    let run_setup = Confirm::new("Install tools now?")
         .with_default(true)
         .prompt()
-    {
-        Ok(v) => v,
-        Err(_) => false,
-    };
+        .unwrap_or_default();
 
     if run_setup {
         println!("\nRunning \x1b[36mjarvy setup\x1b[0m...\n");
@@ -345,7 +333,7 @@ fn detect_package_manager() -> Option<String> {
 fn detect_shell() -> Option<String> {
     std::env::var("SHELL")
         .ok()
-        .and_then(|s| s.split('/').last().map(|s| s.to_string()))
+        .and_then(|s| s.split('/').next_back().map(|s| s.to_string()))
 }
 
 /// Print the system check results

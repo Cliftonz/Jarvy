@@ -5,6 +5,8 @@
 //! - Environment variables (JARVY_UPDATE, JARVY_UPDATE_CHANNEL, etc.)
 //! - CLI flags (--method, --channel, etc.)
 
+#![allow(dead_code)] // Public API for update configuration
+
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::time::Duration;

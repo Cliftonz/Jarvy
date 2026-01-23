@@ -2,6 +2,8 @@
 //!
 //! Fetches release information from GitHub for update checking.
 
+#![allow(dead_code)] // Public API for GitHub releases
+
 use crate::update::config::Channel;
 use serde::Deserialize;
 
