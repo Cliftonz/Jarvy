@@ -295,6 +295,9 @@ pub struct Config {
     /// cargo binary configuration
     #[serde(default)]
     pub cargo: Option<crate::packages::CargoConfig>,
+    /// Git configuration
+    #[serde(default)]
+    pub git: Option<crate::git::GitConfig>,
 }
 
 #[derive(Deserialize, Debug, Default)]
@@ -480,6 +483,16 @@ impl Config {
     /// Check if any packages are configured
     pub fn has_packages(&self) -> bool {
         self.npm.is_some() || self.pip.is_some() || self.cargo.is_some()
+    }
+
+    /// Get the git configuration
+    pub fn get_git(&self) -> Option<&crate::git::GitConfig> {
+        self.git.as_ref()
+    }
+
+    /// Check if git configuration is present
+    pub fn has_git(&self) -> bool {
+        self.git.is_some()
     }
 
     /// Get tool configs with roles applied

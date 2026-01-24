@@ -1,0 +1,334 @@
+{
+  "prd": "041-git-configuration-automation",
+  "title": "Git Configuration Automation",
+  "version": "1.0.0",
+  "priority": "high",
+  "estimated_days": 7,
+  "created": "2026-01-24",
+  "completed": "2026-01-24",
+  "status": "completed",
+  "progress": {
+    "completed": 18,
+    "total": 18,
+    "percentage": 100
+  },
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Module Foundation",
+      "status": "not_started",
+      "estimated_days": 1,
+      "tasks": [
+        {
+          "id": "T001",
+          "title": "Create git module structure",
+          "description": "Create src/git/mod.rs with module declarations for config, setup, signing, aliases, and identity modules",
+          "status": "not_started",
+          "files": ["src/git/mod.rs"],
+          "acceptance_criteria": [
+            "Module structure compiles",
+            "All submodules declared",
+            "Public API exported"
+          ]
+        },
+        {
+          "id": "T002",
+          "title": "Implement GitConfig parsing",
+          "description": "Create src/git/config.rs with GitConfig struct, ConfigValue enum, ConfigScope, SigningFormat, and AutoCrlf types",
+          "status": "not_started",
+          "files": ["src/git/config.rs"],
+          "acceptance_criteria": [
+            "GitConfig struct with all fields from PRD",
+            "ConfigValue enum for plain and env values",
+            "ConfigScope enum (Global, Local)",
+            "SigningFormat enum (Ssh, Gpg)",
+            "AutoCrlf enum (True, False, Input)",
+            "Serde derives for TOML parsing"
+          ]
+        },
+        {
+          "id": "T003",
+          "title": "Implement ConfigValue resolution",
+          "description": "Implement resolve() method on ConfigValue to handle environment variable sourcing with optional defaults",
+          "status": "not_started",
+          "files": ["src/git/config.rs"],
+          "acceptance_criteria": [
+            "Plain values resolve directly",
+            "Env values read from environment",
+            "Default fallback when env not set",
+            "None when env not set and no default"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "Git Configuration Setup",
+      "status": "not_started",
+      "estimated_days": 2,
+      "tasks": [
+        {
+          "id": "T004",
+          "title": "Implement git config setting",
+          "description": "Create src/git/setup.rs with GitSetup struct and set_config() method that runs git config commands",
+          "status": "not_started",
+          "files": ["src/git/setup.rs"],
+          "acceptance_criteria": [
+            "GitSetup struct with config and project_dir",
+            "set_config() runs git config with scope flag",
+            "Supports --global and --local scope",
+            "Error handling for git command failures"
+          ]
+        },
+        {
+          "id": "T005",
+          "title": "Implement user identity configuration",
+          "description": "Add identity configuration to GitSetup::configure() for user.name and user.email",
+          "status": "not_started",
+          "files": ["src/git/setup.rs"],
+          "acceptance_criteria": [
+            "Sets user.name from config",
+            "Sets user.email from config",
+            "Resolves ConfigValue for env variables"
+          ]
+        },
+        {
+          "id": "T006",
+          "title": "Implement default settings configuration",
+          "description": "Add default branch, pull rebase, auto stash, and push autosetup configuration",
+          "status": "not_started",
+          "files": ["src/git/setup.rs"],
+          "acceptance_criteria": [
+            "Sets init.defaultBranch",
+            "Sets pull.rebase when enabled",
+            "Sets rebase.autoStash when enabled",
+            "Sets push.autoSetupRemote when enabled"
+          ]
+        },
+        {
+          "id": "T007",
+          "title": "Implement editor and line endings configuration",
+          "description": "Add core.editor, core.autocrlf, and core.eol configuration",
+          "status": "not_started",
+          "files": ["src/git/setup.rs"],
+          "acceptance_criteria": [
+            "Sets core.editor when specified",
+            "Sets core.autocrlf with true/false/input",
+            "Sets core.eol when specified"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "Signing Configuration",
+      "status": "not_started",
+      "estimated_days": 1,
+      "tasks": [
+        {
+          "id": "T008",
+          "title": "Implement commit signing setup",
+          "description": "Create src/git/signing.rs with signing configuration for SSH and GPG keys",
+          "status": "not_started",
+          "files": ["src/git/signing.rs", "src/git/setup.rs"],
+          "acceptance_criteria": [
+            "Sets commit.gpgsign = true when signing enabled",
+            "Auto-detects SSH vs GPG from key path",
+            "Sets gpg.format = ssh for SSH keys",
+            "Sets user.signingkey with expanded path",
+            "Expands tilde in key paths"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-4",
+      "name": "Credential Helpers and Aliases",
+      "status": "not_started",
+      "estimated_days": 1,
+      "tasks": [
+        {
+          "id": "T009",
+          "title": "Implement credential helper configuration",
+          "description": "Add OS-specific credential helper configuration with sensible defaults",
+          "status": "not_started",
+          "files": ["src/git/setup.rs"],
+          "acceptance_criteria": [
+            "Uses osxkeychain on macOS",
+            "Uses manager-core on Windows",
+            "Uses cache on Linux",
+            "Respects explicit credential_helper config"
+          ]
+        },
+        {
+          "id": "T010",
+          "title": "Implement alias configuration",
+          "description": "Create src/git/aliases.rs for configuring git aliases from [git.aliases] section",
+          "status": "not_started",
+          "files": ["src/git/aliases.rs", "src/git/setup.rs"],
+          "acceptance_criteria": [
+            "Iterates over aliases HashMap",
+            "Sets alias.{name} for each alias",
+            "Handles shell command aliases (starting with !)"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-5",
+      "name": "Interactive Mode",
+      "status": "not_started",
+      "estimated_days": 1,
+      "tasks": [
+        {
+          "id": "T011",
+          "title": "Implement interactive identity prompting",
+          "description": "Create src/git/identity.rs with prompt_identity() for interactive Git identity setup",
+          "status": "not_started",
+          "files": ["src/git/identity.rs"],
+          "acceptance_criteria": [
+            "Checks current git config for existing identity",
+            "Shows current identity if configured",
+            "Prompts for name and email",
+            "Prompts for commit signing",
+            "Finds default SSH signing key"
+          ]
+        },
+        {
+          "id": "T012",
+          "title": "Implement signing key detection",
+          "description": "Add find_default_signing_key() to detect SSH keys in ~/.ssh/",
+          "status": "not_started",
+          "files": ["src/git/identity.rs"],
+          "acceptance_criteria": [
+            "Checks for id_ed25519.pub",
+            "Falls back to id_rsa.pub",
+            "Returns default path if none found"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-6",
+      "name": "Integration",
+      "status": "not_started",
+      "estimated_days": 1,
+      "tasks": [
+        {
+          "id": "T013",
+          "title": "Integrate git config with JarvyConfig",
+          "description": "Add git field to JarvyConfig in src/config.rs with proper parsing",
+          "status": "not_started",
+          "files": ["src/config.rs"],
+          "acceptance_criteria": [
+            "GitConfig field added to JarvyConfig",
+            "TOML parsing works for [git] section",
+            "Default values applied correctly"
+          ]
+        },
+        {
+          "id": "T014",
+          "title": "Integrate with setup command",
+          "description": "Add git configuration step to src/commands/setup_cmd.rs",
+          "status": "not_started",
+          "files": ["src/commands/setup_cmd.rs"],
+          "acceptance_criteria": [
+            "Git configuration runs after tool installation",
+            "Shows Git Configuration header",
+            "Applies config settings",
+            "Shows success message"
+          ]
+        },
+        {
+          "id": "T015",
+          "title": "Export git module from lib.rs",
+          "description": "Add pub mod git to src/lib.rs",
+          "status": "not_started",
+          "files": ["src/lib.rs"],
+          "acceptance_criteria": [
+            "git module exported",
+            "Public types accessible"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-7",
+      "name": "Testing and Documentation",
+      "status": "not_started",
+      "estimated_days": 1,
+      "tasks": [
+        {
+          "id": "T016",
+          "title": "Add shellexpand dependency",
+          "description": "Add shellexpand crate to Cargo.toml for tilde expansion",
+          "status": "not_started",
+          "files": ["Cargo.toml"],
+          "acceptance_criteria": [
+            "shellexpand added to dependencies",
+            "Version compatible with project"
+          ]
+        },
+        {
+          "id": "T017",
+          "title": "Write git integration tests",
+          "description": "Create tests/git_integration.rs with tests for config parsing and setup",
+          "status": "not_started",
+          "files": ["tests/git_integration.rs"],
+          "acceptance_criteria": [
+            "Config parsing tests",
+            "ConfigValue resolution tests",
+            "Setup tests (mocked git commands)"
+          ]
+        },
+        {
+          "id": "T018",
+          "title": "Update CLAUDE.md documentation",
+          "description": "Add [git] section documentation to CLAUDE.md",
+          "status": "not_started",
+          "files": ["CLAUDE.md"],
+          "acceptance_criteria": [
+            "[git] config section documented",
+            "All options explained",
+            "Environment variable support documented"
+          ]
+        }
+      ]
+    }
+  ],
+  "files_to_create": [
+    "src/git/mod.rs",
+    "src/git/config.rs",
+    "src/git/setup.rs",
+    "src/git/signing.rs",
+    "src/git/aliases.rs",
+    "src/git/identity.rs",
+    "tests/git_integration.rs"
+  ],
+  "files_to_modify": [
+    "src/config.rs",
+    "src/lib.rs",
+    "src/commands/setup_cmd.rs",
+    "Cargo.toml",
+    "CLAUDE.md"
+  ],
+  "dependencies": {
+    "new": ["shellexpand"],
+    "existing": ["serde", "dirs"]
+  },
+  "success_metrics": {
+    "manual_git_config_before": "5-10 commands",
+    "manual_git_config_after": "0 commands",
+    "wrong_email_commits_before": "~10%",
+    "wrong_email_commits_after": "<1%",
+    "unsigned_commits_before": "~30%",
+    "unsigned_commits_after": "<5%"
+  },
+  "non_goals": [
+    "SSH key generation",
+    "GitHub/GitLab account setup",
+    "Repository creation/cloning",
+    "Git LFS configuration",
+    "Pre-commit hook content"
+  ]
+}

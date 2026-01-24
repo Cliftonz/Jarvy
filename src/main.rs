@@ -14,6 +14,7 @@ mod commands;
 mod config;
 mod env;
 mod error_codes;
+mod git;
 mod hooks;
 mod init;
 pub mod interactive;

@@ -44,6 +44,7 @@
 | PRD-037 | Main.rs Code Maintainability Refactor | 2026-01-19 | main.rs reduced 83% (3175→542 lines), CLI extracted to `src/cli/`, commands to `src/commands/` |
 | PRD-038 | Hybrid Cross-Platform E2E Testing Harness | 2026-01-19 | GitHub-hosted runners (free) + AWS EC2 Spot (~$5-15/mo), 10 platforms, tiered tool testing |
 | PRD-039 | Language Package Dependencies | 2026-01-23 | `[npm]`, `[pip]`, `[cargo]` sections, package manager detection, virtual env support |
+| PRD-041 | Git Configuration Automation | 2026-01-24 | `[git]` section, identity, signing (SSH/GPG), aliases, defaults, credential helpers |
 
 ---
 
@@ -599,6 +600,58 @@ locked = true               # Use --locked flag
 - Rust 2024: `if let Some(ref x) = ...` triggers "cannot explicitly borrow" error; use `if let Some(x) = ...` instead
 - `#[serde(flatten)]` with HashMap captures dynamic TOML keys while allowing fixed fields like `package_manager`
 - PackageSpec with `#[serde(untagged)]` allows flexible parsing of version strings vs detailed objects
+
+### PRD-041 Git Configuration Automation (Completed 2026-01-24)
+**Goal**: Configure Git settings from `jarvy.toml` to ensure consistent identity, signing, and preferences.
+
+**Module**: `src/git/` - Git configuration automation
+
+**Files Created:**
+- `mod.rs` - Public API exports
+- `config.rs` - GitConfig, ConfigValue, ConfigScope, SigningFormat, AutoCrlf types
+- `setup.rs` - GitSetup for applying configuration
+- `signing.rs` - SSH/GPG signing detection and validation
+- `aliases.rs` - Recommended aliases and formatting
+- `identity.rs` - Interactive prompting and key detection
+
+**Configuration Example:**
+```toml
+[git]
+user_name = "John Doe"
+user_email = { env = "GIT_EMAIL", default = "john@example.com" }
+signing = true
+signing_key = "~/.ssh/id_ed25519.pub"
+default_branch = "main"
+pull_rebase = true
+auto_stash = true
+push_autosetup = true
+editor = "vim"
+autocrlf = "input"
+scope = "global"
+
+[git.aliases]
+co = "checkout"
+lg = "log --oneline --graph --decorate"
+```
+
+**Key Features:**
+- `ConfigValue` with environment variable support and defaults
+- SSH vs GPG signing auto-detection from key path
+- OS-specific credential helper defaults
+- Alias configuration
+- Dry-run mode support in setup
+
+**Tests Added:** 16 unit tests covering:
+- Config parsing and ConfigValue resolution
+- AutoCrlf string conversion
+- Signing format detection
+- Key path detection
+- Alias formatting
+
+**Technical Learnings:**
+- `shellexpand::tilde()` for path expansion in signing keys
+- `#[serde(untagged)]` allows ConfigValue to be either plain string or `{ env, default }` object
+- Credential helper auto-detection by target_os cfg flags
 
 ### Future Enhancements
 - `jarvy search --category` (category filtering)

@@ -487,6 +487,47 @@ pub fn run_setup(
         }
     }
 
+    // Git configuration
+    if config.has_git() {
+        if let Some(git_config) = config.get_git() {
+            if dry_run {
+                println!("\n=== Git Configuration (dry-run) ===");
+                if let Some(ref name) = git_config.user_name {
+                    if let Some(resolved) = name.resolve() {
+                        println!("[DRY-RUN] Would set git config user.name: {}", resolved);
+                    }
+                }
+                if let Some(ref email) = git_config.user_email {
+                    if let Some(resolved) = email.resolve() {
+                        println!("[DRY-RUN] Would set git config user.email: {}", resolved);
+                    }
+                }
+                if git_config.signing {
+                    println!("[DRY-RUN] Would enable commit signing");
+                    if let Some(ref key) = git_config.signing_key {
+                        println!("[DRY-RUN] Would set signing key: {}", key);
+                    }
+                }
+                if let Some(ref branch) = git_config.default_branch {
+                    println!("[DRY-RUN] Would set init.defaultBranch: {}", branch);
+                }
+                if !git_config.aliases.is_empty() {
+                    println!(
+                        "[DRY-RUN] Would configure {} git aliases",
+                        git_config.aliases.len()
+                    );
+                }
+            } else {
+                println!("\n=== Git Configuration ===");
+                let setup = crate::git::GitSetup::new(git_config.clone());
+                match setup.configure() {
+                    Ok(()) => println!("Git configuration applied successfully"),
+                    Err(e) => eprintln!("Warning: Git configuration failed: {}", e),
+                }
+            }
+        }
+    }
+
     // Environment variable setup
     let env_config = config.get_env();
     let env_settings = &env_config.config;

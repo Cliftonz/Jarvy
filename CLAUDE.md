@@ -232,6 +232,73 @@ locked = true               # Use --locked flag
 
 **Integration**: Package installation runs after tool hooks and before environment setup in `jarvy setup`.
 
+### Git Configuration
+
+Jarvy can configure Git settings including user identity, commit signing, default branch, and aliases.
+
+**Module**: `src/git/` - Git configuration automation
+
+**Configuration** (`jarvy.toml`):
+```toml
+[git]
+# User identity (plain string or from environment)
+user_name = "John Doe"
+user_email = { env = "GIT_EMAIL", default = "john@example.com" }
+
+# Commit signing (SSH or GPG)
+signing = true
+signing_key = "~/.ssh/id_ed25519.pub"
+signing_format = "ssh"  # or "gpg", auto-detected if not set
+
+# Default settings
+default_branch = "main"
+pull_rebase = true
+auto_stash = true
+push_autosetup = true
+editor = "vim"
+
+# Line endings
+autocrlf = "input"  # true, false, or input
+eol = "lf"
+
+# Credential helper (auto-detected by OS if not set)
+credential_helper = "osxkeychain"
+
+# Configuration scope
+scope = "global"  # or "local"
+
+# Git aliases
+[git.aliases]
+co = "checkout"
+br = "branch"
+ci = "commit"
+st = "status"
+lg = "log --oneline --graph --decorate"
+```
+
+**Key Types**:
+- `GitConfig` - Main configuration struct
+- `ConfigValue` - Plain string or `{ env = "VAR", default = "value" }`
+- `ConfigScope` - `global` (~/.gitconfig) or `local` (.git/config)
+- `SigningFormat` - `ssh` or `gpg`
+- `AutoCrlf` - `true`, `false`, or `input`
+
+**ConfigValue Resolution**:
+- Plain: `user_name = "John"` → Uses value directly
+- From Env: `user_email = { env = "GIT_EMAIL" }` → Reads from environment
+- With Default: `user_email = { env = "GIT_EMAIL", default = "fallback@example.com" }`
+
+**Signing Auto-Detection**:
+- Keys ending in `.pub` → SSH signing
+- Other keys → GPG signing
+
+**Credential Helper Defaults**:
+- macOS: `osxkeychain`
+- Linux: `cache`
+- Windows: `manager-core`
+
+**Integration**: Git configuration runs after package installation and before environment setup in `jarvy setup`.
+
 ### Config Files
 
 - **`jarvy.toml`** (project) - Tools to provision with versions
