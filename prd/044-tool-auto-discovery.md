@@ -1,0 +1,665 @@
+# PRD-044: Tool Auto-Discovery
+
+## Overview
+
+Enable Jarvy to analyze project files and automatically suggest or configure tools based on detected technologies, reducing manual configuration and ensuring new developers get a complete environment without guessing what's needed.
+
+## Problem Statement
+
+Creating a `jarvy.toml` for a project requires knowing what tools the project needs:
+
+- New team members don't know what tools are required
+- Maintainers forget to update `jarvy.toml` when adding technologies
+- Reviewing every config file to identify tooling is tedious
+- Common tools are often missed (formatters, linters, git hooks)
+- Different projects have different conventions for the same technology
+
+Auto-discovery can bootstrap configuration and keep it current.
+
+## Evidence
+
+- "What do I need to install?" is a common onboarding question
+- `jarvy.toml` files are often incomplete or outdated
+- Projects with complex stacks have long, manual setup docs
+- New tools get adopted but never added to provisioning config
+- Similar projects have inconsistent `jarvy.toml` configurations
+
+## Requirements
+
+### Functional Requirements
+
+1. **Project scanning**: Analyze project files to detect technologies
+2. **Tool mapping**: Map detected technologies to Jarvy tools
+3. **Version detection**: Infer versions from lock files and config
+4. **Config generation**: Generate or update `jarvy.toml`
+5. **Interactive mode**: Let users confirm/modify suggestions
+6. **Continuous discovery**: Detect when new tools are needed
+
+### Non-Functional Requirements
+
+1. **Fast**: Complete scan in <3 seconds for typical projects
+2. **Accurate**: >95% precision in suggestions
+3. **Non-invasive**: Never auto-modify without confirmation
+4. **Extensible**: Easy to add new detection rules
+5. **Quiet**: Suggestions only, not warnings
+
+## Non-Goals
+
+- Deep static analysis of code
+- Runtime dependency analysis
+- Detecting tools that aren't in Jarvy's registry
+- Language-specific package installation (separate PRD-039)
+- Framework-specific setup (e.g., Rails database config)
+
+## Feature Specifications
+
+### 1. Detection Rules
+
+```yaml
+# Detection rules (internal configuration)
+rules:
+  # Rust detection
+  - name: rust
+    detect:
+      - file: "Cargo.toml"
+      - file: "Cargo.lock"
+      - file: "*.rs"
+    version_from:
+      file: "rust-toolchain.toml"
+      pattern: 'channel = "(\d+\.\d+)"'
+    suggests: [cargo-watch, cargo-nextest, rustfmt, clippy]
+
+  # Node.js detection
+  - name: node
+    detect:
+      - file: "package.json"
+      - file: "package-lock.json"
+      - file: "yarn.lock"
+      - file: "pnpm-lock.yaml"
+    version_from:
+      file: ".nvmrc"
+      pattern: "v?(\\d+)"
+    suggests: [npm, yarn, pnpm]
+
+  # Python detection
+  - name: python
+    detect:
+      - file: "pyproject.toml"
+      - file: "requirements.txt"
+      - file: "Pipfile"
+      - file: "setup.py"
+    version_from:
+      file: ".python-version"
+    suggests: [pip, pipenv, poetry, uv]
+
+  # Docker detection
+  - name: docker
+    detect:
+      - file: "Dockerfile"
+      - file: "docker-compose.yml"
+      - file: "docker-compose.yaml"
+      - file: "compose.yml"
+    suggests: [docker-compose, lazydocker]
+
+  # Kubernetes detection
+  - name: kubectl
+    detect:
+      - dir: "k8s/"
+      - dir: "kubernetes/"
+      - file: "*.yaml" containing "kind: Deployment"
+    suggests: [helm, kustomize, k9s, kubectx]
+
+  # Terraform detection
+  - name: terraform
+    detect:
+      - file: "*.tf"
+      - file: ".terraform.lock.hcl"
+    suggests: [tflint, terraform-docs]
+
+  # Git hooks detection
+  - name: pre-commit
+    detect:
+      - file: ".pre-commit-config.yaml"
+    suggests: [pre-commit]
+```
+
+### 2. CLI Commands
+
+```bash
+# Scan project and show suggestions
+jarvy discover
+
+# Output:
+# Project Analysis
+# ================
+#
+# Detected Technologies:
+#   ✓ Rust (from Cargo.toml, rust-toolchain.toml)
+#   ✓ Docker (from Dockerfile, docker-compose.yml)
+#   ✓ Node.js (from package.json)
+#   ✓ Kubernetes (from k8s/ directory)
+#
+# Suggested Tools:
+#   Required:
+#     rust       1.75.0  (from rust-toolchain.toml)
+#     node       20      (from .nvmrc)
+#     docker     latest
+#     kubectl    latest
+#
+#   Recommended:
+#     cargo-watch     (for Rust development)
+#     docker-compose  (for Docker workflows)
+#     k9s             (for Kubernetes management)
+#     pre-commit      (detected .pre-commit-config.yaml)
+#
+# Run 'jarvy discover --apply' to update jarvy.toml
+
+# Generate/update jarvy.toml
+jarvy discover --apply
+
+# Interactive mode (confirm each suggestion)
+jarvy discover --interactive
+
+# Output only missing tools
+jarvy discover --missing
+
+# JSON output for scripting
+jarvy discover --json
+
+# Scan with custom rules file
+jarvy discover --rules ./custom-rules.yaml
+```
+
+### 3. Generated Configuration
+
+```toml
+# jarvy.toml (generated by jarvy discover)
+
+# Auto-discovered by Jarvy
+# Run 'jarvy discover' to update
+
+[provisioner]
+# Core tools (detected from project files)
+rust = "1.75"      # from rust-toolchain.toml
+node = "20"        # from .nvmrc
+docker = "latest"  # from Dockerfile
+kubectl = "latest" # from k8s/
+
+# Recommended tools
+cargo-watch = "latest"
+docker-compose = "latest"
+k9s = "latest"
+pre-commit = "latest"
+
+# Development tools
+ripgrep = "latest"
+fd = "latest"
+jq = "latest"
+```
+
+### 4. Configuration Options
+
+```toml
+# jarvy.toml
+
+[discover]
+# Enable continuous discovery (check on setup)
+enabled = true
+
+# Auto-add new tools without prompting
+auto_add = false
+
+# Directories to skip
+ignore_dirs = ["node_modules", "target", ".git", "vendor"]
+
+# Files to skip
+ignore_files = ["*.min.js", "*.bundle.js"]
+
+# Custom detection rules
+rules_file = ".jarvy/discovery-rules.yaml"
+
+# Categories to discover
+categories = ["runtime", "build", "dev", "ops"]
+# Options: runtime, build, dev, ops, all
+```
+
+## Technical Approach
+
+### Module Structure
+
+```
+src/
+  discover/
+    mod.rs           # Public API
+    config.rs        # Discovery configuration
+    scanner.rs       # Project file scanner
+    rules.rs         # Detection rule engine
+    version.rs       # Version extraction
+    suggestions.rs   # Tool suggestion logic
+    generator.rs     # Config file generation
+    commands.rs      # CLI command handlers
+```
+
+### Detection Engine
+
+```rust
+// src/discover/rules.rs
+use serde::{Deserialize, Serialize};
+use glob::Pattern;
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DetectionRule {
+    pub name: String,
+    pub detect: Vec<DetectionPattern>,
+    pub version_from: Option<VersionSource>,
+    pub suggests: Vec<String>,
+    pub category: ToolCategory,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum DetectionPattern {
+    File { file: String },
+    Dir { dir: String },
+    FileContaining {
+        file: String,
+        containing: String,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct VersionSource {
+    pub file: String,
+    pub pattern: Option<String>,
+    pub key: Option<String>,  // For TOML/JSON files
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolCategory {
+    Runtime,  // Node, Python, Rust, Go
+    Build,    // Make, CMake, Bazel
+    Dev,      // formatters, linters, watchers
+    Ops,      // Docker, Kubernetes, Terraform
+}
+
+pub struct RuleEngine {
+    rules: Vec<DetectionRule>,
+}
+
+impl RuleEngine {
+    pub fn new() -> Self {
+        Self {
+            rules: Self::default_rules(),
+        }
+    }
+
+    pub fn with_custom_rules(custom: Vec<DetectionRule>) -> Self {
+        let mut rules = Self::default_rules();
+        rules.extend(custom);
+        Self { rules }
+    }
+
+    pub fn detect(&self, project_dir: &Path) -> Vec<Detection> {
+        let mut detections = Vec::new();
+
+        for rule in &self.rules {
+            if self.matches_rule(project_dir, rule) {
+                let version = self.extract_version(project_dir, rule);
+                detections.push(Detection {
+                    tool: rule.name.clone(),
+                    version,
+                    source: self.detection_source(project_dir, rule),
+                    suggests: rule.suggests.clone(),
+                    category: rule.category,
+                });
+            }
+        }
+
+        detections
+    }
+
+    fn matches_rule(&self, project_dir: &Path, rule: &DetectionRule) -> bool {
+        for pattern in &rule.detect {
+            if self.matches_pattern(project_dir, pattern) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn matches_pattern(&self, project_dir: &Path, pattern: &DetectionPattern) -> bool {
+        match pattern {
+            DetectionPattern::File { file } => {
+                let glob = Pattern::new(file).ok();
+                self.find_matching_file(project_dir, glob.as_ref()).is_some()
+            }
+            DetectionPattern::Dir { dir } => {
+                project_dir.join(dir).is_dir()
+            }
+            DetectionPattern::FileContaining { file, containing } => {
+                if let Some(path) = self.find_matching_file(project_dir, Pattern::new(file).ok().as_ref()) {
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        return content.contains(containing);
+                    }
+                }
+                false
+            }
+        }
+    }
+
+    fn default_rules() -> Vec<DetectionRule> {
+        // Built-in detection rules
+        vec![
+            // Rust
+            DetectionRule {
+                name: "rust".to_string(),
+                detect: vec![
+                    DetectionPattern::File { file: "Cargo.toml".to_string() },
+                ],
+                version_from: Some(VersionSource {
+                    file: "rust-toolchain.toml".to_string(),
+                    pattern: Some(r#"channel\s*=\s*"(\d+\.\d+)""#.to_string()),
+                    key: None,
+                }),
+                suggests: vec!["cargo-watch".to_string(), "cargo-nextest".to_string()],
+                category: ToolCategory::Runtime,
+            },
+            // Node.js
+            DetectionRule {
+                name: "node".to_string(),
+                detect: vec![
+                    DetectionPattern::File { file: "package.json".to_string() },
+                ],
+                version_from: Some(VersionSource {
+                    file: ".nvmrc".to_string(),
+                    pattern: Some(r"v?(\d+)".to_string()),
+                    key: None,
+                }),
+                suggests: vec![],
+                category: ToolCategory::Runtime,
+            },
+            // Docker
+            DetectionRule {
+                name: "docker".to_string(),
+                detect: vec![
+                    DetectionPattern::File { file: "Dockerfile".to_string() },
+                    DetectionPattern::File { file: "docker-compose.yml".to_string() },
+                ],
+                version_from: None,
+                suggests: vec!["docker-compose".to_string(), "lazydocker".to_string()],
+                category: ToolCategory::Ops,
+            },
+            // ... more rules
+        ]
+    }
+}
+```
+
+### Version Extraction
+
+```rust
+// src/discover/version.rs
+use regex::Regex;
+
+pub struct VersionExtractor;
+
+impl VersionExtractor {
+    pub fn extract(project_dir: &Path, source: &VersionSource) -> Option<String> {
+        let file_path = project_dir.join(&source.file);
+        let content = std::fs::read_to_string(&file_path).ok()?;
+
+        // Try regex pattern first
+        if let Some(pattern) = &source.pattern {
+            if let Ok(re) = Regex::new(pattern) {
+                if let Some(caps) = re.captures(&content) {
+                    return caps.get(1).map(|m| m.as_str().to_string());
+                }
+            }
+        }
+
+        // Try TOML/JSON key extraction
+        if let Some(key) = &source.key {
+            return Self::extract_from_config(&content, &source.file, key);
+        }
+
+        // Plain file content (e.g., .nvmrc, .python-version)
+        Some(content.trim().to_string())
+    }
+
+    fn extract_from_config(content: &str, filename: &str, key: &str) -> Option<String> {
+        if filename.ends_with(".toml") {
+            let table: toml::Table = toml::from_str(content).ok()?;
+            Self::get_nested_value(&table, key)
+        } else if filename.ends_with(".json") {
+            let json: serde_json::Value = serde_json::from_str(content).ok()?;
+            Self::get_json_value(&json, key)
+        } else {
+            None
+        }
+    }
+}
+```
+
+### Suggestion Generator
+
+```rust
+// src/discover/suggestions.rs
+use crate::tools::registry::get_all_tools;
+
+pub struct SuggestionGenerator {
+    detections: Vec<Detection>,
+    existing_config: Option<JarvyConfig>,
+}
+
+#[derive(Debug)]
+pub struct Suggestions {
+    pub required: Vec<ToolSuggestion>,
+    pub recommended: Vec<ToolSuggestion>,
+    pub already_configured: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct ToolSuggestion {
+    pub name: String,
+    pub version: String,
+    pub reason: String,
+    pub category: ToolCategory,
+}
+
+impl SuggestionGenerator {
+    pub fn generate(&self) -> Suggestions {
+        let mut suggestions = Suggestions {
+            required: Vec::new(),
+            recommended: Vec::new(),
+            already_configured: Vec::new(),
+        };
+
+        let configured_tools = self.existing_config
+            .as_ref()
+            .map(|c| c.provisioner_tools())
+            .unwrap_or_default();
+
+        for detection in &self.detections {
+            // Primary tool (required)
+            if configured_tools.contains(&detection.tool) {
+                suggestions.already_configured.push(detection.tool.clone());
+            } else if get_all_tools().contains(&detection.tool.as_str()) {
+                suggestions.required.push(ToolSuggestion {
+                    name: detection.tool.clone(),
+                    version: detection.version.clone().unwrap_or_else(|| "latest".to_string()),
+                    reason: format!("detected from {}", detection.source),
+                    category: detection.category,
+                });
+            }
+
+            // Suggested companion tools (recommended)
+            for suggested in &detection.suggests {
+                if !configured_tools.contains(suggested)
+                    && get_all_tools().contains(&suggested.as_str())
+                {
+                    suggestions.recommended.push(ToolSuggestion {
+                        name: suggested.clone(),
+                        version: "latest".to_string(),
+                        reason: format!("commonly used with {}", detection.tool),
+                        category: ToolCategory::Dev,
+                    });
+                }
+            }
+        }
+
+        // Deduplicate recommendations
+        suggestions.recommended.dedup_by(|a, b| a.name == b.name);
+
+        suggestions
+    }
+}
+```
+
+### Config Generator
+
+```rust
+// src/discover/generator.rs
+use std::path::Path;
+
+pub struct ConfigGenerator;
+
+impl ConfigGenerator {
+    pub fn generate(suggestions: &Suggestions) -> String {
+        let mut config = String::new();
+
+        config.push_str("# jarvy.toml (generated by jarvy discover)\n");
+        config.push_str("# Run 'jarvy discover' to update\n\n");
+
+        config.push_str("[provisioner]\n");
+        config.push_str("# Core tools (detected from project files)\n");
+
+        for tool in &suggestions.required {
+            config.push_str(&format!(
+                "{} = \"{}\"  # {}\n",
+                tool.name, tool.version, tool.reason
+            ));
+        }
+
+        if !suggestions.recommended.is_empty() {
+            config.push_str("\n# Recommended tools\n");
+            for tool in &suggestions.recommended {
+                config.push_str(&format!(
+                    "{} = \"{}\"  # {}\n",
+                    tool.name, tool.version, tool.reason
+                ));
+            }
+        }
+
+        config
+    }
+
+    pub fn update_existing(existing: &str, suggestions: &Suggestions) -> String {
+        // Parse existing config, merge with suggestions
+        let mut config: toml::Table = toml::from_str(existing).unwrap_or_default();
+
+        let provisioner = config
+            .entry("provisioner")
+            .or_insert(toml::Value::Table(toml::Table::new()))
+            .as_table_mut()
+            .unwrap();
+
+        for tool in &suggestions.required {
+            if !provisioner.contains_key(&tool.name) {
+                provisioner.insert(tool.name.clone(), toml::Value::String(tool.version.clone()));
+            }
+        }
+
+        toml::to_string_pretty(&config).unwrap()
+    }
+}
+```
+
+## Implementation Steps
+
+1. Create discover module structure
+2. Implement DiscoverConfig parsing
+3. Implement project file scanner
+4. Implement detection rule engine
+5. Implement version extraction
+6. Define default detection rules for all supported tools
+7. Implement suggestion generator
+8. Implement config file generator
+9. Implement `discover` command
+10. Implement `--apply` mode
+11. Implement `--interactive` mode
+12. Implement continuous discovery (check_on_setup)
+13. Add custom rules file support
+14. Write tests for detection rules
+15. Update documentation
+
+## Success Metrics
+
+| Metric | Current | Target |
+|--------|---------|--------|
+| Manual tool identification time | 10-30 minutes | <1 minute |
+| `jarvy.toml` completeness | ~60% | >95% |
+| New tool adoption lag | Days/weeks | Immediate |
+| Onboarding "what tools" questions | Common | Rare |
+
+## Risks and Mitigations
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| False positive detections | Medium | Low | High precision rules, user confirmation |
+| Missing detections | Medium | Low | Extensible rules, user can add manually |
+| Version detection failures | Medium | Low | Fall back to "latest" |
+| Slow scanning on large repos | Low | Medium | Ignore patterns, file limits |
+| Rule maintenance burden | Medium | Low | Well-structured rules, community contributions |
+
+## Dependencies
+
+### New Dependencies
+- `glob` - Pattern matching for file detection
+- `regex` - Version extraction patterns
+
+### Existing Dependencies
+- `toml` - Config parsing/generation
+- `serde` - Serialization
+
+## Effort Estimate
+
+| Task | Effort |
+|------|--------|
+| Module structure and config | 0.5 days |
+| Project scanner | 0.5 days |
+| Rule engine | 1 day |
+| Version extraction | 0.5 days |
+| Default detection rules | 1.5 days |
+| Suggestion generator | 0.5 days |
+| Config generator | 0.5 days |
+| CLI commands | 1 day |
+| Interactive mode | 0.5 days |
+| Custom rules support | 0.5 days |
+| Testing | 1 day |
+| Documentation | 0.5 days |
+| **Total** | **8.5 days** |
+
+## Files to Create/Modify
+
+### New Files
+- `src/discover/mod.rs`
+- `src/discover/config.rs`
+- `src/discover/scanner.rs`
+- `src/discover/rules.rs`
+- `src/discover/version.rs`
+- `src/discover/suggestions.rs`
+- `src/discover/generator.rs`
+- `src/discover/commands.rs`
+- `tests/discover_integration.rs`
+
+### Modified Files
+- `src/config.rs` - Add discover config parsing
+- `src/lib.rs` - Export discover module
+- `src/main.rs` - Add discover subcommand
+- `Cargo.toml` - Add glob dependency (if not present)
+- `CLAUDE.md` - Document [discover] section and CLI
+
+---
+
+*PRD-044 v1.0 | Tool Auto-Discovery | Priority: Medium*

@@ -52,6 +52,26 @@ This folder contains PRDs for improving Jarvy based on a comprehensive codebase 
 | 22 | [Remote Telemetry & Monitoring](022-remote-telemetry-monitoring.md) | Observability | 3-5 days | OTEL metrics, traces, unsupported tool reporting |
 | 23 | [Docker MCP Catalog](025-docker-mcp-catalog.md) | Distribution | 2-3 days | Containerize and publish to Docker Desktop MCP catalog |
 
+### Tier 7: Environment & Developer Experience
+
+| # | PRD | Impact | Effort | Description |
+|---|-----|--------|--------|-------------|
+| 39 | [Language Package Dependencies](039-language-package-dependencies.md) | Full env | 10 days | npm, pip, cargo, gem package installation |
+| 40 | [IDE Extension Management](040-ide-extension-management.md) | DX | 7.5 days | VS Code and JetBrains extension installation |
+| 41 | [Git Configuration Automation](041-git-configuration-automation.md) | DX | 7 days | User identity, signing, aliases, hooks |
+| 42 | [Secrets Management Integration](042-secrets-management-integration.md) | Security | 10 days | 1Password, Vault, AWS Secrets Manager |
+| 43 | [Configuration Drift Detection](043-configuration-drift-detection.md) | Stability | 9 days | Detect when environment drifts from config |
+| 44 | [Tool Auto-Discovery](044-tool-auto-discovery.md) | DX | 8.5 days | Detect required tools from project files |
+
+### Tier 8: Advanced Capabilities
+
+| # | PRD | Impact | Effort | Description |
+|---|-----|--------|--------|-------------|
+| 45 | [Dependency Graph Visualization](045-dependency-graph-visualization.md) | Visibility | 8 days | ASCII/DOT/SVG/HTML dependency graphs |
+| 46 | [Per-Tool Performance Analytics](046-per-tool-performance-analytics.md) | Insights | 8 days | Track installation times and failures |
+| 47 | [Multi-Project/Monorepo Support](047-multi-project-monorepo-support.md) | Scale | 8.5 days | Workspace configs with inheritance |
+| 48 | [Pre-Commit Hook Installation](048-pre-commit-hook-installation.md) | Quality | 7 days | pre-commit, husky, lefthook integration |
+
 ## Recommended Implementation Order
 
 ```
@@ -84,6 +104,20 @@ Phase 6: Security & Compliance (1+ week)
 Phase 7: Ecosystem & Integrations (2+ weeks)
 ├── PRD-021: MCP Server                ← LLM integration via Claude, Cursor, etc.
 └── PRD-022: Remote Telemetry          ← OTEL observability, unsupported tool feedback
+
+Phase 8: Environment & Developer Experience (6+ weeks)
+├── PRD-039: Language Package Deps     ← npm, pip, cargo, gem packages
+├── PRD-040: IDE Extensions            ← VS Code and JetBrains extensions
+├── PRD-041: Git Configuration         ← Identity, signing, aliases
+├── PRD-042: Secrets Management        ← 1Password, Vault, AWS SM integration
+├── PRD-043: Drift Detection           ← Environment state monitoring
+└── PRD-044: Tool Auto-Discovery       ← Project analysis for tool suggestions
+
+Phase 9: Advanced Capabilities (4+ weeks)
+├── PRD-045: Dependency Graph          ← Visualization of tool dependencies
+├── PRD-046: Performance Analytics     ← Installation timing and insights
+├── PRD-047: Monorepo Support          ← Workspace configs with inheritance
+└── PRD-048: Pre-Commit Hooks          ← pre-commit, husky, lefthook
 ```
 
 ## Quick Reference
@@ -108,6 +142,16 @@ Phase 7: Ecosystem & Integrations (2+ weeks)
 | No visibility into unsupported tool requests | [022](022-remote-telemetry-monitoring.md) |
 | Tool dependencies are too rigid | [034](034-enhanced-dependency-system.md) |
 | Users run outdated versions | [035](035-self-updating.md) |
+| Can't install npm/pip/cargo packages | [039](039-language-package-dependencies.md) |
+| Must manually install VS Code extensions | [040](040-ide-extension-management.md) |
+| Must manually configure Git identity | [041](041-git-configuration-automation.md) |
+| Secrets must be configured manually | [042](042-secrets-management-integration.md) |
+| No visibility into environment drift | [043](043-configuration-drift-detection.md) |
+| Must manually identify required tools | [044](044-tool-auto-discovery.md) |
+| Can't see tool dependencies | [045](045-dependency-graph-visualization.md) |
+| No insight into slow installations | [046](046-per-tool-performance-analytics.md) |
+| Monorepos need multiple configs | [047](047-multi-project-monorepo-support.md) |
+| Pre-commit hooks need manual setup | [048](048-pre-commit-hook-installation.md) |
 
 ### Dependencies Between PRDs
 
@@ -147,6 +191,46 @@ Enables flexible dependencies (kubectl needs any K8s cluster, not all of them)
 PRD-035 (Self-Update) ←────────────────────── PRD-012 (Distribution) for release binaries
        ↓
 Keeps users on latest version automatically, enabled by default
+
+PRD-039 (Package Deps) ←─────────────────── PRD-003 (Hooks) for post-install scripts
+       ↓
+Enables npm install, pip install, cargo build after tool installation
+
+PRD-040 (IDE Extensions) ←───────────────── PRD-001 (Parallel) for concurrent extension installs
+       ↓
+VS Code and JetBrains extensions as part of environment setup
+
+PRD-041 (Git Config) ←───────────────────── PRD-003 (Hooks) for identity prompts
+       ↓
+Git identity, signing, and aliases automatically configured
+
+PRD-042 (Secrets) ←──────────────────────── PRD-008 (Env Vars) for environment injection
+       ↓
+Secrets from 1Password, Vault, AWS injected into environment
+
+PRD-043 (Drift) ←────────────────────────── PRD-001 (Parallel) for fast version checks
+       ↓
+Detects when installed tools drift from expected configuration
+
+PRD-044 (Discovery) ←────────────────────── PRD-002 (Tool Spec) for tool registry
+       ↓
+Analyzes project files to suggest tools for jarvy.toml
+
+PRD-045 (Graph) ←────────────────────────── PRD-034 (Dependencies) for dependency data
+       ↓
+Visualizes tool dependencies in ASCII, DOT, SVG, HTML formats
+
+PRD-046 (Analytics) ←────────────────────── PRD-001 (Parallel) for timing data
+       ↓
+Tracks per-tool installation performance over time
+
+PRD-047 (Monorepo) ←─────────────────────── PRD-003 (Hooks) for per-project hooks
+       ↓
+Workspace configs with tool inheritance across projects
+
+PRD-048 (Pre-commit) ←───────────────────── PRD-041 (Git Config) for git hook paths
+       ↓
+Installs pre-commit, husky, or lefthook hooks automatically
 ```
 
 ## Analysis Sources
