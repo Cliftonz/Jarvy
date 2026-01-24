@@ -39,6 +39,7 @@ Jarvy is a cross-platform CLI tool that provisions development environments from
 - **`src/tools/registry.rs`** - Global `OnceLock<RwLock<HashMap>>` registry mapping tool names to handler functions
 - **`src/tools/common.rs`** - Shared utilities: `Os` enum, `InstallError` type, `run()`, `has()`, `cmd_satisfies()`, package manager detection
 - **`src/tools/spec.rs`** - ToolSpec pattern: `ToolSpec` struct and `define_tool!` macro for declarative tool definitions
+- **`src/packages/`** - Language package dependencies (npm, pip, cargo) with virtual environment support (PRD-039)
 
 ### Tool Implementation Pattern
 
@@ -180,6 +181,56 @@ jarvy setup --role <name>           # Override role for single run
 ```
 
 **Module**: `src/roles/` - Role definitions, resolution with inheritance, and CLI commands.
+
+### Language Package Dependencies
+
+Jarvy supports installing language-specific packages alongside CLI tools via `[npm]`, `[pip]`, and `[cargo]` sections.
+
+**Module**: `src/packages/` - Language package dependency management.
+
+**Key Files**:
+- `mod.rs` - `install_packages()` orchestration function
+- `config.rs` - PackagesConfig, NpmConfig, PipConfig, CargoConfig, PackageSpec
+- `common.rs` - PackageError, run_package_command(), command_exists()
+- `npm.rs` - NpmHandler with package manager auto-detection
+- `pip.rs` - PipHandler with virtual environment support
+- `cargo_pkg.rs` - CargoHandler for cargo install
+
+**Configuration** (`jarvy.toml`):
+```toml
+[npm]
+typescript = "^5.0"
+eslint = "latest"
+package_manager = "pnpm"    # Auto-detected from lock file if not set
+from_lockfile = false       # Install from package-lock.json instead
+
+[pip]
+pytest = ">=7.0"
+black = "latest"
+venv = ".venv"              # Virtual environment path
+create_venv = true          # Auto-create venv if missing
+from_lockfile = false       # Install from requirements.txt instead
+
+[cargo]
+cargo-watch = "latest"
+cargo-nextest = "0.9"
+locked = true               # Use --locked flag
+```
+
+**Package Spec Variants**:
+- Simple: `typescript = "^5.0"`
+- Detailed: `some-crate = { version = "1.0", optional = true, features = ["feature1"] }`
+
+**Package Manager Detection** (npm):
+- Auto-detects from lock files: `pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn
+- Explicit override: `package_manager = "yarn"`
+
+**Virtual Environment** (pip):
+- Creates `.venv` if `venv` is set and `create_venv = true`
+- Shows activation hint after setup
+- Supports `--system-site-packages`
+
+**Integration**: Package installation runs after tool hooks and before environment setup in `jarvy setup`.
 
 ### Config Files
 

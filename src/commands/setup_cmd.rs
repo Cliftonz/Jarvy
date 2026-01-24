@@ -20,6 +20,7 @@ use crate::env::{
 use crate::error_codes;
 use crate::hooks::{Hook, HookConfig, HookEnv};
 use crate::onboarding::mark_initialized;
+use crate::packages;
 use crate::remote::fetch_remote_config;
 use crate::services;
 use crate::setup::setup;
@@ -456,6 +457,32 @@ pub fn run_setup(
                 )
                 .with_env(env);
                 hook.dry_run();
+            }
+        }
+    }
+
+    // Install language-specific packages (npm, pip, cargo)
+    if config.has_packages() {
+        let packages_config = config.get_packages_config();
+        let project_dir = std::path::Path::new(file)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+
+        if dry_run {
+            println!("\n=== Package Dependencies (dry-run) ===");
+            if packages_config.npm.is_some() {
+                println!("[DRY-RUN] Would install npm packages");
+            }
+            if packages_config.pip.is_some() {
+                println!("[DRY-RUN] Would install pip packages");
+            }
+            if packages_config.cargo.is_some() {
+                println!("[DRY-RUN] Would install cargo binaries");
+            }
+        } else {
+            println!("\n=== Installing Package Dependencies ===");
+            if let Err(e) = packages::install_packages(&packages_config, project_dir) {
+                eprintln!("Warning: Package installation failed: {}", e);
             }
         }
     }

@@ -286,6 +286,15 @@ pub struct Config {
     #[serde(default)]
     #[allow(dead_code)] // Used for proxy configuration in corporate environments
     pub network: crate::network::NetworkConfig,
+    /// npm package configuration
+    #[serde(default)]
+    pub npm: Option<crate::packages::NpmConfig>,
+    /// pip package configuration
+    #[serde(default)]
+    pub pip: Option<crate::packages::PipConfig>,
+    /// cargo binary configuration
+    #[serde(default)]
+    pub cargo: Option<crate::packages::CargoConfig>,
 }
 
 #[derive(Deserialize, Debug, Default)]
@@ -455,6 +464,22 @@ impl Config {
     #[allow(dead_code)] // Public API for role configuration access
     pub fn has_assigned_role(&self) -> bool {
         self.role.as_ref().map(|r| !r.is_empty()).unwrap_or(false)
+    }
+
+    /// Get the packages configuration for npm/pip/cargo
+    pub fn get_packages_config(&self) -> crate::packages::PackagesConfig {
+        crate::packages::PackagesConfig {
+            npm: self.npm.clone(),
+            pip: self.pip.clone(),
+            cargo: self.cargo.clone(),
+            gem: None,
+            go: None,
+        }
+    }
+
+    /// Check if any packages are configured
+    pub fn has_packages(&self) -> bool {
+        self.npm.is_some() || self.pip.is_some() || self.cargo.is_some()
     }
 
     /// Get tool configs with roles applied

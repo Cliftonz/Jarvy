@@ -43,6 +43,7 @@
 | PRD-035 | Self-Updating Functionality | 2026-01-19 | `jarvy update`, multi-method detection (Homebrew/Cargo/apt/etc), rollback support, CI auto-disable |
 | PRD-037 | Main.rs Code Maintainability Refactor | 2026-01-19 | main.rs reduced 83% (3175→542 lines), CLI extracted to `src/cli/`, commands to `src/commands/` |
 | PRD-038 | Hybrid Cross-Platform E2E Testing Harness | 2026-01-19 | GitHub-hosted runners (free) + AWS EC2 Spot (~$5-15/mo), 10 platforms, tiered tool testing |
+| PRD-039 | Language Package Dependencies | 2026-01-23 | `[npm]`, `[pip]`, `[cargo]` sections, package manager detection, virtual env support |
 
 ---
 
@@ -533,10 +534,76 @@ tier4_dependencies: ["lazygit"]                            // Tools with deps
 - Alpine uses musl libc; gcompat package required for GitHub runner
 - FreeBSD has no official GitHub Actions runner support; custom solution needed
 
+### PRD-039 Language Package Dependencies (Completed 2026-01-23)
+**Goal**: Enable language-specific package management (npm, pip, cargo) alongside CLI tools.
+
+**Module**: `src/packages/` - Language package dependency management
+
+**Files Created:**
+- `mod.rs` - Main module with `install_packages()` orchestration function
+- `config.rs` - PackagesConfig, NpmConfig, PipConfig, CargoConfig, PackageSpec types
+- `common.rs` - PackageError enum, run_package_command(), command_exists() utilities
+- `npm.rs` - NpmHandler with package manager detection (npm/yarn/pnpm)
+- `pip.rs` - PipHandler with virtual environment support
+- `cargo_pkg.rs` - CargoHandler for cargo install
+
+**Files Modified:**
+- `src/config.rs` - Added npm, pip, cargo fields to Config struct
+- `src/lib.rs` - Exported packages module and PackagesConfig
+- `src/main.rs` - Added `mod packages;`
+- `src/commands/setup_cmd.rs` - Integrated package installation after tool hooks
+
+**Configuration Example:**
+```toml
+[npm]
+typescript = "^5.0"
+eslint = "latest"
+package_manager = "pnpm"    # Auto-detected from lock file if not set
+
+[pip]
+pytest = ">=7.0"
+black = "latest"
+venv = ".venv"              # Virtual environment path
+create_venv = true          # Auto-create venv if missing
+
+[cargo]
+cargo-watch = "latest"
+cargo-nextest = "0.9"
+locked = true               # Use --locked flag
+```
+
+**Key Technical Details:**
+- `#[serde(flatten)]` for package maps: Allows `typescript = "^5.0"` syntax
+- `#[serde(untagged)]` enum PackageSpec: Supports simple strings OR detailed specs
+- Package manager detection from lock files (pnpm-lock.yaml, yarn.lock)
+- Virtual environment auto-creation with activation hints
+- Package installation runs after tool hooks, before environment setup
+- Dry-run support shows what would be installed
+
+**Package Manager Features:**
+
+| Manager | Lock File | Version Operators | Extra Features |
+|---------|-----------|-------------------|----------------|
+| npm/yarn/pnpm | package-lock.json, yarn.lock, pnpm-lock.yaml | ^, ~, >=, latest | Auto-detect from lock file |
+| pip | requirements.txt | ==, >=, ~=, !=, latest | Virtual env creation |
+| cargo | N/A | exact versions, latest | --locked flag, features |
+
+**Tests Added:** 17 unit tests covering:
+- Config parsing (npm, pip, cargo)
+- Package spec variants (simple vs detailed)
+- Package manager detection
+- Version specifier formatting
+- Command existence checks
+
+**Technical Learnings:**
+- Rust 2024: `if let Some(ref x) = ...` triggers "cannot explicitly borrow" error; use `if let Some(x) = ...` instead
+- `#[serde(flatten)]` with HashMap captures dynamic TOML keys while allowing fixed fields like `package_manager`
+- PackageSpec with `#[serde(untagged)]` allows flexible parsing of version strings vs detailed objects
+
 ### Future Enhancements
 - `jarvy search --category` (category filtering)
 - `jarvy validate --from URL` (remote validation)
-- Package manager expansion: pip, snap, flatpak, cargo, scoop
+- Package manager expansion: gem, go modules, snap, flatpak
 - MacinCloud integration if GitHub macOS runners prove insufficient
 
 ---

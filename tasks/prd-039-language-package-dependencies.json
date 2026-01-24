@@ -1,0 +1,387 @@
+{
+  "prd": "039-language-package-dependencies",
+  "title": "Language Package Dependencies",
+  "version": "1.0.0",
+  "priority": "high",
+  "estimated_days": 11,
+  "created": "2026-01-23",
+  "status": "in_progress",
+  "progress": {
+    "completed": 0,
+    "total": 24,
+    "percentage": 0
+  },
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Module Structure & Configuration",
+      "status": "in_progress",
+      "estimated_days": 1,
+      "tasks": [
+        {
+          "id": "T001",
+          "title": "Create packages module structure",
+          "description": "Create src/packages/mod.rs with module declarations and re-exports",
+          "status": "not_started",
+          "files": ["src/packages/mod.rs"],
+          "acceptance_criteria": ["Module compiles", "Exports are accessible from lib.rs"]
+        },
+        {
+          "id": "T002",
+          "title": "Implement PackagesConfig parsing",
+          "description": "Create src/packages/config.rs with PackagesConfig, NpmConfig, PipConfig, CargoConfig structs",
+          "status": "not_started",
+          "files": ["src/packages/config.rs"],
+          "acceptance_criteria": [
+            "PackagesConfig struct with npm, pip, cargo, gem, go options",
+            "NpmConfig with packages, package_manager, from_lockfile fields",
+            "PipConfig with packages, venv, create_venv, from_lockfile fields",
+            "CargoConfig with packages and locked fields",
+            "PackageSpec enum for version and detailed specs",
+            "cargo check passes"
+          ]
+        },
+        {
+          "id": "T003",
+          "title": "Create common utilities",
+          "description": "Create src/packages/common.rs with shared utilities for running commands",
+          "status": "not_started",
+          "files": ["src/packages/common.rs"],
+          "acceptance_criteria": [
+            "run_command helper function",
+            "PackageError error type with thiserror",
+            "format_package_spec utility"
+          ]
+        },
+        {
+          "id": "T004",
+          "title": "Integrate with main config",
+          "description": "Add packages field to main Config struct in src/config.rs",
+          "status": "not_started",
+          "files": ["src/config.rs", "src/lib.rs"],
+          "acceptance_criteria": [
+            "Config struct has packages: Option<PackagesConfig> field",
+            "packages module exported from lib.rs",
+            "jarvy.toml with [npm]/[pip]/[cargo] sections parses correctly"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "npm Handler Implementation",
+      "status": "not_started",
+      "estimated_days": 1.5,
+      "tasks": [
+        {
+          "id": "T005",
+          "title": "Implement NpmHandler structure",
+          "description": "Create src/packages/npm.rs with NpmHandler struct and constructor",
+          "status": "not_started",
+          "files": ["src/packages/npm.rs"],
+          "acceptance_criteria": [
+            "NpmHandler struct with config and project_dir fields",
+            "new() constructor"
+          ]
+        },
+        {
+          "id": "T006",
+          "title": "Implement package manager detection",
+          "description": "Add detect_package_manager method to auto-detect from lock files",
+          "status": "not_started",
+          "files": ["src/packages/npm.rs"],
+          "acceptance_criteria": [
+            "Detects pnpm from pnpm-lock.yaml",
+            "Detects yarn from yarn.lock",
+            "Defaults to npm otherwise",
+            "Respects explicit package_manager config"
+          ]
+        },
+        {
+          "id": "T007",
+          "title": "Implement lockfile installation",
+          "description": "Add install_from_lockfile method for npm ci / yarn install / pnpm install",
+          "status": "not_started",
+          "files": ["src/packages/npm.rs"],
+          "acceptance_criteria": [
+            "npm ci for npm",
+            "yarn install --frozen-lockfile for yarn",
+            "pnpm install --frozen-lockfile for pnpm"
+          ]
+        },
+        {
+          "id": "T008",
+          "title": "Implement package installation",
+          "description": "Add install_packages method for individual package installation",
+          "status": "not_started",
+          "files": ["src/packages/npm.rs"],
+          "acceptance_criteria": [
+            "Installs packages with version specifiers",
+            "Handles 'latest' version correctly",
+            "Works with all three package managers"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "pip Handler Implementation",
+      "status": "not_started",
+      "estimated_days": 2,
+      "tasks": [
+        {
+          "id": "T009",
+          "title": "Implement PipHandler structure",
+          "description": "Create src/packages/pip.rs with PipHandler struct",
+          "status": "not_started",
+          "files": ["src/packages/pip.rs"],
+          "acceptance_criteria": [
+            "PipHandler struct with config and project_dir fields",
+            "new() constructor"
+          ]
+        },
+        {
+          "id": "T010",
+          "title": "Implement virtual environment creation",
+          "description": "Add create_venv method for Python virtual environment setup",
+          "status": "not_started",
+          "files": ["src/packages/pip.rs"],
+          "acceptance_criteria": [
+            "Creates venv at specified path",
+            "Supports system-site-packages flag",
+            "Only creates if venv doesn't exist or create_venv is true"
+          ]
+        },
+        {
+          "id": "T011",
+          "title": "Implement pip installation from lockfile",
+          "description": "Add install_from_lockfile method for requirements.txt",
+          "status": "not_started",
+          "files": ["src/packages/pip.rs"],
+          "acceptance_criteria": [
+            "Installs from requirements.txt by default",
+            "Supports custom lockfile path",
+            "Uses venv pip if configured"
+          ]
+        },
+        {
+          "id": "T012",
+          "title": "Implement pip package installation",
+          "description": "Add install_packages method for individual packages",
+          "status": "not_started",
+          "files": ["src/packages/pip.rs"],
+          "acceptance_criteria": [
+            "Installs packages with version specifiers",
+            "Uses venv pip if configured",
+            "Shows activation hint after setup"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-4",
+      "name": "cargo Handler Implementation",
+      "status": "not_started",
+      "estimated_days": 0.5,
+      "tasks": [
+        {
+          "id": "T013",
+          "title": "Implement CargoHandler",
+          "description": "Create src/packages/cargo_pkg.rs with CargoHandler for cargo install",
+          "status": "not_started",
+          "files": ["src/packages/cargo_pkg.rs"],
+          "acceptance_criteria": [
+            "CargoHandler struct with config",
+            "install() method that runs cargo install for each package",
+            "Supports version specifiers",
+            "Supports features flag",
+            "Supports --locked flag"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-5",
+      "name": "Setup Integration",
+      "status": "not_started",
+      "estimated_days": 1,
+      "tasks": [
+        {
+          "id": "T014",
+          "title": "Add packages command to CLI",
+          "description": "Add packages subcommand to CLI args",
+          "status": "not_started",
+          "files": ["src/cli/args.rs", "src/cli/subcommands.rs"],
+          "acceptance_criteria": [
+            "jarvy packages install command exists",
+            "jarvy packages list command exists"
+          ]
+        },
+        {
+          "id": "T015",
+          "title": "Integrate with setup command",
+          "description": "Add package installation step to setup_cmd.rs",
+          "status": "not_started",
+          "files": ["src/commands/setup_cmd.rs"],
+          "acceptance_criteria": [
+            "Package installation runs after tool installation",
+            "npm packages installed if [npm] section present",
+            "pip packages installed if [pip] section present",
+            "cargo packages installed if [cargo] section present",
+            "Failures are warnings, not errors"
+          ]
+        },
+        {
+          "id": "T016",
+          "title": "Create packages command handler",
+          "description": "Create src/commands/packages_cmd.rs for standalone package commands",
+          "status": "not_started",
+          "files": ["src/commands/packages_cmd.rs", "src/commands/mod.rs"],
+          "acceptance_criteria": [
+            "jarvy packages install works independently",
+            "jarvy packages list shows configured packages"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-6",
+      "name": "Testing",
+      "status": "not_started",
+      "estimated_days": 2,
+      "tasks": [
+        {
+          "id": "T017",
+          "title": "Write unit tests for config parsing",
+          "description": "Add tests for PackagesConfig, NpmConfig, PipConfig, CargoConfig parsing",
+          "status": "not_started",
+          "files": ["src/packages/config.rs"],
+          "acceptance_criteria": [
+            "Tests for simple package list syntax",
+            "Tests for version specifiers",
+            "Tests for PackageSpec detailed variant"
+          ]
+        },
+        {
+          "id": "T018",
+          "title": "Write unit tests for npm handler",
+          "description": "Add tests for package manager detection and command building",
+          "status": "not_started",
+          "files": ["src/packages/npm.rs"],
+          "acceptance_criteria": [
+            "Tests for package manager detection",
+            "Tests for format_package_spec"
+          ]
+        },
+        {
+          "id": "T019",
+          "title": "Write integration tests",
+          "description": "Create tests/packages_integration.rs for end-to-end tests",
+          "status": "not_started",
+          "files": ["tests/packages_integration.rs"],
+          "acceptance_criteria": [
+            "Test config parsing from jarvy.toml",
+            "Test package installation flows (mocked)"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-7",
+      "name": "Documentation & Cleanup",
+      "status": "not_started",
+      "estimated_days": 0.5,
+      "tasks": [
+        {
+          "id": "T020",
+          "title": "Update CLAUDE.md with packages documentation",
+          "description": "Document [npm], [pip], [cargo] sections in CLAUDE.md",
+          "status": "not_started",
+          "files": ["CLAUDE.md"],
+          "acceptance_criteria": [
+            "Package configuration syntax documented",
+            "Examples for each package manager",
+            "Virtual environment options documented"
+          ]
+        },
+        {
+          "id": "T021",
+          "title": "Add inline documentation",
+          "description": "Add module-level and function documentation to packages module",
+          "status": "not_started",
+          "files": ["src/packages/mod.rs", "src/packages/config.rs", "src/packages/npm.rs", "src/packages/pip.rs", "src/packages/cargo_pkg.rs"],
+          "acceptance_criteria": [
+            "Each module has //! doc comment",
+            "Public functions have /// doc comments"
+          ]
+        },
+        {
+          "id": "T022",
+          "title": "Run clippy and fmt",
+          "description": "Run cargo clippy and cargo fmt on all new code",
+          "status": "not_started",
+          "files": [],
+          "acceptance_criteria": [
+            "No clippy warnings",
+            "Code properly formatted"
+          ]
+        },
+        {
+          "id": "T023",
+          "title": "Update progress.txt",
+          "description": "Document PRD-039 implementation in progress.txt",
+          "status": "not_started",
+          "files": ["progress.txt"],
+          "acceptance_criteria": [
+            "PRD-039 completion noted",
+            "Key learnings documented"
+          ]
+        },
+        {
+          "id": "T024",
+          "title": "Commit all changes",
+          "description": "Create commit with all PRD-039 changes",
+          "status": "not_started",
+          "files": [],
+          "acceptance_criteria": [
+            "All new files committed",
+            "Conventional commit message used"
+          ]
+        }
+      ]
+    }
+  ],
+  "files_to_create": [
+    "src/packages/mod.rs",
+    "src/packages/config.rs",
+    "src/packages/common.rs",
+    "src/packages/npm.rs",
+    "src/packages/pip.rs",
+    "src/packages/cargo_pkg.rs",
+    "src/commands/packages_cmd.rs",
+    "tests/packages_integration.rs"
+  ],
+  "files_to_modify": [
+    "src/config.rs",
+    "src/lib.rs",
+    "src/cli/args.rs",
+    "src/cli/subcommands.rs",
+    "src/commands/mod.rs",
+    "src/commands/setup_cmd.rs",
+    "CLAUDE.md",
+    "progress.txt"
+  ],
+  "success_metrics": {
+    "post_setup_commands_before": "3-4",
+    "post_setup_commands_after": "0",
+    "environment_reproducibility_before": "70%",
+    "environment_reproducibility_after": "95%"
+  },
+  "non_goals": [
+    "Package publishing/deployment",
+    "Dependency vulnerability scanning",
+    "Complex monorepo package management",
+    "Container/Docker image building",
+    "Private registry authentication"
+  ]
+}
