@@ -52,7 +52,11 @@ rpassword = "7.3"
 rayon = "1.10"
 rustls = "0.23"
 zip = "2.2"
+flate2 = "1.0"
 hostname = "0.4"
+sys-info = "0.9"
+num_cpus = "1.16"
+chrono = { version = "0.4", features = ["serde"] }
 self_update = "0.41"
 sha2 = "0.10"
 hex = "0.4"
@@ -64,7 +68,6 @@ tempfile = "3.20.0"
 assert_cmd = "2.0.17"
 proptest = "1.5"
 criterion = { version = "0.5", features = ["html_reports"] }
-chrono = "0.4"
 
 [[bench]]
 name = "config_parsing"

@@ -47,12 +47,14 @@ pub mod drift_cmd;
 pub mod env_cmd;
 pub mod get;
 pub mod lock_cmd;
+pub mod logs_cmd;
 pub mod mcp_cmd;
 pub mod roles_cmd;
 pub mod services_cmd;
 pub mod setup_cmd;
 pub mod team_cmd;
 pub mod telemetry_cmd;
+pub mod ticket_cmd;
 pub mod tools_cmd;
 
 // Public API re-exports - these modules may not be used directly by main.rs
@@ -89,9 +91,11 @@ pub use drift_cmd::*;
 pub use env_cmd::*;
 pub use get::*;
 pub use lock_cmd::*;
+pub use logs_cmd::*;
 pub use mcp_cmd::*;
 pub use roles_cmd::*;
 pub use services_cmd::*;
 pub use team_cmd::*;
 pub use telemetry_cmd::*;
+pub use ticket_cmd::*;
 pub use tools_cmd::*;

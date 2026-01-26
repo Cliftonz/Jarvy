@@ -384,6 +384,16 @@ pub enum Commands {
         #[clap(subcommand)]
         action: DriftAction,
     },
+    /// View and manage log files
+    Logs {
+        #[clap(subcommand)]
+        action: LogsAction,
+    },
+    /// Generate debug tickets for support
+    Ticket {
+        #[clap(subcommand)]
+        action: TicketAction,
+    },
     /// Catch-all for unknown subcommands and their args
     #[clap(external_subcommand)]
     External(Vec<String>),

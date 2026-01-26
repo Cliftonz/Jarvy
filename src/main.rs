@@ -20,6 +20,7 @@ mod hooks;
 mod init;
 pub mod interactive;
 mod lock;
+pub mod logging;
 mod mcp;
 mod network;
 mod observability;
@@ -37,6 +38,7 @@ mod setup;
 mod team;
 mod telemetry;
 mod templates;
+pub mod ticket;
 mod tools;
 mod update;
 
@@ -283,6 +285,12 @@ fn dispatch_command(cli: &Cli, global_config: &init::CliConfig) {
             handle_update(action, version, channel, method, *rollback);
         }
         Some(Commands::Drift { file, action }) => commands::run_drift(file, action),
+        Some(Commands::Logs { action }) => {
+            std::process::exit(commands::run_logs_command(action.clone()));
+        }
+        Some(Commands::Ticket { action }) => {
+            std::process::exit(commands::run_ticket_command(action.clone()));
+        }
         None => interactive::user_select(),
         Some(Commands::External(_)) => unreachable!("External subcommand handled before init"),
     }

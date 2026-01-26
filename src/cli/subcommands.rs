@@ -212,3 +212,67 @@ pub enum DriftAction {
         force: bool,
     },
 }
+
+#[derive(Clone, Subcommand)]
+pub enum LogsAction {
+    /// View recent log entries
+    View {
+        /// Number of lines to show (default: 100)
+        #[clap(short = 'n', long, default_value = "100")]
+        lines: usize,
+        /// Filter by log level (error, warn, info, debug, trace)
+        #[clap(short, long)]
+        level: Option<String>,
+        /// Filter logs containing this text
+        #[clap(short, long)]
+        grep: Option<String>,
+        /// Output format: text, json
+        #[clap(short = 'F', long = "format", default_value = "text")]
+        output_format: String,
+    },
+    /// Show log statistics
+    Stats {},
+    /// Clean old log files
+    Clean {
+        /// Remove all log files (not just old ones)
+        #[clap(long)]
+        all: bool,
+        /// Show what would be removed without removing
+        #[clap(long)]
+        dry_run: bool,
+    },
+    /// Show logging configuration
+    Config {},
+}
+
+#[derive(Clone, Subcommand)]
+pub enum TicketAction {
+    /// Create a new debug ticket
+    Create {
+        /// Focus on a specific tool
+        #[clap(short, long)]
+        tool: Option<String>,
+        /// Number of log lines to include (default: 500)
+        #[clap(short = 'n', long, default_value = "500")]
+        logs: usize,
+        /// Output path (default: ~/.jarvy/tickets/)
+        #[clap(short, long)]
+        output: Option<String>,
+        /// Show what would be collected without creating ticket
+        #[clap(long)]
+        dry_run: bool,
+    },
+    /// Show contents of a ticket
+    Show {
+        /// Ticket ID or path to ticket ZIP
+        ticket: String,
+    },
+    /// List existing tickets
+    List {},
+    /// Clean old tickets
+    Clean {
+        /// Remove tickets older than this many days (default: 30)
+        #[clap(long, default_value = "30")]
+        older_than: u32,
+    },
+}

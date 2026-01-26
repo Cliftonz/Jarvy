@@ -46,6 +46,7 @@
 | PRD-039 | Language Package Dependencies | 2026-01-23 | `[npm]`, `[pip]`, `[cargo]` sections, package manager detection, virtual env support |
 | PRD-041 | Git Configuration Automation | 2026-01-24 | `[git]` section, identity, signing (SSH/GPG), aliases, defaults, credential helpers |
 | PRD-043 | Configuration Drift Detection | 2026-01-24 | `[drift]` section, state capture, version comparison, file hashing, remediation |
+| PRD-050 | Debug Ticket & Enhanced Logging | 2026-01-26 | File logging, rotation, sanitization, `jarvy logs`, `jarvy ticket`, ZIP bundles |
 
 ---
 
@@ -725,17 +726,49 @@ jarvy drift fix --dry-run      # Preview what would be fixed
 - `which` crate for cross-platform binary path detection
 - Install method detection by analyzing binary paths (homebrew, cargo, nvm, etc.)
 
-### PRD-050 Debug Ticket & Enhanced Logging System (Created 2026-01-26)
+### PRD-050 Debug Ticket & Enhanced Logging System (Completed 2026-01-26)
 **Goal**: Add persistent file-based logging with rotation and debug ticket generation.
 
-**Planned Features:**
-- File-based logging to `~/.jarvy/logs/` with configurable levels
-- Automatic log rotation by size (default 10MB) and age (default 30 days)
-- Gzip compression of rotated logs
-- Sensitive data sanitization (API keys, tokens, passwords)
-- `jarvy logs` command for viewing, filtering, and cleaning logs
-- `jarvy ticket` command for generating diagnostic bundles
-- Ticket includes: system info, config, tools status, logs, environment, network config
+**Module**: `src/logging/` - Persistent file-based logging
+**Module**: `src/ticket/` - Debug ticket generation
+
+**Files Created (Logging):**
+- `mod.rs` - Main module with LogError enum, init(), read_recent_logs(), get_log_stats(), clean_logs()
+- `config.rs` - LoggingConfig, LogLevel, LogFormat types
+- `formatter.rs` - LogEntry struct and LogFormatter for JSON/text output
+- `sanitizer.rs` - Sensitive data redaction with 14 regex patterns
+- `writer.rs` - Thread-safe RotatingFileWriter with Arc<Mutex>
+- `rotator.rs` - Log rotation with gzip compression using flate2
+
+**Files Created (Ticket):**
+- `mod.rs` - TicketData, TicketScope, TicketError, list_tickets(), clean_tickets()
+- `collector.rs` - SystemInfo, ToolInfo, TicketCollector with sanitization
+- `bundler.rs` - TicketBundler for ZIP archive creation, preview_ticket()
+
+**Files Created (Commands):**
+- `src/commands/logs_cmd.rs` - Handler for logs command (view, stats, clean, config)
+- `src/commands/ticket_cmd.rs` - Handler for ticket command (create, show, list, clean)
+
+**Files Modified:**
+- `src/cli/args.rs` - Added Logs and Ticket commands to Commands enum
+- `src/cli/subcommands.rs` - Added LogsAction and TicketAction enums
+- `src/commands/mod.rs` - Added logs_cmd and ticket_cmd modules
+- `src/main.rs` - Added logging and ticket module declarations and dispatch
+- `src/lib.rs` - Exported logging and ticket modules
+- `Cargo.toml` - Added flate2, sys-info, num_cpus, chrono (serde feature)
+
+**Sensitive Data Redaction Patterns:**
+- API keys and tokens (generic patterns)
+- Bearer tokens and Authorization headers
+- Passwords (password, passwd, pwd)
+- AWS credentials (access key ID, secret access key)
+- GitHub tokens (ghp_, gho_, ghs_)
+- npm tokens
+- SSH private keys
+- Email addresses (partial masking)
+- Database connection strings (postgres, mysql, mongodb, redis)
+- JSON secrets (secret, password, token, key, credential fields)
+- Home directory path replacement with ~
 
 **Configuration:**
 ```toml
@@ -745,24 +778,61 @@ level = "info"         # error, warn, info, debug, trace
 format = "json"        # text, json
 max_file_size = "10MB"
 max_files = 5
-max_total_size = "50MB"
 max_age_days = 30
 ```
 
 **CLI Commands:**
 ```bash
-jarvy logs                    # View recent logs
-jarvy logs --level error      # Filter by level
-jarvy logs --follow           # Tail logs
+jarvy logs view [--lines N] [--level LEVEL] [--grep PATTERN]
 jarvy logs stats              # Show log statistics
-jarvy logs clean              # Remove old logs
-jarvy ticket                  # Generate diagnostic bundle
-jarvy ticket list             # List existing tickets
+jarvy logs clean [--all]      # Remove old/all logs
+jarvy logs config             # Show logging configuration
+
+jarvy ticket create [--tool NAME] [--logs N] [--output PATH] [--dry-run]
 jarvy ticket show <id>        # View ticket contents
-jarvy ticket clean            # Remove expired tickets
+jarvy ticket list             # List existing tickets
+jarvy ticket clean [--older-than DAYS]
 ```
 
-**New Dependencies:** flate2 (gzip), zip, sys-info, num_cpus
+**Ticket Contents:**
+- `ticket.json` - Main data file with all collected information
+- System info: OS, version, arch, CPU cores, memory, shell, locale, hostname
+- Tool status: installed tools with versions and paths
+- Configuration: Sanitized jarvy.toml content
+- Environment: Filtered allowlist of safe env vars
+- Logs: Recent log entries (configurable count)
+
+**Technical Details:**
+- Thread-safe writer using `Arc<Mutex<BufWriter<File>>>`
+- Rotation triggered when file exceeds max_file_size
+- Rotated logs named `jarvy.log.1.gz`, `jarvy.log.2.gz`, etc.
+- Enforce max_files limit by deleting oldest rotated logs
+- ZIP archives created in `~/.jarvy/tickets/` with unique ticket IDs
+- Ticket IDs format: `JARVY-YYYYMMDD-xxxxxxxx` (date + UUID prefix)
+
+**Tests Added:** 15+ unit tests covering:
+- Log directory/file paths
+- Sanitizer patterns (API keys, passwords, tokens, emails, SSH keys, DB URLs)
+- Rotating file writer (create, write, size tracking, clone state sharing)
+- Log rotation and compression
+- Ticket scope configurations
+- TOML to JSON conversion
+- System info collection
+
+**Technical Learnings:**
+- Raw string regex: Use `r#""#` syntax to avoid escaping issues with `\-` inside character classes
+- chrono serialization: Must enable `serde` feature for DateTime serialization
+- Cow<str> returns: Call `.to_string()` when function expects String but sanitizer returns Cow
+- Module visibility: Use `crate::cli::LogsAction` not `crate::cli::subcommands::LogsAction` when re-exported
+- Clap subcommands: Need `#[derive(Clone, Subcommand)]` to use `.clone()` on action enum
+- Loop bounds for max_files: Use `(max_files + 1)..100` not `max_files..100` (1-indexed files)
+- Rust 2024 unsafe: `std::env::set_var` requires `unsafe { }` block in tests
+
+**New Dependencies:**
+- `flate2 = "1.0"` - Gzip compression for log rotation
+- `sys-info = "0.9"` - System information collection
+- `num_cpus = "1.16"` - CPU core count detection
+- `chrono` with `serde` feature - Timestamp serialization
 
 ---
 

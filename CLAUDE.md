@@ -32,6 +32,7 @@ Jarvy is a cross-platform CLI tool that provisions development environments from
   - `get.rs`, `tools_cmd.rs`, `env_cmd.rs`, `ci_cmd.rs`, `services_cmd.rs`
   - `mcp_cmd.rs`, `telemetry_cmd.rs`, `team_cmd.rs`, `lock_cmd.rs`, `config_cmd.rs`
   - `roles_cmd.rs`, `bootstrap_cmd.rs`, `configure_cmd.rs`
+  - `logs_cmd.rs`, `ticket_cmd.rs` - Logging and debug ticket commands (PRD-050)
 - **`src/remote.rs`** - Remote config fetching with caching (`fetch_remote_config`, `transform_github_url`)
 - **`src/interactive.rs`** - Interactive menu for users who run `jarvy` without subcommand
 - **`src/config.rs`** - Parses `jarvy.toml` using serde. Supports simple (`git = "2.40"`) and detailed (`git = { version = "2.40", version_manager = true }`) formats
@@ -40,6 +41,8 @@ Jarvy is a cross-platform CLI tool that provisions development environments from
 - **`src/tools/common.rs`** - Shared utilities: `Os` enum, `InstallError` type, `run()`, `has()`, `cmd_satisfies()`, package manager detection
 - **`src/tools/spec.rs`** - ToolSpec pattern: `ToolSpec` struct and `define_tool!` macro for declarative tool definitions
 - **`src/packages/`** - Language package dependencies (npm, pip, cargo) with virtual environment support (PRD-039)
+- **`src/logging/`** - Persistent file-based logging with rotation (PRD-050). Key files: `config.rs` (LoggingConfig), `sanitizer.rs` (sensitive data redaction), `writer.rs` (RotatingFileWriter), `rotator.rs` (gzip compression)
+- **`src/ticket/`** - Debug ticket generation (PRD-050). Key files: `collector.rs` (SystemInfo, ToolInfo), `bundler.rs` (ZIP archive creation)
 
 ### Tool Implementation Pattern
 
@@ -509,6 +512,57 @@ jarvy update disable              # Disable auto-updates
 - `UpdateChecker` - Version checking with throttling
 - `BinaryInstaller` - Direct binary download/install
 - `RollbackManager` - Backup and restore previous versions
+
+### Logging & Debug Tickets
+
+Jarvy provides persistent file-based logging with rotation and debug ticket generation for support and diagnostics.
+
+**Module**: `src/logging/` - File-based logging with rotation and sanitization.
+**Module**: `src/ticket/` - Debug ticket generation for support bundles.
+
+**Key Files**:
+- `logging/config.rs` - LoggingConfig, LogLevel, LogFormat types
+- `logging/sanitizer.rs` - Sensitive data redaction (API keys, tokens, passwords, emails)
+- `logging/writer.rs` - Thread-safe RotatingFileWriter with Arc<Mutex>
+- `logging/rotator.rs` - Log rotation with gzip compression
+- `ticket/collector.rs` - SystemInfo, ToolInfo collection
+- `ticket/bundler.rs` - ZIP archive creation
+
+**Configuration** (`jarvy.toml`):
+```toml
+[logging]
+enabled = true
+level = "info"           # error, warn, info, debug, trace
+format = "json"          # text, json
+max_file_size = "10MB"   # Rotate when exceeded
+max_files = 5            # Keep N rotated files
+max_age_days = 30        # Delete logs older than this
+```
+
+**CLI Commands**:
+```bash
+jarvy logs view [--lines N] [--level LEVEL]  # View recent logs
+jarvy logs stats                              # Show log statistics
+jarvy logs clean [--all]                      # Remove old/all logs
+jarvy logs config                             # Show logging configuration
+
+jarvy ticket create [--tool NAME]             # Generate diagnostic bundle
+jarvy ticket show <id>                        # View ticket contents
+jarvy ticket list                             # List existing tickets
+jarvy ticket clean [--older-than DAYS]        # Remove expired tickets
+```
+
+**Log Directory**: `~/.jarvy/logs/` (jarvy.log, jarvy.log.1.gz, etc.)
+**Tickets Directory**: `~/.jarvy/tickets/` (JARVY-YYYYMMDD-xxxxxxxx.zip)
+
+**Key Types**:
+- `LoggingConfig` - Logging configuration
+- `Sanitizer` - Sensitive data redaction with regex patterns
+- `RotatingFileWriter` - Thread-safe file writer with rotation
+- `LogRotator` - Rotation and gzip compression
+- `TicketData` - Complete ticket data structure
+- `TicketCollector` - System and tool info collection
+- `TicketBundler` - ZIP archive creation
 
 ## Testing
 
