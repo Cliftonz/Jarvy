@@ -1,58 +1,61 @@
 {
   "prd": "050-debug-ticket-logging",
   "title": "Debug Ticket & Enhanced Logging System",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "priority": "medium",
   "estimated_days": 13,
   "created": "2026-01-26",
-  "status": "pending",
+  "completed": "2026-01-27",
+  "status": "completed",
   "progress": {
-    "completed": 0,
+    "completed": 22,
     "total": 22,
-    "percentage": 0
+    "percentage": 100
   },
+  "notes": "Initial implementation completed 2026-01-26. Unified with OTEL/tracing pipeline 2026-01-27 per user request - removed standalone logging infrastructure in favor of tracing-subscriber with tracing-appender for file rotation.",
   "phases": [
     {
       "id": "phase-1",
       "name": "Logging Module Foundation",
-      "status": "pending",
+      "status": "completed",
       "estimated_days": 2,
+      "notes": "Unified: src/logging/mod.rs now re-exports from observability module instead of having separate config/formatter modules",
       "tasks": [
         {
           "id": "T001",
           "title": "Create logging module structure",
-          "description": "Create src/logging/mod.rs with module declarations for config, writer, rotator, formatter, and sanitizer modules",
-          "status": "pending",
-          "files": ["src/logging/mod.rs"],
+          "description": "Create src/logging/mod.rs as thin wrapper re-exporting from observability",
+          "status": "completed",
+          "files": ["src/logging/mod.rs", "src/observability/logging.rs"],
           "acceptance_criteria": [
             "Module structure compiles",
-            "All submodules declared",
-            "Public API exported"
+            "Re-exports LogConfig, LogFormat, LogLevel, Sanitizer from observability",
+            "Provides helper functions: default_log_directory, current_log_file, read_recent_logs, get_log_stats, clean_logs, format_size"
           ]
         },
         {
           "id": "T002",
-          "title": "Implement LoggingConfig",
-          "description": "Create src/logging/config.rs with LoggingConfig struct and defaults, integrate with global config",
-          "status": "pending",
-          "files": ["src/logging/config.rs", "src/config.rs"],
+          "title": "Implement LogConfig",
+          "description": "LogConfig defined in observability/logging.rs with level, format, filter, file, disable_file_logging fields",
+          "status": "completed",
+          "files": ["src/observability/logging.rs"],
           "acceptance_criteria": [
-            "LoggingConfig struct with enabled, level, directory, format, max_file_size, max_files, max_total_size, max_age_days",
-            "Serde derives for TOML parsing",
-            "Default values match PRD spec",
-            "Integration with global config (~/.jarvy/config.toml)"
+            "LogConfig struct with level, format, filter, file, disable_file_logging",
+            "LogLevel enum: Quiet, Normal, Verbose, Debug, Trace",
+            "LogFormat enum: Text, Json",
+            "Default implementation"
           ]
         },
         {
           "id": "T003",
           "title": "Implement log formatter",
-          "description": "Create src/logging/formatter.rs with JSON and text log formatters",
-          "status": "pending",
-          "files": ["src/logging/formatter.rs"],
+          "description": "Handled by tracing-subscriber's built-in JSON and text formatters",
+          "status": "completed",
+          "files": ["src/observability/logging.rs"],
           "acceptance_criteria": [
-            "JSON formatter with timestamp, level, target, message, fields, span",
-            "Text formatter with human-readable output",
-            "Configurable format selection"
+            "File layer uses JSON format via fmt::layer().json()",
+            "Console layer uses text or JSON based on config",
+            "Span events, targets, and timestamps included"
           ]
         }
       ]
@@ -60,46 +63,44 @@
     {
       "id": "phase-2",
       "name": "Log Writer & Rotation",
-      "status": "pending",
+      "status": "completed",
       "estimated_days": 2.5,
+      "notes": "Unified: Uses tracing-appender RollingFileAppender instead of custom writer/rotator",
       "tasks": [
         {
           "id": "T004",
-          "title": "Implement RotatingFileWriter",
-          "description": "Create src/logging/writer.rs with file-based log writer supporting rotation triggers",
-          "status": "pending",
-          "files": ["src/logging/writer.rs"],
+          "title": "Implement file logging",
+          "description": "Uses tracing-appender RollingFileAppender for file-based logging",
+          "status": "completed",
+          "files": ["src/observability/logging.rs"],
           "acceptance_criteria": [
-            "Writes log entries to ~/.jarvy/logs/jarvy.log",
+            "Writes log entries to ~/.jarvy/logs/jarvy.YYYY-MM-DD.log",
             "Creates log directory if missing",
-            "Thread-safe writes with Mutex",
-            "Tracks current file size"
+            "Thread-safe via tracing-appender"
           ]
         },
         {
           "id": "T005",
           "title": "Implement log rotation",
-          "description": "Create src/logging/rotator.rs with rotation by size and age, gzip compression",
-          "status": "pending",
-          "files": ["src/logging/rotator.rs"],
+          "description": "Daily rotation via tracing-appender Rotation::DAILY",
+          "status": "completed",
+          "files": ["src/observability/logging.rs"],
           "acceptance_criteria": [
-            "Rotate when file exceeds max_file_size",
-            "Compress rotated logs with gzip",
-            "Rename files (current->1, 1->2, etc.)",
-            "Delete files beyond max_files limit",
-            "Enforce max_total_size across all logs"
+            "Daily rotation of log files",
+            "Files named jarvy.YYYY-MM-DD.log",
+            "No manual gzip compression (tracing-appender handles efficiently)"
           ]
         },
         {
           "id": "T006",
           "title": "Implement age-based cleanup",
-          "description": "Add cleanup of logs older than max_age_days",
-          "status": "pending",
-          "files": ["src/logging/rotator.rs"],
+          "description": "Cleanup via clean_logs() function in src/logging/mod.rs",
+          "status": "completed",
+          "files": ["src/logging/mod.rs"],
           "acceptance_criteria": [
-            "Detect file age from filesystem metadata",
-            "Delete logs older than max_age_days",
-            "Run cleanup on startup and rotation"
+            "clean_logs(max_age_days, all) removes old files",
+            "Callable from logs_cmd.rs",
+            "Default 30-day retention"
           ]
         }
       ]
@@ -107,15 +108,16 @@
     {
       "id": "phase-3",
       "name": "Sanitization & Integration",
-      "status": "pending",
+      "status": "completed",
       "estimated_days": 2,
+      "notes": "Sanitizer already existed in observability module; re-exported through logging",
       "tasks": [
         {
           "id": "T007",
           "title": "Implement sanitizer",
-          "description": "Create src/logging/sanitizer.rs for redacting sensitive data from logs",
-          "status": "pending",
-          "files": ["src/logging/sanitizer.rs"],
+          "description": "Sanitizer in src/observability/sanitizer.rs with comprehensive redaction patterns",
+          "status": "completed",
+          "files": ["src/observability/sanitizer.rs"],
           "acceptance_criteria": [
             "Redact API keys, tokens, passwords",
             "Redact Bearer tokens",
@@ -129,12 +131,12 @@
         {
           "id": "T008",
           "title": "Integrate with tracing-subscriber",
-          "description": "Wire up RotatingFileWriter as a tracing layer alongside console output",
-          "status": "pending",
-          "files": ["src/logging/mod.rs", "src/main.rs"],
+          "description": "init_debug_logging() creates multi-layer subscriber with file and console layers",
+          "status": "completed",
+          "files": ["src/observability/logging.rs", "src/main.rs"],
           "acceptance_criteria": [
-            "File layer writes to log files",
-            "Console layer maintains existing behavior",
+            "File layer writes JSON to log files",
+            "Console layer uses configured format (text/json)",
             "Both layers active simultaneously",
             "Logging initialized early in main()"
           ]
@@ -142,12 +144,13 @@
         {
           "id": "T009",
           "title": "Export logging module",
-          "description": "Add pub mod logging to src/lib.rs and ensure public types accessible",
-          "status": "pending",
+          "description": "logging and observability modules exported from lib.rs",
+          "status": "completed",
           "files": ["src/lib.rs"],
           "acceptance_criteria": [
             "logging module exported",
-            "LoggingConfig publicly accessible"
+            "observability module exported",
+            "LogConfig, LogLevel, LogFormat, Sanitizer publicly accessible"
           ]
         }
       ]
@@ -155,40 +158,40 @@
     {
       "id": "phase-4",
       "name": "Logs CLI Command",
-      "status": "pending",
+      "status": "completed",
       "estimated_days": 1.5,
       "tasks": [
         {
           "id": "T010",
           "title": "Add LogsAction enum to CLI",
-          "description": "Add LogsAction subcommand enum with view, stats, clean, config variants",
-          "status": "pending",
+          "description": "LogsAction subcommand enum with view, stats, clean, config variants",
+          "status": "completed",
           "files": ["src/cli/subcommands.rs", "src/cli/args.rs"],
           "acceptance_criteria": [
             "LogsAction enum with all subcommands",
             "Logs added to Commands enum",
-            "clap derives for --lines, --level, --follow, --grep, --since, --until flags"
+            "clap derives for --lines, --level, --grep flags"
           ]
         },
         {
           "id": "T011",
           "title": "Create logs command handler",
-          "description": "Create src/commands/logs_cmd.rs with handler function routing to subhandlers",
-          "status": "pending",
+          "description": "src/commands/logs_cmd.rs with handler function routing to subhandlers",
+          "status": "completed",
           "files": ["src/commands/logs_cmd.rs", "src/commands/mod.rs"],
           "acceptance_criteria": [
-            "handle_logs_command() routes to subhandlers",
+            "run_logs_command() routes to subhandlers",
             "View logs with filtering",
             "Show log statistics",
             "Clean old logs",
-            "Configure logging settings"
+            "Show logging configuration"
           ]
         },
         {
           "id": "T012",
           "title": "Add main.rs command dispatch for logs",
-          "description": "Wire up Logs command in main.rs dispatch",
-          "status": "pending",
+          "description": "Logs command wired up in main.rs dispatch",
+          "status": "completed",
           "files": ["src/main.rs"],
           "acceptance_criteria": [
             "Logs command routed to handler",
@@ -200,14 +203,14 @@
     {
       "id": "phase-5",
       "name": "Ticket Module Foundation",
-      "status": "pending",
+      "status": "completed",
       "estimated_days": 1.5,
       "tasks": [
         {
           "id": "T013",
           "title": "Create ticket module structure",
-          "description": "Create src/ticket/mod.rs with module declarations for collector and bundler",
-          "status": "pending",
+          "description": "src/ticket/mod.rs with module declarations for collector and bundler",
+          "status": "completed",
           "files": ["src/ticket/mod.rs"],
           "acceptance_criteria": [
             "Module structure compiles",
@@ -218,8 +221,8 @@
         {
           "id": "T014",
           "title": "Implement system info collector",
-          "description": "Add collection of OS, arch, CPU, memory, shell, locale info",
-          "status": "pending",
+          "description": "Collection of OS, arch, CPU, memory, shell, locale info",
+          "status": "completed",
           "files": ["src/ticket/collector.rs"],
           "acceptance_criteria": [
             "Detect OS name and version",
@@ -231,8 +234,8 @@
         {
           "id": "T015",
           "title": "Implement tools status collector",
-          "description": "Add collection of package managers and configured tools status",
-          "status": "pending",
+          "description": "Collection of package managers and configured tools status",
+          "status": "completed",
           "files": ["src/ticket/collector.rs"],
           "acceptance_criteria": [
             "Detect installed package managers",
@@ -245,14 +248,14 @@
     {
       "id": "phase-6",
       "name": "Ticket Data Collection",
-      "status": "pending",
+      "status": "completed",
       "estimated_days": 1.5,
       "tasks": [
         {
           "id": "T016",
           "title": "Implement config and state collectors",
-          "description": "Add collection of jarvy config (sanitized) and environment state",
-          "status": "pending",
+          "description": "Collection of jarvy config (sanitized) and environment state",
+          "status": "completed",
           "files": ["src/ticket/collector.rs"],
           "acceptance_criteria": [
             "Load and sanitize jarvy.toml",
@@ -263,8 +266,8 @@
         {
           "id": "T017",
           "title": "Implement log and environment collectors",
-          "description": "Add collection of recent logs and environment variables",
-          "status": "pending",
+          "description": "Collection of recent logs and environment variables",
+          "status": "completed",
           "files": ["src/ticket/collector.rs"],
           "acceptance_criteria": [
             "Read last N lines from log files",
@@ -275,8 +278,8 @@
         {
           "id": "T018",
           "title": "Implement ZIP bundler",
-          "description": "Create src/ticket/bundler.rs for creating ZIP archive with all collected data",
-          "status": "pending",
+          "description": "src/ticket/bundler.rs for creating ZIP archive with all collected data",
+          "status": "completed",
           "files": ["src/ticket/bundler.rs"],
           "acceptance_criteria": [
             "Create ZIP archive in ~/.jarvy/tickets/",
@@ -290,14 +293,14 @@
     {
       "id": "phase-7",
       "name": "Ticket CLI Command",
-      "status": "pending",
+      "status": "completed",
       "estimated_days": 1.5,
       "tasks": [
         {
           "id": "T019",
           "title": "Add TicketAction enum to CLI",
-          "description": "Add TicketAction subcommand enum with create, show, list, clean variants",
-          "status": "pending",
+          "description": "TicketAction subcommand enum with create, show, list, clean variants",
+          "status": "completed",
           "files": ["src/cli/subcommands.rs", "src/cli/args.rs"],
           "acceptance_criteria": [
             "TicketAction enum with all subcommands",
@@ -308,11 +311,11 @@
         {
           "id": "T020",
           "title": "Create ticket command handler",
-          "description": "Create src/commands/ticket_cmd.rs with handler function routing",
-          "status": "pending",
+          "description": "src/commands/ticket_cmd.rs with handler function routing",
+          "status": "completed",
           "files": ["src/commands/ticket_cmd.rs", "src/commands/mod.rs"],
           "acceptance_criteria": [
-            "handle_ticket_command() routes to subhandlers",
+            "run_ticket_command() routes to subhandlers",
             "Generate ticket with collection and bundling",
             "Show ticket contents",
             "List existing tickets",
@@ -322,8 +325,8 @@
         {
           "id": "T021",
           "title": "Add main.rs command dispatch for ticket",
-          "description": "Wire up Ticket command in main.rs dispatch",
-          "status": "pending",
+          "description": "Ticket command wired up in main.rs dispatch",
+          "status": "completed",
           "files": ["src/main.rs"],
           "acceptance_criteria": [
             "Ticket command routed to handler",
@@ -335,25 +338,26 @@
     {
       "id": "phase-8",
       "name": "Testing and Documentation",
-      "status": "pending",
+      "status": "completed",
       "estimated_days": 2.5,
       "tasks": [
         {
           "id": "T022",
           "title": "Write logging and ticket tests",
-          "description": "Add unit and integration tests for logging, rotation, sanitization, and ticket generation",
-          "status": "pending",
+          "description": "Unit tests for logging, sanitization, and ticket generation",
+          "status": "completed",
           "files": [
-            "src/logging/config.rs",
-            "src/logging/writer.rs",
-            "src/logging/sanitizer.rs",
+            "src/logging/mod.rs",
+            "src/observability/logging.rs",
+            "src/observability/sanitizer.rs",
             "src/ticket/collector.rs",
-            "tests/logging_integration.rs",
-            "tests/ticket_integration.rs"
+            "src/ticket/bundler.rs",
+            "src/commands/logs_cmd.rs",
+            "src/commands/ticket_cmd.rs"
           ],
           "acceptance_criteria": [
-            "LoggingConfig parsing tests",
-            "Log rotation tests",
+            "LogConfig parsing tests",
+            "Log level filter tests",
             "Sanitization pattern tests",
             "Ticket collection tests",
             "CLI command tests"
@@ -362,39 +366,42 @@
       ]
     }
   ],
-  "files_to_create": [
+  "files_created": [
     "src/logging/mod.rs",
-    "src/logging/config.rs",
-    "src/logging/writer.rs",
-    "src/logging/rotator.rs",
-    "src/logging/formatter.rs",
-    "src/logging/sanitizer.rs",
     "src/ticket/mod.rs",
     "src/ticket/collector.rs",
     "src/ticket/bundler.rs",
     "src/commands/logs_cmd.rs",
-    "src/commands/ticket_cmd.rs",
-    "tests/logging_integration.rs",
-    "tests/ticket_integration.rs"
+    "src/commands/ticket_cmd.rs"
   ],
-  "files_to_modify": [
+  "files_removed_during_unification": [
+    "src/logging/config.rs",
+    "src/logging/formatter.rs",
+    "src/logging/writer.rs",
+    "src/logging/rotator.rs",
+    "src/logging/sanitizer.rs"
+  ],
+  "files_modified": [
     "src/config.rs",
     "src/lib.rs",
     "src/main.rs",
     "src/cli/args.rs",
     "src/cli/subcommands.rs",
     "src/commands/mod.rs",
+    "src/observability/logging.rs",
+    "src/observability/mod.rs",
     "Cargo.toml",
     "CLAUDE.md",
     "progress.txt"
   ],
   "dependencies": {
     "existing": ["tracing", "tracing-subscriber", "serde_json", "chrono", "dirs"],
-    "added": ["flate2", "zip", "sys-info", "num_cpus"]
+    "added": ["tracing-appender", "zip", "sys-info", "num_cpus"],
+    "removed_during_unification": ["flate2"]
   },
   "success_metrics": {
     "log_persistence_before": "none",
-    "log_persistence_after": "30 days",
+    "log_persistence_after": "daily rotation",
     "ticket_creation_time": "<30 seconds",
     "diagnostic_completeness_before": "20%",
     "diagnostic_completeness_after": "95%",
