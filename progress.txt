@@ -726,19 +726,25 @@ jarvy drift fix --dry-run      # Preview what would be fixed
 - `which` crate for cross-platform binary path detection
 - Install method detection by analyzing binary paths (homebrew, cargo, nvm, etc.)
 
-### PRD-050 Debug Ticket & Enhanced Logging System (Completed 2026-01-26)
+### PRD-050 Debug Ticket & Enhanced Logging System (Completed 2026-01-26, Unified 2026-01-27)
 **Goal**: Add persistent file-based logging with rotation and debug ticket generation.
 
-**Module**: `src/logging/` - Persistent file-based logging
+**Module**: `src/logging/` - Thin wrapper re-exporting from observability
+**Module**: `src/observability/` - Unified logging through tracing-subscriber
 **Module**: `src/ticket/` - Debug ticket generation
 
-**Files Created (Logging):**
-- `mod.rs` - Main module with LogError enum, init(), read_recent_logs(), get_log_stats(), clean_logs()
-- `config.rs` - LoggingConfig, LogLevel, LogFormat types
-- `formatter.rs` - LogEntry struct and LogFormatter for JSON/text output
-- `sanitizer.rs` - Sensitive data redaction with 14 regex patterns
-- `writer.rs` - Thread-safe RotatingFileWriter with Arc<Mutex>
-- `rotator.rs` - Log rotation with gzip compression using flate2
+**Logging Unification (2026-01-27):**
+- Merged logging into OTEL/tracing pipeline per user request
+- Removed redundant files: `src/logging/sanitizer.rs`, `src/logging/writer.rs`, `src/logging/rotator.rs`, `src/logging/formatter.rs`, `src/logging/config.rs`
+- `src/logging/mod.rs` now re-exports from `src/observability/logging` and provides helper functions
+- Uses `tracing-appender` for daily file rotation instead of custom rotation
+- Removed `flate2` dependency (no longer needed for custom gzip compression)
+- File layer always writes JSON format for machine-readability
+- Console layer respects user's format preference (text/JSON)
+- Added `tracing-appender = "0.2"` to Cargo.toml
+
+**Files in Logging Module (after unification):**
+- `mod.rs` - Re-exports LogConfig, LogFormat, LogLevel, Sanitizer from observability; provides LogError, LogStats, default_log_directory(), current_log_file(), read_recent_logs(), get_log_stats(), clean_logs(), format_size()
 
 **Files Created (Ticket):**
 - `mod.rs` - TicketData, TicketScope, TicketError, list_tickets(), clean_tickets()
@@ -827,9 +833,12 @@ jarvy ticket clean [--older-than DAYS]
 - Clap subcommands: Need `#[derive(Clone, Subcommand)]` to use `.clone()` on action enum
 - Loop bounds for max_files: Use `(max_files + 1)..100` not `max_files..100` (1-indexed files)
 - Rust 2024 unsafe: `std::env::set_var` requires `unsafe { }` block in tests
+- tracing-subscriber layers: Use `tracing_subscriber::registry().with(layer1).with(layer2).init()` for multiple outputs
+- tracing-appender: Use `RollingFileAppender::new(Rotation::DAILY, dir, prefix)` for daily log rotation
+- Layer composition: Each layer needs its own filter via `.with_filter(env_filter.clone())`
 
 **New Dependencies:**
-- `flate2 = "1.0"` - Gzip compression for log rotation
+- `tracing-appender = "0.2"` - Rolling file logging with rotation
 - `sys-info = "0.9"` - System information collection
 - `num_cpus = "1.16"` - CPU core count detection
 - `chrono` with `serde` feature - Timestamp serialization

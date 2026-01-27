@@ -80,6 +80,7 @@ impl ObservabilityConfig {
                 format,
                 filter: debug_filter.map(|s| s.to_string()),
                 file: log_file.map(|s| s.to_string()),
+                disable_file_logging: false,
             },
             profile,
             profile_output: profile_output.map(|s| s.to_string()),

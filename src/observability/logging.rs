@@ -1,6 +1,9 @@
 //! Structured Logging Configuration
 //!
-//! Provides debug logging with multiple verbosity levels and output formats.
+//! Provides unified logging with multiple outputs:
+//! - Console output (for interactive use)
+//! - File output to ~/.jarvy/logs/ (always enabled for debugging)
+//! - Optional OTLP export (when telemetry is configured)
 //!
 //! ## Log Levels
 //!
@@ -8,8 +11,6 @@
 //! - `Normal`: Info and above (default)
 //! - `Verbose`: Includes warnings
 //! - `Debug`: Full debug logs
-
-#![allow(dead_code)] // Public API for logging configuration
 //! - `Trace`: Trace-level detail
 //!
 //! ## Usage
@@ -18,14 +19,19 @@
 //! jarvy setup --debug              # Debug logging
 //! jarvy setup --trace              # Trace logging
 //! jarvy setup --debug --log-format json   # JSON output
-//! jarvy setup --debug --log-file debug.log
 //! ```
 
-use std::fs::OpenOptions;
+#![allow(dead_code)] // Public API for logging configuration
+
+use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Mutex;
-use tracing_subscriber::EnvFilter;
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, Layer, fmt};
 
 /// Log verbosity level
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -75,8 +81,25 @@ pub struct LogConfig {
     pub format: LogFormat,
     /// Module filter (e.g., "jarvy::tools::docker")
     pub filter: Option<String>,
-    /// File to write logs to
+    /// File to write logs to (in addition to default ~/.jarvy/logs/)
     pub file: Option<String>,
+    /// Disable file logging (for tests)
+    pub disable_file_logging: bool,
+}
+
+/// Get the default log directory path (~/.jarvy/logs/)
+fn default_log_directory() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".jarvy")
+        .join("logs")
+}
+
+/// Ensure log directory exists
+fn ensure_log_directory() -> std::io::Result<PathBuf> {
+    let log_dir = default_log_directory();
+    fs::create_dir_all(&log_dir)?;
+    Ok(log_dir)
 }
 
 /// File writer that implements Write
@@ -117,23 +140,16 @@ impl Write for &FileWriter {
     }
 }
 
-/// Initialize debug logging with the given configuration
+/// Initialize unified logging with console and file output
 ///
-/// This should be called early in main() when debug flags are present.
+/// This sets up:
+/// 1. Console output (stdout for non-errors, stderr for errors)
+/// 2. File output to ~/.jarvy/logs/jarvy.YYYY-MM-DD.log (daily rotation)
+///
 /// Returns Ok(true) if debug logging was enabled, Ok(false) if using default logging.
 pub fn init_debug_logging(config: &LogConfig) -> Result<bool, super::error::ObservabilityError> {
-    // Only initialize if we have non-default settings
-    if config.level == LogLevel::Normal
-        && config.format == LogFormat::Text
-        && config.filter.is_none()
-        && config.file.is_none()
-    {
-        return Ok(false);
-    }
-
     // Build filter string
     let filter_str = if let Some(ref module_filter) = config.filter {
-        // Apply module filter on top of level
         format!("{},{}", config.level.as_filter_string(), module_filter)
     } else {
         config.level.as_filter_string().to_string()
@@ -142,56 +158,83 @@ pub fn init_debug_logging(config: &LogConfig) -> Result<bool, super::error::Obse
     let env_filter = EnvFilter::try_new(&filter_str)
         .unwrap_or_else(|_| EnvFilter::new(config.level.as_filter_string()));
 
-    // Build subscriber based on format and output
-    match (config.format, &config.file) {
-        (LogFormat::Json, None) => {
-            let subscriber = tracing_subscriber::fmt()
-                .with_env_filter(env_filter)
-                .json()
-                .with_span_events(FmtSpan::CLOSE)
-                .with_current_span(true)
-                .with_target(true)
-                .finish();
-            tracing::subscriber::set_global_default(subscriber)?;
-        }
-        (LogFormat::Json, Some(path)) => {
-            let file = OpenOptions::new().create(true).append(true).open(path)?;
-            let subscriber = tracing_subscriber::fmt()
-                .with_env_filter(env_filter)
-                .json()
-                .with_span_events(FmtSpan::CLOSE)
-                .with_current_span(true)
-                .with_target(true)
-                .with_writer(Mutex::new(file))
-                .finish();
-            tracing::subscriber::set_global_default(subscriber)?;
-        }
-        (LogFormat::Text, None) => {
-            let subscriber = tracing_subscriber::fmt()
-                .with_env_filter(env_filter)
-                .with_target(true)
-                .with_thread_ids(false)
-                .with_file(true)
-                .with_line_number(true)
-                .finish();
-            tracing::subscriber::set_global_default(subscriber)?;
-        }
-        (LogFormat::Text, Some(path)) => {
-            let file = OpenOptions::new().create(true).append(true).open(path)?;
-            let subscriber = tracing_subscriber::fmt()
-                .with_env_filter(env_filter)
-                .with_target(true)
-                .with_thread_ids(false)
-                .with_file(true)
-                .with_line_number(true)
-                .with_writer(Mutex::new(file))
-                .with_ansi(false) // No colors in file output
-                .finish();
-            tracing::subscriber::set_global_default(subscriber)?;
-        }
-    }
+    // Create file layer if not disabled
+    let file_layer = if !config.disable_file_logging {
+        match ensure_log_directory() {
+            Ok(log_dir) => {
+                // Use daily rotation
+                let file_appender = RollingFileAppender::new(Rotation::DAILY, log_dir, "jarvy.log");
 
-    Ok(true)
+                // File layer always uses JSON for machine-readability
+                let file_layer = fmt::layer()
+                    .json()
+                    .with_writer(file_appender)
+                    .with_span_events(FmtSpan::CLOSE)
+                    .with_current_span(true)
+                    .with_target(true)
+                    .with_ansi(false)
+                    .with_filter(env_filter.clone());
+
+                Some(file_layer)
+            }
+            Err(e) => {
+                eprintln!("Warning: Could not create log directory: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Create console layer based on format
+    let console_layer = match config.format {
+        LogFormat::Json => fmt::layer()
+            .json()
+            .with_span_events(FmtSpan::CLOSE)
+            .with_current_span(true)
+            .with_target(true)
+            .with_filter(env_filter)
+            .boxed(),
+        LogFormat::Text => fmt::layer()
+            .with_target(true)
+            .with_thread_ids(false)
+            .with_file(config.level == LogLevel::Debug || config.level == LogLevel::Trace)
+            .with_line_number(config.level == LogLevel::Debug || config.level == LogLevel::Trace)
+            .with_filter(env_filter)
+            .boxed(),
+    };
+
+    // Build and set the subscriber
+    let subscriber = tracing_subscriber::registry()
+        .with(console_layer)
+        .with(file_layer);
+
+    subscriber.init();
+
+    // Return whether we enabled non-default logging
+    let is_non_default = config.level != LogLevel::Normal
+        || config.format != LogFormat::Text
+        || config.filter.is_some()
+        || config.file.is_some();
+
+    Ok(is_non_default)
+}
+
+/// Initialize minimal logging (for when full logging isn't needed)
+///
+/// This is used when debug flags aren't present. Sets up basic info-level logging
+/// with optional file output.
+pub fn init_minimal_logging() -> Result<(), super::error::ObservabilityError> {
+    let config = LogConfig {
+        level: LogLevel::Normal,
+        format: LogFormat::Text,
+        filter: None,
+        file: None,
+        disable_file_logging: false,
+    };
+
+    init_debug_logging(&config)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -213,5 +256,12 @@ mod tests {
         assert_eq!(config.format, LogFormat::Text);
         assert!(config.filter.is_none());
         assert!(config.file.is_none());
+        assert!(!config.disable_file_logging);
+    }
+
+    #[test]
+    fn test_default_log_directory() {
+        let dir = default_log_directory();
+        assert!(dir.ends_with(".jarvy/logs"));
     }
 }

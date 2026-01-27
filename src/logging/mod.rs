@@ -1,26 +1,19 @@
-//! Persistent file-based logging with rotation
+//! Logging module - unified through observability
 //!
-//! This module provides:
-//! - File-based logging to ~/.jarvy/logs/
-//! - Automatic log rotation by size and age
-//! - Gzip compression of rotated logs
-//! - Sensitive data sanitization
-//! - Integration with tracing-subscriber
-
-mod config;
-mod formatter;
-mod rotator;
-mod sanitizer;
-mod writer;
-
-pub use config::{LogFormat, LogLevel, LoggingConfig};
-pub use formatter::{LogEntry, LogFormatter};
-pub use rotator::LogRotator;
-pub use sanitizer::Sanitizer;
-pub use writer::RotatingFileWriter;
+//! This module re-exports logging utilities from the observability module
+//! and provides helper functions for log file management.
+//!
+//! All logging goes through tracing-subscriber with:
+//! - Console output (for interactive use)
+//! - File output to ~/.jarvy/logs/ (always enabled)
+//! - Optional OTLP export (when telemetry is configured)
 
 use std::path::PathBuf;
 use thiserror::Error;
+
+// Re-export from observability
+pub use crate::observability::Sanitizer;
+pub use crate::observability::logging::{LogConfig, LogFormat, LogLevel};
 
 /// Logging errors
 #[derive(Debug, Error)]
@@ -31,17 +24,8 @@ pub enum LogError {
     #[error("Failed to open log file: {0}")]
     FileOpenFailed(String),
 
-    #[error("Failed to write to log file: {0}")]
-    WriteFailed(String),
-
-    #[error("Failed to rotate log file: {0}")]
-    RotationFailed(String),
-
-    #[error("Failed to compress log file: {0}")]
-    CompressionFailed(String),
-
-    #[error("Invalid log configuration: {0}")]
-    InvalidConfig(String),
+    #[error("Failed to read log file: {0}")]
+    ReadFailed(String),
 }
 
 /// Get the default log directory path (~/.jarvy/logs/)
@@ -57,27 +41,6 @@ pub fn current_log_file() -> PathBuf {
     default_log_directory().join("jarvy.log")
 }
 
-/// Initialize the logging system with the given configuration
-///
-/// This sets up file-based logging alongside console output.
-pub fn init(config: &LoggingConfig) -> Result<(), LogError> {
-    if !config.enabled {
-        return Ok(());
-    }
-
-    // Ensure log directory exists
-    let log_dir = config.directory.clone();
-    std::fs::create_dir_all(&log_dir)?;
-
-    // Run initial cleanup of old logs
-    let rotator = LogRotator::new(config.clone());
-    if let Err(e) = rotator.cleanup_old_logs() {
-        tracing::warn!("Failed to cleanup old logs: {}", e);
-    }
-
-    Ok(())
-}
-
 /// Read recent log entries from the log file
 ///
 /// Returns the last `lines` entries from the current log file.
@@ -89,7 +52,7 @@ pub fn read_recent_logs(lines: usize) -> Result<Vec<String>, LogError> {
     }
 
     let content =
-        std::fs::read_to_string(&log_file).map_err(|e| LogError::FileOpenFailed(e.to_string()))?;
+        std::fs::read_to_string(&log_file).map_err(|e| LogError::ReadFailed(e.to_string()))?;
 
     let all_lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
     let start = all_lines.len().saturating_sub(lines);
@@ -116,10 +79,7 @@ pub fn get_log_stats() -> Result<LogStats, LogError> {
     let mut current_file_size: u64 = 0;
 
     if log_dir.exists() {
-        for entry in (std::fs::read_dir(&log_dir)
-            .map_err(|e| LogError::FileOpenFailed(e.to_string()))?)
-        .flatten()
-        {
+        for entry in (std::fs::read_dir(&log_dir)?).flatten() {
             let path = entry.path();
             if path.is_file() {
                 if let Ok(metadata) = path.metadata() {
@@ -148,7 +108,7 @@ pub fn get_log_stats() -> Result<LogStats, LogError> {
             }
 
             for line in lines {
-                // Try to parse log level from line
+                // Try to parse log level from line (works with both JSON and text formats)
                 if line.contains("\"level\":\"ERROR\"") || line.contains(" ERROR ") {
                     *entries_by_level.entry("ERROR".to_string()).or_insert(0) += 1;
                 } else if line.contains("\"level\":\"WARN\"") || line.contains(" WARN ") {
@@ -174,9 +134,9 @@ pub fn get_log_stats() -> Result<LogStats, LogError> {
     })
 }
 
-/// Clean old log files based on configuration
-pub fn clean_logs(config: &LoggingConfig, all: bool) -> Result<(usize, u64), LogError> {
-    let log_dir = config.directory.clone();
+/// Clean old log files
+pub fn clean_logs(max_age_days: u32, all: bool) -> Result<(usize, u64), LogError> {
+    let log_dir = default_log_directory();
 
     if !log_dir.exists() {
         return Ok((0, 0));
@@ -184,11 +144,9 @@ pub fn clean_logs(config: &LoggingConfig, all: bool) -> Result<(usize, u64), Log
 
     let mut removed_files = 0;
     let mut removed_bytes: u64 = 0;
+    let max_age_secs = max_age_days as u64 * 24 * 60 * 60;
 
-    for entry in std::fs::read_dir(&log_dir)
-        .map_err(|e| LogError::FileOpenFailed(e.to_string()))?
-        .flatten()
-    {
+    for entry in std::fs::read_dir(&log_dir)?.flatten() {
         let path = entry.path();
         if path.is_file() {
             let should_remove = if all {
@@ -200,7 +158,7 @@ pub fn clean_logs(config: &LoggingConfig, all: bool) -> Result<(usize, u64), Log
                         let age = std::time::SystemTime::now()
                             .duration_since(modified)
                             .unwrap_or_default();
-                        age.as_secs() > config.max_age_days as u64 * 24 * 60 * 60
+                        age.as_secs() > max_age_secs
                     } else {
                         false
                     }
@@ -223,6 +181,19 @@ pub fn clean_logs(config: &LoggingConfig, all: bool) -> Result<(usize, u64), Log
     Ok((removed_files, removed_bytes))
 }
 
+/// Format bytes as human-readable size
+pub fn format_size(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 * 1024 {
+        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    } else if bytes >= 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,5 +208,13 @@ mod tests {
     fn test_current_log_file() {
         let file = current_log_file();
         assert!(file.ends_with("jarvy.log"));
+    }
+
+    #[test]
+    fn test_format_size() {
+        assert_eq!(format_size(500), "500 B");
+        assert_eq!(format_size(1024), "1.0 KB");
+        assert_eq!(format_size(1024 * 1024), "1.0 MB");
+        assert_eq!(format_size(1024 * 1024 * 1024), "1.0 GB");
     }
 }

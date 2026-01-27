@@ -3,7 +3,7 @@
 //! View and manage log files.
 
 use crate::cli::LogsAction;
-use crate::logging::{self, LoggingConfig};
+use crate::logging;
 
 /// Handle logs command dispatch
 pub fn run_logs_command(action: LogsAction) -> i32 {
@@ -92,11 +92,11 @@ fn handle_logs_stats() -> i32 {
             println!("  Total files: {}", stats.total_files);
             println!(
                 "  Total size: {}",
-                logging::LoggingConfig::format_size(stats.total_size_bytes)
+                logging::format_size(stats.total_size_bytes)
             );
             println!(
                 "  Current file size: {}",
-                logging::LoggingConfig::format_size(stats.current_file_size_bytes)
+                logging::format_size(stats.current_file_size_bytes)
             );
 
             if !stats.entries_by_level.is_empty() {
@@ -124,13 +124,15 @@ fn handle_logs_stats() -> i32 {
     }
 }
 
+/// Default max age for log cleanup (30 days)
+const DEFAULT_MAX_AGE_DAYS: u32 = 30;
+
 /// Clean old log files
 fn handle_logs_clean(all: bool, dry_run: bool) -> i32 {
-    let config = LoggingConfig::default();
+    let log_dir = logging::default_log_directory();
 
     if dry_run {
         // Just show what would be removed
-        let log_dir = config.directory.clone();
         if !log_dir.exists() {
             println!("No log directory found.");
             return 0;
@@ -138,7 +140,7 @@ fn handle_logs_clean(all: bool, dry_run: bool) -> i32 {
 
         let mut would_remove = 0;
         let mut would_remove_bytes: u64 = 0;
-        let max_age_secs = config.max_age_days as u64 * 24 * 60 * 60;
+        let max_age_secs = DEFAULT_MAX_AGE_DAYS as u64 * 24 * 60 * 60;
         let now = std::time::SystemTime::now();
 
         if let Ok(entries) = std::fs::read_dir(&log_dir) {
@@ -176,7 +178,7 @@ fn handle_logs_clean(all: bool, dry_run: bool) -> i32 {
             println!(
                 "\nWould remove {} files ({})",
                 would_remove,
-                LoggingConfig::format_size(would_remove_bytes)
+                logging::format_size(would_remove_bytes)
             );
         } else {
             println!("No files would be removed.");
@@ -184,13 +186,13 @@ fn handle_logs_clean(all: bool, dry_run: bool) -> i32 {
         return 0;
     }
 
-    match logging::clean_logs(&config, all) {
+    match logging::clean_logs(DEFAULT_MAX_AGE_DAYS, all) {
         Ok((removed, bytes)) => {
             if removed > 0 {
                 println!(
                     "Removed {} log files ({})",
                     removed,
-                    LoggingConfig::format_size(bytes)
+                    logging::format_size(bytes)
                 );
             } else {
                 println!("No log files to clean.");
@@ -206,23 +208,18 @@ fn handle_logs_clean(all: bool, dry_run: bool) -> i32 {
 
 /// Show logging configuration
 fn handle_logs_config() -> i32 {
-    let config = LoggingConfig::default();
+    let log_dir = logging::default_log_directory();
+    let log_file = logging::current_log_file();
 
     println!("Logging Configuration:");
-    println!("  Enabled: {}", config.enabled);
-    println!("  Level: {}", config.level);
-    println!("  Format: {}", config.format);
-    println!("  Directory: {}", config.directory.display());
-    println!(
-        "  Max file size: {}",
-        LoggingConfig::format_size(config.max_file_size)
-    );
-    println!("  Max files: {}", config.max_files);
-    println!(
-        "  Max total size: {}",
-        LoggingConfig::format_size(config.max_total_size)
-    );
-    println!("  Max age: {} days", config.max_age_days);
+    println!("  Directory: {}", log_dir.display());
+    println!("  Current file: {}", log_file.display());
+    println!("  Rotation: Daily");
+    println!("  Format: JSON (file), Text/JSON (console)");
+    println!("  Cleanup max age: {} days", DEFAULT_MAX_AGE_DAYS);
+    println!();
+    println!("Logs are written through the unified tracing system.");
+    println!("Use --debug or --trace flags to increase verbosity.");
 
     0
 }

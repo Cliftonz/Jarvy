@@ -3,12 +3,13 @@ pub mod drift;
 pub mod git;
 pub mod logging;
 pub mod network;
+pub mod observability;
 pub mod packages;
 pub mod ticket;
 pub mod tools;
 
 pub use drift::{DriftConfig, DriftDetector, DriftReport, DriftStatus, EnvironmentState};
-pub use logging::{LogError, LogFormat, LogLevel, LogStats, LoggingConfig};
+pub use logging::{LogConfig, LogError, LogFormat, LogLevel, LogStats, Sanitizer};
 pub use packages::PackagesConfig;
 pub use ticket::{TicketData, TicketError, TicketScope};
 pub use tools::{add, register_all};

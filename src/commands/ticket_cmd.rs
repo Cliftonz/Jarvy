@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use crate::cli::TicketAction;
-use crate::logging::LoggingConfig;
+use crate::logging;
 use crate::ticket::{self, TicketBundler, TicketCollector, TicketScope, preview_ticket};
 
 /// Handle ticket command dispatch
@@ -73,7 +73,7 @@ fn handle_ticket_create(
             println!("  Location: {}", path.display());
             println!(
                 "  Size: {}",
-                LoggingConfig::format_size(std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0))
+                logging::format_size(std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0))
             );
 
             // Show contents summary
@@ -170,7 +170,7 @@ fn handle_ticket_list() -> i32 {
                 println!(
                     "  {} ({}) - {}",
                     name,
-                    LoggingConfig::format_size(size),
+                    logging::format_size(size),
                     path.display()
                 );
             }
@@ -197,7 +197,7 @@ fn handle_ticket_clean(older_than: u32) -> i32 {
                 println!(
                     "Removed {} tickets ({})",
                     count,
-                    LoggingConfig::format_size(bytes)
+                    logging::format_size(bytes)
                 );
             } else {
                 println!("No old tickets to remove.");
