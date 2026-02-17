@@ -49,6 +49,7 @@ pub mod fd;
 pub mod flux;
 pub mod freelens;
 pub mod fzf;
+pub mod gcloud;
 pub mod gh;
 pub mod git;
 pub mod git_lfs;
