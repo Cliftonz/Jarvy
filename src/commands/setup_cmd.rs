@@ -43,6 +43,7 @@ pub fn run_setup(
     ignore_missing_deps: bool,
     insecure: bool,
     header: &[String],
+    machine_id: Option<&str>,
 ) {
     // Determine effective parallelism level
     let parallel_jobs = if sequential { 1 } else { jobs.max(1) };
@@ -129,6 +130,17 @@ pub fn run_setup(
         println!("Using role override: {}", role_name);
     }
     let tool_configs = config.get_tool_configs_with_role_override(role);
+
+    // Emit full tool inventory for security audit via OTEL
+    telemetry::setup_inventory(
+        &tool_configs
+            .values()
+            .map(|t| (t.name.clone(), t.version.clone()))
+            .collect::<Vec<_>>(),
+        role,
+        file,
+        machine_id,
+    );
 
     // Phase 2: Parallel version checking - determine which tools need installation
     println!("Checking tool versions...");

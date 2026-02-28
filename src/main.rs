@@ -71,10 +71,39 @@ fn main() {
     init_logging(global_config.settings.telemetry);
 
     // Initialize unified telemetry (OTEL-based)
+    // Priority: env vars > project jarvy.toml > global ~/.jarvy/config.toml
     let mut telemetry_config = global_config.telemetry.clone();
     if !global_config.settings.telemetry {
         telemetry_config.enabled = false;
     }
+
+    // Apply project-level telemetry config from jarvy.toml (if present)
+    let project_config_path = extract_config_path(&cli);
+    if let Some(ref path) = project_config_path {
+        if let Ok(contents) = fs::read_to_string(path) {
+            if let Ok(project_config) = toml::from_str::<Config>(&contents) {
+                if let Some(project_telemetry) = project_config.telemetry {
+                    if project_telemetry.enabled {
+                        telemetry_config.enabled = true;
+                    }
+                    if project_telemetry.endpoint != telemetry::TelemetryConfig::default().endpoint
+                    {
+                        telemetry_config.endpoint = project_telemetry.endpoint;
+                    }
+                    if project_telemetry.protocol != telemetry::TelemetryConfig::default().protocol
+                    {
+                        telemetry_config.protocol = project_telemetry.protocol;
+                    }
+                    telemetry_config.logs = project_telemetry.logs;
+                    telemetry_config.metrics = project_telemetry.metrics;
+                    telemetry_config.traces = project_telemetry.traces;
+                    telemetry_config.sample_rate = project_telemetry.sample_rate;
+                }
+            }
+        }
+    }
+
+    // Env vars take highest priority (override both global and project)
     let env_config = telemetry::TelemetryConfig::from_env();
     if std::env::var("JARVY_TELEMETRY").is_ok() {
         telemetry_config.enabled = env_config.enabled;
@@ -136,6 +165,7 @@ fn dispatch_command(cli: &Cli, global_config: &init::CliConfig) {
                 *ignore_missing_deps,
                 *insecure,
                 header,
+                global_config.settings.fingerprint.as_deref(),
             );
         }
         Some(Commands::Bootstrap {}) => commands::run_bootstrap(),
@@ -551,4 +581,28 @@ fn handle_update(
         },
     };
     std::process::exit(update::run_update_command(update_action));
+}
+
+/// Extract the config file path from the CLI command (for early telemetry config loading).
+/// Defaults to `./jarvy.toml` if the command doesn't specify a file.
+fn extract_config_path(cli: &Cli) -> Option<String> {
+    match &cli.command {
+        Some(Commands::Setup { file, .. })
+        | Some(Commands::Get { file, .. })
+        | Some(Commands::Env { file, .. })
+        | Some(Commands::Diff { file, .. })
+        | Some(Commands::Validate { file, .. })
+        | Some(Commands::Roles { file, .. })
+        | Some(Commands::Drift { file, .. })
+        | Some(Commands::Services { file, .. }) => Some(file.clone()),
+        _ => {
+            // Try default path for commands that don't have a --file flag
+            let default = "./jarvy.toml";
+            if std::path::Path::new(default).exists() {
+                Some(default.to_string())
+            } else {
+                None
+            }
+        }
+    }
 }

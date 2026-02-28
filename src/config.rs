@@ -301,6 +301,9 @@ pub struct Config {
     /// Drift detection configuration
     #[serde(default)]
     pub drift: Option<crate::drift::DriftConfig>,
+    /// Telemetry/OTEL configuration (project-level override for security audit)
+    #[serde(default)]
+    pub telemetry: Option<crate::telemetry::TelemetryConfig>,
 }
 
 #[derive(Deserialize, Debug, Default)]

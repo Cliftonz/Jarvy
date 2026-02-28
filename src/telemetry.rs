@@ -19,7 +19,7 @@
 //! - `command_executed()`, `setup_completed()`
 
 use opentelemetry::KeyValue;
-use opentelemetry::metrics::{Counter, Histogram, MeterProvider};
+use opentelemetry::metrics::{Counter, Gauge, Histogram, MeterProvider};
 use opentelemetry_otlp::{Protocol, WithExportConfig};
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use serde::{Deserialize, Serialize};
@@ -176,6 +176,7 @@ struct Metrics {
     setup_duration: Histogram<f64>,
     hooks_duration: Histogram<f64>,
     commands_duration: Histogram<f64>,
+    setup_inventory_size: Gauge<u64>,
 }
 
 // ============================================================================
@@ -250,6 +251,12 @@ fn build_telemetry_state(config: TelemetryConfig) -> TelemetryState {
                         .f64_histogram("jarvy.commands.duration")
                         .with_description("Command execution duration in seconds")
                         .with_unit("s")
+                        .build(),
+                    setup_inventory_size: meter
+                        .u64_gauge("jarvy.setup.inventory_size")
+                        .with_description(
+                            "Number of tools in the provisioning inventory (security audit)",
+                        )
                         .build(),
                 };
                 (Some(provider), Some(metrics))
@@ -483,6 +490,55 @@ pub fn setup_completed(summary: &SetupSummary) {
             metrics.setup_duration.record(
                 summary.duration.as_secs_f64(),
                 &[KeyValue::new("tools_count", summary.tools_requested as i64)],
+            );
+        }
+    }
+}
+
+/// Record the complete tool inventory being provisioned (for security audit).
+///
+/// Emits a single structured log event with the full manifest of tools, versions,
+/// machine hardware ID, hostname, and platform so security teams can audit
+/// provisioning across the fleet via their OTEL-connected observability platform.
+pub fn setup_inventory(
+    tools: &[(String, String)],
+    role: Option<&str>,
+    config_source: &str,
+    machine_id: Option<&str>,
+) {
+    if !is_enabled() {
+        return;
+    }
+
+    let tools_str = tools
+        .iter()
+        .map(|(name, version)| format!("{}={}", name, version))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let hostname = hostname::get()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+
+    tracing::info!(
+        event = "setup.inventory",
+        tools = %tools_str,
+        tools_count = %tools.len(),
+        role = %role.unwrap_or("none"),
+        config_source = %redact_path(config_source),
+        machine_id = %machine_id.unwrap_or("unknown"),
+        hostname = %hostname,
+        platform = %env::consts::OS,
+    );
+
+    if let Some(state) = TELEMETRY.get() {
+        if let Some(ref metrics) = state.metrics {
+            metrics.setup_inventory_size.record(
+                tools.len() as u64,
+                &[
+                    KeyValue::new("machine_id", machine_id.unwrap_or("unknown").to_string()),
+                    KeyValue::new("platform", env::consts::OS.to_string()),
+                ],
             );
         }
     }
