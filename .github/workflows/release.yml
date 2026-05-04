@@ -101,10 +101,13 @@ jobs:
             artifact_paths: target/release/jarvy*_aarch64.dmg
             build_args: ""
             cross: false
-          - platform: macos-13
-            artifact_paths: target/release/jarvy*_x64.dmg
-            build_args: ""
-            cross: false
+          # macos-13 (Intel) intentionally dropped from v0.1.0. Apple
+          # stopped selling Intel Macs in 2022; macOS 15+ retired most
+          # Intel hardware; GitHub-hosted macos-13 runner queues are
+          # routinely 15-30 min and tax every release. Intel macOS users
+          # install via `cargo install jarvy` (compiles from source) or
+          # Homebrew (also compiles from source on Intel hosts). Re-add
+          # this matrix slot if there is demand for prebuilt Intel .dmg.
           - platform: ubuntu-latest
             artifact_paths: |
               target/x86_64-unknown-linux-musl/release/jarvy*_amd64.deb

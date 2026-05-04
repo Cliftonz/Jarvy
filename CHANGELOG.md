@@ -79,6 +79,10 @@ Initial public release. Everything below ships in `v0.1.0`.
 
 - Multi-channel: crates.io, Homebrew tap, AUR (source + binary), `.deb`, `.rpm`,
   winget, Chocolatey, universal install scripts for macOS/Linux/Windows (PRD-012)
+- **Prebuilt platforms**: macOS arm64, Linux x86_64 (musl), Linux aarch64,
+  Linux armv7, Windows x86_64. macOS Intel (x86_64) **not shipped as prebuilt** —
+  Intel users install via `cargo install jarvy` or Homebrew (both compile from
+  source). See `docs/release-testing.md` for rationale.
 - Sigstore keyless signing for all release artifacts (PRD-020)
 - SBOM generation in SPDX 2.3 and CycloneDX 1.4 formats per release (PRD-020)
 - GitHub build provenance attestation per release (PRD-020)

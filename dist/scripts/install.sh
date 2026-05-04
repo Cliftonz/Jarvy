@@ -78,6 +78,23 @@ detect_platform() {
             ;;
     esac
 
+    # macOS Intel (x86_64) is intentionally not shipped as a prebuilt
+    # binary as of v0.1.0. Detect and route those users to `cargo install`
+    # before the script falls through to a 404 download URL.
+    if [ "$os" = "apple-darwin" ] && { [ "$arch" = "x86_64" ] || [ "$arch" = "amd64" ]; }; then
+        log_error "Intel macOS (x86_64) prebuilt binaries are not shipped."
+        log_error ""
+        log_error "Install via cargo instead (compiles from source, ~2 min):"
+        log_error "    cargo install jarvy"
+        log_error ""
+        log_error "Or use Homebrew (also compiles from source on Intel hosts):"
+        log_error "    brew install bearbinary/tap/jarvy"
+        log_error ""
+        log_error "Apple Silicon (arm64) Macs and all Linux/Windows targets ship"
+        log_error "prebuilt binaries via this script."
+        exit 1
+    fi
+
     case "$arch" in
         x86_64|amd64)
             arch="x86_64"

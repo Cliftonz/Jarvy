@@ -23,9 +23,11 @@ include = [
 maintenance = { status = "actively-developed" }
 
 [package.metadata.docs.rs]
+# x86_64-apple-darwin intentionally omitted: jarvy v0.1.0+ does not ship
+# Intel macOS prebuilts (Apple Silicon only). docs.rs builds for arm64
+# macOS plus Linux x86_64 + Windows x86_64.
 targets = [
     "x86_64-unknown-linux-gnu",
-    "x86_64-apple-darwin",
     "aarch64-apple-darwin",
     "x86_64-pc-windows-msvc",
 ]

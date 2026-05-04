@@ -91,9 +91,16 @@ it must cover the platforms Jarvy ships to.
 | Fedora 40+ x86_64 (VM or container) | `.rpm`, install.sh, Cargo |
 | Windows 11 x86_64 (VM) | winget, Chocolatey, install.ps1 |
 
+**Note on macOS Intel (x86_64)**: jarvy v0.1.0+ does not ship prebuilt
+Intel macOS binaries. Apple stopped selling Intel Macs in 2022; macOS 15+
+retired most Intel hardware. Intel macOS users install via
+`cargo install jarvy` or Homebrew (both compile from source). The
+`install.sh` script detects and rejects Intel macOS with a clear
+recommendation to use cargo. Re-add `macos-13` to the release matrix
+if there is demand for prebuilt Intel .dmg.
+
 **Optional but recommended**:
 
-- macOS x86_64 (Intel) — only if the diff touches platform-specific code
 - Arch Linux — for AUR validation
 - Alpine Linux — to exercise the musl build path
 
