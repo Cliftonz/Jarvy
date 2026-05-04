@@ -86,6 +86,16 @@ jobs:
         if: failure()
         uses: actions/github-script@v7
         with:
+          # Body assembled via array.join('\n') so every line stays
+          # within the YAML block scalar's indent. The previous
+          # multi-line backtick template literal had lines starting in
+          # column 1 (e.g. "**Target:**"), which terminated the YAML
+          # scalar early on stricter parsers (Python yaml, OSSF
+          # Scorecard's static-analysis pre-pass) — GitHub Actions
+          # itself accepted it but Scorecard's SAST / Dangerous-Workflow /
+          # Pinned-Dependencies / Token-Permissions / Packaging checks
+          # all returned -1 with "could not parse as YAML: yaml: line
+          # 102: did not find expected alphabetic or numeric character".
           script: |
             const fs = require('fs');
             const artifactPath = 'fuzz/artifacts/${{ matrix.target }}';
@@ -93,25 +103,30 @@ jobs:
             if (fs.existsSync(artifactPath)) {
               const crashes = fs.readdirSync(artifactPath);
               if (crashes.length > 0) {
+                const runUrl = context.serverUrl + '/' + context.repo.owner +
+                  '/' + context.repo.repo + '/actions/runs/' + context.runId;
+                const bodyLines = [
+                  '## Fuzz Testing Crash Report',
+                  '',
+                  '**Target:** `${{ matrix.target }}`',
+                  '**Workflow Run:** ' + runUrl,
+                  '',
+                  '### Crashes Found',
+                  ...crashes.map(c => '- `' + c + '`'),
+                  '',
+                  '### Next Steps',
+                  '1. Download the crash artifacts from the workflow run',
+                  '2. Reproduce locally with `cargo +nightly fuzz run ${{ matrix.target }} <crash_input>`',
+                  '3. Fix the issue and add a regression test',
+                  '',
+                  '/label bug fuzz',
+                ];
                 await github.rest.issues.create({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  title: `[Fuzz] Crash found in ${{ matrix.target }}`,
-                  body: `## Fuzz Testing Crash Report
-
-**Target:** \`${{ matrix.target }}\`
-**Workflow Run:** ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
-
-### Crashes Found
-${crashes.map(c => `- \`${c}\``).join('\n')}
-
-### Next Steps
-1. Download the crash artifacts from the workflow run
-2. Reproduce locally with \`cargo +nightly fuzz run ${{ matrix.target }} <crash_input>\`
-3. Fix the issue and add a regression test
-
-/label bug fuzz`,
-                  labels: ['bug', 'fuzz']
+                  title: '[Fuzz] Crash found in ${{ matrix.target }}',
+                  body: bodyLines.join('\n'),
+                  labels: ['bug', 'fuzz'],
                 });
               }
             }

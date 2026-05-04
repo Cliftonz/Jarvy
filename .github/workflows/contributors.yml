@@ -24,43 +24,81 @@ jobs:
       - name: Generate contributor data
         id: contributors
         run: |
-          # Get contributor stats from git log
+          # Build data/contributors.json from git history.
+          #
+          # The previous shell-heredoc + per-contributor `echo` approach had
+          # two bugs that made every run fail:
+          #   1. The header heredoc used a single-quoted delimiter
+          #      (<< 'JSONEOF'), which suppresses $() expansion. The
+          #      "last_updated" field landed in the file as the literal
+          #      string "$(date -u +%Y-%m-%d)" instead of a real date.
+          #   2. The git-log/uniq parser was misaligned. `uniq -c` emits
+          #      "   COUNT  Name|Email" but the loop split on '|' alone, so
+          #      the variable named `count` actually held "   COUNT  Name".
+          #      `tr -d ' '` then concatenated those, producing JSON like
+          #      `"commits": 5ZacClifton,` and tripping jq's parser.
+          #
+          # Replace the lot with `git shortlog -sne` (canonical "count<TAB>
+          # Name <email>" output) parsed line-by-line, piped into `jq -nR`
+          # which builds the JSON atomically — no string interpolation, no
+          # trailing-comma cleanup pass, no quoting traps.
+          set -euo pipefail
           echo "Generating contributor statistics..."
 
-          # Create contributors JSON
-          cat > data/contributors.json << 'JSONEOF'
-          {
-            "version": "1.0.0",
-            "last_updated": "$(date -u +%Y-%m-%d)",
-            "contributors": [
-          JSONEOF
+          # Emit TSV: count<TAB>name<TAB>email<TAB>username (one row per dev).
+          # `git shortlog -sne HEAD` is the standard way to get
+          # commit-count-sorted contributor records and handles unicode,
+          # quoted names, and email weirdness uniformly. The explicit
+          # `HEAD` argument is required because shortlog reads stdin
+          # when invoked non-interactively without a ref.
+          git shortlog -sne HEAD | head -50 | while IFS= read -r line; do
+            count=$(printf '%s' "$line" | awk '{print $1}')
+            # Strip leading whitespace + count, leaving "Name <email>".
+            rest=$(printf '%s' "$line" | sed -E 's/^[[:space:]]*[0-9]+[[:space:]]+//')
+            name=${rest% <*}
+            email=${rest##*<}
+            email=${email%>}
 
-          # Get unique contributors with commit counts
-          git log --format='%aN|%aE' | sort | uniq -c | sort -rn | head -50 | while IFS='|' read -r count name_email; do
-            count=$(echo "$count" | tr -d ' ')
-            name=$(echo "$name_email" | cut -d'|' -f1)
-            email=$(echo "$name_email" | cut -d'|' -f2)
-
-            # Try to get GitHub username from email
-            username=$(echo "$email" | sed -n 's/.*+\([^@]*\)@users.noreply.github.com/\1/p')
-            if [ -z "$username" ]; then
-              username=$(echo "$email" | cut -d'@' -f1)
+            # GitHub-noreply emails carry the username we want for the
+            # avatar URL: "12345+user@users.noreply.github.com" or the
+            # legacy "user@users.noreply.github.com". Fall back to the
+            # local-part for non-GitHub emails.
+            if [[ "$email" =~ ^[0-9]+\+([^@]+)@users\.noreply\.github\.com$ ]]; then
+              username="${BASH_REMATCH[1]}"
+            elif [[ "$email" =~ ^([^@]+)@users\.noreply\.github\.com$ ]]; then
+              username="${BASH_REMATCH[1]}"
+            else
+              username="${email%%@*}"
             fi
 
-            echo "    {" >> data/contributors.json
-            echo "      \"username\": \"$username\"," >> data/contributors.json
-            echo "      \"name\": \"$name\"," >> data/contributors.json
-            echo "      \"roles\": [\"contributor\"]," >> data/contributors.json
-            echo "      \"tools\": []," >> data/contributors.json
-            echo "      \"commits\": $count," >> data/contributors.json
-            echo "      \"active\": true" >> data/contributors.json
-            echo "    }," >> data/contributors.json
-          done
+            printf '%s\t%s\t%s\t%s\n' "$count" "$name" "$email" "$username"
+          done > /tmp/contributors.tsv
 
-          # Remove trailing comma and close JSON
-          sed -i '$ s/,$//' data/contributors.json
-          echo "  ]" >> data/contributors.json
-          echo "}" >> data/contributors.json
+          # Build the JSON with jq from the TSV. Atomic: either the whole
+          # document is valid or jq exits non-zero and the workflow fails
+          # at this step rather than producing a half-written file the
+          # next step has to parse.
+          DATE=$(date -u +%Y-%m-%d)
+          jq -nR --arg date "$DATE" '
+            {
+              version: "1.0.0",
+              last_updated: $date,
+              contributors: [
+                inputs | split("\t") | {
+                  username: .[3],
+                  name: .[1],
+                  roles: ["contributor"],
+                  tools: [],
+                  commits: (.[0] | tonumber),
+                  active: true
+                }
+              ]
+            }
+          ' < /tmp/contributors.tsv > data/contributors.json
+
+          # Quick validation: jq parse + show count.
+          jq -e '.contributors | length' data/contributors.json
+          echo "Wrote $(jq -r '.contributors | length' data/contributors.json) contributor(s)."
 
       - name: Generate CONTRIBUTORS.md
         run: |
