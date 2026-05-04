@@ -58,9 +58,23 @@ pub fn registered_tool_names() -> Vec<String> {
 
 /// Dispatch an added request to a registered tool by name and version.
 /// Example: add("git", "latest") or add("docker", "24.01").
-/// Returns InstallError::Parse("unknown tool") if no handler is registered.
+///
+/// Resolution order:
+/// 1. User-defined plugin tools (`~/.jarvy/tools.d/`). Plugins dispatch by
+///    their declared `name` so the package fields belonging to that plugin
+///    are the ones executed — no shared-handler ambiguity.
+/// 2. Built-in tool registry.
+///
+/// Returns `InstallError::Parse("unknown tool")` if neither has a handler.
 #[must_use = "this Result may contain an error that should be handled"]
 pub fn add(name: &str, version: &str) -> Result<(), InstallError> {
+    // Plugins first: name-keyed dispatch is correct by construction.
+    match crate::tools::plugins::install_by_name(name, version) {
+        Ok(true) => return Ok(()),
+        Ok(false) => {}
+        Err(e) => return Err(e),
+    }
+
     let key = name.to_ascii_lowercase();
     let map = registry().read().expect("registry rwlock poisoned");
     if let Some(handler) = map.get(&key) {

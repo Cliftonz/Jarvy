@@ -48,7 +48,7 @@ pub enum Commands {
         #[clap(long)]
         no_hooks: bool,
         /// Show what would happen without executing (dry run mode)
-        #[clap(long)]
+        #[clap(long, alias = "plan")]
         dry_run: bool,
         /// Force CI mode (non-interactive, auto-answer prompts)
         #[clap(long, conflicts_with = "no_ci")]
@@ -68,9 +68,6 @@ pub enum Commands {
         /// Use this flag to suppress those warnings (e.g., if dependencies are pre-installed elsewhere).
         #[clap(long)]
         ignore_missing_deps: bool,
-        /// Skip SSL certificate verification for --from URL (not recommended)
-        #[clap(long)]
-        insecure: bool,
         /// Add custom HTTP header for authenticated config fetching (can be repeated)
         /// Example: --header "Authorization: token ghp_xxxx" --header "X-Custom: value"
         #[clap(long, value_name = "HEADER", action = clap::ArgAction::Append)]
@@ -375,6 +372,10 @@ pub enum Commands {
         /// Rollback to previous version
         #[clap(long)]
         rollback: bool,
+        /// Skip Sigstore signature verification (DANGEROUS — only when cosign
+        /// is unavailable and you accept supply-chain risk).
+        #[clap(long)]
+        allow_unsigned: bool,
     },
     /// Detect configuration drift in the environment
     Drift {
@@ -393,6 +394,65 @@ pub enum Commands {
     Ticket {
         #[clap(subcommand)]
         action: TicketAction,
+    },
+    /// Output shell initialization snippet for RC files.
+    /// Add `eval "$(jarvy shell-init)"` to your .bashrc/.zshrc.
+    #[clap(name = "shell-init")]
+    ShellInit {
+        /// Shell type (bash, zsh, fish, sh, powershell). Auto-detected if not specified.
+        #[clap(long)]
+        shell: Option<String>,
+    },
+    /// Ensure base tools are installed (lightweight check for shell startup).
+    /// Reads tool list from [shell_init] in ~/.jarvy/config.toml.
+    Ensure {
+        /// Force re-check, ignore stamp file
+        #[clap(long)]
+        force: bool,
+        /// Suppress all output
+        #[clap(short, long)]
+        quiet: bool,
+        /// Run in foreground (override background default)
+        #[clap(long)]
+        foreground: bool,
+    },
+    /// Get detailed information about a specific tool
+    Explain {
+        /// Tool to explain (e.g., 'docker', 'node', 'git')
+        tool: String,
+        /// Path to the configuration file (optional, for role/version context)
+        #[clap(short, long)]
+        file: Option<String>,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
+    /// Run security scanners and produce a unified audit report
+    Audit {
+        /// Run only a specific scanner (betterleaks, gitleaks, trivy, etc.)
+        #[clap(long)]
+        tool: Option<String>,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
+    /// Check jarvy.toml for deprecated patterns and suggest migrations
+    Migrate {
+        /// Path to the configuration file
+        #[clap(short, long, default_value = "./jarvy.toml")]
+        file: String,
+        /// Apply migrations (default is dry-run report only)
+        #[clap(long)]
+        apply: bool,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
+    /// Output the JSON Schema for jarvy.toml (for editor autocomplete)
+    Schema {
+        /// Write to file instead of stdout
+        #[clap(short, long)]
+        output: Option<String>,
     },
     /// Catch-all for unknown subcommands and their args
     #[clap(external_subcommand)]

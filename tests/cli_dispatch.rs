@@ -25,7 +25,7 @@ fn get_known_command_prints_json_yaml_toml_pretty() {
     let cfg = make_config();
 
     for fmt in ["json", "yaml", "toml", "pretty"] {
-        let mut c = Command::cargo_bin("jarvy").unwrap();
+        let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
         c.env("JARVY_TEST_MODE", "1"); // ensure no interactive prompts leak
         c.args(["get", "--file"])
             .arg(cfg.path())
@@ -65,7 +65,7 @@ fn get_writes_output_file_when_requested() {
     // Close and allow jarvy to write
     drop(outfile);
 
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c.args(["get", "--file"])
         .arg(cfg.path())
@@ -83,7 +83,7 @@ fn unknown_never_writes_output_file_even_if_arg_present() {
     let pathbuf = outfile.path().to_path_buf();
     drop(outfile);
 
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c.args(["frobnicate", "--output", pathbuf.to_str().unwrap()]);
     c.assert()
@@ -99,7 +99,7 @@ fn unknown_never_writes_output_file_even_if_arg_present() {
 #[test]
 fn known_command_does_not_invoke_user_select() {
     let cfg = make_config();
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c.args(["get", "--file"]).arg(cfg.path());
     c.assert()

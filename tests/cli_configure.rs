@@ -5,7 +5,7 @@ use std::process::Command;
 #[test]
 fn configure_writes_default_config_in_cwd() {
     let dir = tempfile::tempdir().unwrap();
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c.current_dir(dir.path()).arg("configure");
     c.assert().success();

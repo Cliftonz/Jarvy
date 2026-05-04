@@ -2,8 +2,9 @@
 // OS-specific success and actual installation are covered by e2e tests.
 
 #[test]
+#[allow(unsafe_code)]
 fn tools_add_handlers_are_invocable() {
-    // Enable fast, side-effect-free path for integration tests
+    // SAFETY: test-only, single-threaded access to env var
     unsafe {
         std::env::set_var("JARVY_FAST_TEST", "1");
     }

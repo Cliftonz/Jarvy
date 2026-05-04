@@ -2,8 +2,9 @@
 //!
 //! Measures the performance of parsing and comparing semantic versions.
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use semver::{Version, VersionReq};
+use std::hint::black_box;
 
 fn bench_version_parsing(c: &mut Criterion) {
     let mut group = c.benchmark_group("version_parsing");

@@ -70,12 +70,14 @@ curl = "latest"
 fn validate_warns_about_missing_strict_dependencies() {
     let cfg = make_config_with_deps();
 
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c.args(["validate", "--file"]).arg(cfg.path());
 
-    // Should warn about lazydocker requiring docker
-    c.assert().success().stdout(
+    // Should warn about lazydocker requiring docker (exit 1 = warnings present).
+    // Tightened from `in_iter([0, 1])` so a regression that suppresses the
+    // dependency warning fails the test instead of silently passing on code 0.
+    c.assert().code(1).stdout(
         predicate::str::contains("lazydocker")
             .and(predicate::str::contains("docker"))
             .and(predicate::str::contains("requires").or(predicate::str::contains("not in"))),
@@ -86,12 +88,12 @@ fn validate_warns_about_missing_strict_dependencies() {
 fn validate_informs_about_missing_flexible_dependencies() {
     let cfg = make_config_with_deps();
 
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c.args(["validate", "--file"]).arg(cfg.path());
 
-    // Should mention kubectl and its flexible dep options
-    c.assert().success().stdout(
+    // Should mention kubectl and its flexible dep options (exit 1 = warnings present).
+    c.assert().code(1).stdout(
         predicate::str::contains("kubectl")
             .and(predicate::str::contains("one of").or(predicate::str::contains("best with"))),
     );
@@ -101,7 +103,7 @@ fn validate_informs_about_missing_flexible_dependencies() {
 fn validate_no_warnings_when_dependencies_satisfied() {
     let cfg = make_config_with_satisfied_flex_deps();
 
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c.args(["validate", "--file"]).arg(cfg.path());
 
@@ -115,7 +117,7 @@ fn validate_no_warnings_when_dependencies_satisfied() {
 fn diff_shows_dependency_resolution() {
     let cfg = make_config_with_satisfied_flex_deps();
 
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c.env("JARVY_FAST_TEST", "1"); // Skip actual command execution
     c.args(["diff", "--file"]).arg(cfg.path());
@@ -128,7 +130,7 @@ fn diff_shows_dependency_resolution() {
 fn diff_shows_missing_dependency_warnings() {
     let cfg = make_config_with_deps();
 
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c.env("JARVY_FAST_TEST", "1");
     c.args(["diff", "--file"]).arg(cfg.path());
@@ -142,7 +144,7 @@ fn ignore_missing_deps_flag_suppresses_warnings() {
     let cfg = make_config_with_deps();
 
     // With --ignore-missing-deps, should not show dependency warnings in setup
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c.env("JARVY_FAST_TEST", "1");
     c.env("JARVY_IGNORE_MISSING_DEPS", "1"); // Simulate the flag
@@ -158,13 +160,13 @@ fn ignore_missing_deps_flag_suppresses_warnings() {
 fn doctor_shows_dependency_information() {
     let cfg = make_config_with_satisfied_flex_deps();
 
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c.args(["doctor", "--file"]).arg(cfg.path());
 
-    // Doctor should complete successfully and show tool health
+    // Doctor should show tool health (may exit non-zero if tools are missing)
     c.assert()
-        .success()
+        .code(predicate::in_iter([0, 1, 2]))
         .stdout(predicate::str::contains("Tool Health"));
 }
 
@@ -172,7 +174,7 @@ fn doctor_shows_dependency_information() {
 fn simple_config_has_no_dependency_issues() {
     let cfg = make_simple_config();
 
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c.args(["validate", "--file"]).arg(cfg.path());
 
@@ -186,15 +188,15 @@ fn simple_config_has_no_dependency_issues() {
 fn validate_json_output_includes_dependency_info() {
     let cfg = make_config_with_deps();
 
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c.args(["validate", "--file"])
         .arg(cfg.path())
         .args(["--format", "json"]);
 
-    // JSON output should be valid and contain issues
+    // JSON output should be valid and contain issues (exit 1 = warnings present).
     c.assert()
-        .success()
+        .code(1)
         .stdout(predicate::str::contains("\"issues\""));
 }
 
@@ -202,22 +204,20 @@ fn validate_json_output_includes_dependency_info() {
 fn doctor_json_output_includes_dependency_field() {
     let cfg = make_config_with_satisfied_flex_deps();
 
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c.args(["doctor", "--file"])
         .arg(cfg.path())
         .args(["--format", "json"]);
 
-    // Doctor JSON should include tools array
+    // Doctor JSON should include tools array (may exit non-zero if tools are missing)
     c.assert()
-        .success()
+        .code(predicate::in_iter([0, 1, 2]))
         .stdout(predicate::str::contains("\"tools\""));
 }
 
 // Unit-style tests for the spec module functions
 mod spec_tests {
-    use std::collections::HashSet;
-
     #[test]
     fn test_should_ignore_missing_deps_env_var() {
         // This test verifies the env var detection works

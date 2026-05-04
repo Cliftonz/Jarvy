@@ -29,6 +29,9 @@ pub enum UpdateAction {
         method: Option<InstallMethod>,
         /// Perform rollback instead of install
         rollback: bool,
+        /// Operator override: accept unsigned/missing-cosign installs.
+        /// Defaults to false (fail-closed).
+        allow_unsigned: bool,
     },
     /// Show update history
     History,
@@ -49,11 +52,12 @@ pub fn run_update_command(action: UpdateAction) -> i32 {
             channel,
             method,
             rollback,
+            allow_unsigned,
         } => {
             if rollback {
                 run_rollback()
             } else {
-                run_install(version, channel, method)
+                run_install(version, channel, method, allow_unsigned)
             }
         }
         UpdateAction::History => run_history(),
@@ -129,6 +133,7 @@ fn run_install(
     version: Option<String>,
     channel: Option<Channel>,
     method: Option<InstallMethod>,
+    allow_unsigned: bool,
 ) -> Result<(), UpdateError> {
     // Determine channel (reserved for future use with channel-specific releases)
     let _channel = channel.unwrap_or(UpdateConfig::load().channel);
@@ -187,7 +192,7 @@ fn run_install(
         let installer =
             BinaryInstaller::new().map_err(|e| UpdateError::InstallationFailed(e.to_string()))?;
 
-        installer.install(&release)?;
+        installer.install_with_options(&release, allow_unsigned)?;
     }
 
     println!("\nSuccessfully updated to jarvy v{}", target_version);

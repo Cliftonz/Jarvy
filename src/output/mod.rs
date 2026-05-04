@@ -34,7 +34,7 @@ impl std::str::FromStr for Format {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "human" => Ok(Format::Human),
+            "human" | "pretty" | "text" | "table" => Ok(Format::Human),
             "json" => Ok(Format::Json),
             "quiet" => Ok(Format::Quiet),
             _ => Err(format!(
@@ -43,6 +43,22 @@ impl std::str::FromStr for Format {
             )),
         }
     }
+}
+
+/// Render a command's `Outputable` result and return its exit code.
+///
+/// Single source of truth for the
+/// `if json { to_json } else { to_human }; println!; exit_code` boilerplate
+/// that was previously duplicated across every CLI handler. Centralizing
+/// here also normalizes the `output_format` strings — `"pretty"`, `"json"`,
+/// `"human"`, `"text"` etc. all flow through the same `Format::FromStr`.
+pub fn print_and_exit<T: Outputable>(result: T, format_str: &str) -> i32 {
+    let format = format_str.parse::<Format>().unwrap_or(Format::Human);
+    let rendered = result.render(format);
+    if !rendered.is_empty() {
+        println!("{}", rendered);
+    }
+    result.exit_code().code()
 }
 
 /// Exit codes for commands

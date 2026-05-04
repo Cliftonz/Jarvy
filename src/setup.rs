@@ -9,7 +9,7 @@ use inquire::Select;
 use crate::os_setup::set_up_os;
 use crate::outputs::{error_message, installing_dependency, success_message};
 use crate::provisioner::{
-    check_and_install_git, install_docker, install_homebrew, start_docker_infra,
+    check_and_install_git, install_docker, install_homebrew, start_docker_infra_with_config,
 };
 use crate::telemetry;
 
@@ -39,7 +39,7 @@ pub fn setup() {
         _ => {}
     }
 
-    start_docker_infra();
+    start_docker_infra_with_config(None);
     refresh_shell(PLATFORM);
 
     // Emit setup_complete with duration
@@ -57,24 +57,33 @@ pub fn setup() {
 fn check_hard_dependencies(platform: &str) {
     match platform {
         "macOS" => {
-            let output = Command::new("brew")
-                .arg("--version")
-                .output()
-                .unwrap_or_else(|_| panic!("Failed to run Homebrew check"));
+            let Some(output) = crate::tools::common::run_capture(
+                "brew",
+                &["--version"],
+                "hard_dep_check",
+                "Failed to run Homebrew check",
+            ) else {
+                return;
+            };
 
-            let brew_check = str::from_utf8(&output.stdout)
-                .expect("Could not decode byte array as UTF-8 string");
+            let brew_check = str::from_utf8(&output.stdout).unwrap_or("");
 
             if brew_check.is_empty() || output.status.code() != Some(0) {
                 error_message("Homebrew");
                 println!("⛔️ Homebrew is a hard dependency for this tool");
 
                 installing_dependency("Homebrew");
-                let output = Command::new("/bin/bash")
-                    .arg("-c")
-                    .arg(r#""$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)""#)
-                    .output()
-                    .expect("Failed to execute command");
+                let Some(output) = crate::tools::common::run_capture(
+                    "/bin/bash",
+                    &[
+                        "-c",
+                        r#""$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)""#,
+                    ],
+                    "hard_dep_check",
+                    "Failed to execute Homebrew install command",
+                ) else {
+                    return;
+                };
 
                 println!("{}", String::from_utf8_lossy(&output.stdout));
                 success_message("Homebrew")
@@ -89,10 +98,14 @@ fn check_hard_dependencies(platform: &str) {
 
 fn check_zsh() {
     // Check if zsh is installed
-    let output = Command::new("zsh")
-        .arg("--version")
-        .output()
-        .unwrap_or_else(|_| panic!("Failed to check zsh"));
+    let Some(output) = crate::tools::common::run_capture(
+        "zsh",
+        &["--version"],
+        "hard_dep_check",
+        "Failed to check zsh",
+    ) else {
+        return;
+    };
 
     // If zsh is not installed, don't go further.
     if output.status.code() != Some(0) {
@@ -102,20 +115,28 @@ fn check_zsh() {
     // Zsh is installed, ask to install Oh My Zsh
     let user_choice = Select::new("Do you want to install Oh My Zsh?", vec!["Yes", "No"]).prompt();
 
-    let response = user_choice.unwrap();
+    let Ok(response) = user_choice else {
+        return;
+    };
 
     // Check if user wants to install Oh My Zsh
     if response == "Yes" {
-        let ohmyzsh_dir = format!("{}/.oh-my-zsh", env::var("HOME").unwrap());
+        let Some(home) = dirs::home_dir() else {
+            return;
+        };
+        let ohmyzsh_dir = format!("{}/.oh-my-zsh", home.display());
 
         // Check if directory .oh-my-zsh exists in the home directory
         if !Path::new(&ohmyzsh_dir).exists() {
             // Download and install Oh My Zsh!
-            Command::new("sh")
+            if let Err(e) = Command::new("sh")
                 .arg("-c")
                 .arg("$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)")
                 .status()
-                .expect("Failed to install Oh My Zsh!");
+            {
+                eprintln!("Failed to install Oh My Zsh: {e}");
+                return;
+            }
 
             // Check if Oh My Zsh! is installed successfully
             if !Path::new(&ohmyzsh_dir).exists() {
@@ -129,19 +150,59 @@ fn check_zsh() {
     }
 }
 
+/// Single-quote a shell argument so it survives `sh -c "..."` unchanged.
+/// Internal single quotes are escaped via the `'\''` idiom.
+/// Rejects paths containing NUL bytes (sh cannot represent them).
+pub(crate) fn shell_single_quote(s: &str) -> Option<String> {
+    if s.contains('\0') {
+        return None;
+    }
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for c in s.chars() {
+        if c == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(c);
+        }
+    }
+    out.push('\'');
+    Some(out)
+}
+
 fn refresh_shell(platform: &str) {
     match platform {
         "macOS" => {
-            let zprofile = env::var("ZPROFILE").expect("ZPROFILE is not set");
+            let zprofile = env::var("ZPROFILE").unwrap_or_else(|_| {
+                let home = env::var("HOME").unwrap_or_else(|_| "~".to_string());
+                format!("{home}/.zprofile")
+            });
 
-            let output = Command::new("sh")
-                .arg("-c")
-                .arg(format!("source {}", zprofile))
-                .output()
-                .expect("Failed to execute shell command");
+            if !Path::new(&zprofile).exists() {
+                eprintln!(
+                    "Warning: profile {} does not exist, skipping source",
+                    zprofile
+                );
+                return;
+            }
+
+            let Some(quoted) = shell_single_quote(&zprofile) else {
+                eprintln!("Error: ZPROFILE path contains a NUL byte: {}", zprofile);
+                return;
+            };
+
+            let source_cmd = format!("source {}", quoted);
+            let Some(output) = crate::tools::common::run_capture(
+                "sh",
+                &["-c", &source_cmd],
+                "refresh_shell",
+                "Failed to source shell profile",
+            ) else {
+                return;
+            };
 
             if output.status.success() {
-                let shell = env::var("SHELL").expect("SHELL is not set");
+                let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
                 #[cfg(unix)]
                 {
                     let _ = Command::new(shell).exec();
@@ -156,13 +217,29 @@ fn refresh_shell(platform: &str) {
             }
         }
         "windows" => {
-            let shell_profile = env::var("PROFILE").expect("PROFILE is not set");
+            let shell_profile = env::var("PROFILE").unwrap_or_else(|_| {
+                let userprofile = env::var("USERPROFILE").unwrap_or_else(|_| "~".to_string());
+                format!(
+                    "{userprofile}\\Documents\\WindowsPowerShell\\Microsoft.PowerShell_profile.ps1"
+                )
+            });
 
-            let output = Command::new("powershell")
-                .arg("-Command")
-                .arg(format!(". {}", shell_profile))
-                .output()
-                .expect("Failed to execute PowerShell command");
+            // PowerShell single-quote: doubled internal single quotes.
+            if shell_profile.contains('\0') {
+                eprintln!("Error: PROFILE path contains a NUL byte");
+                return;
+            }
+            let ps_quoted = format!("'{}'", shell_profile.replace('\'', "''"));
+
+            let dot_cmd = format!(". {}", ps_quoted);
+            let Some(output) = crate::tools::common::run_capture(
+                "powershell",
+                &["-Command", &dot_cmd],
+                "refresh_shell",
+                "Failed to execute PowerShell command",
+            ) else {
+                return;
+            };
 
             if output.status.success() {
                 let _ = Command::new("powershell").status();
@@ -174,5 +251,76 @@ fn refresh_shell(platform: &str) {
         _ => {
             println!("Unsupported sh")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shell_single_quote;
+
+    #[test]
+    fn quotes_plain_path() {
+        assert_eq!(
+            shell_single_quote("/Users/zac/.zprofile"),
+            Some("'/Users/zac/.zprofile'".to_string())
+        );
+    }
+
+    #[test]
+    fn neutralizes_semicolon_command_separator() {
+        let injected = "/tmp/x;rm -rf $HOME";
+        let q = shell_single_quote(injected).unwrap();
+        assert_eq!(q, "'/tmp/x;rm -rf $HOME'");
+        // After substitution into `source <q>`, sh sees one literal arg.
+        assert!(!q.contains("\0"));
+    }
+
+    #[test]
+    fn neutralizes_backtick_command_substitution() {
+        let q = shell_single_quote("/tmp/`whoami`").unwrap();
+        assert_eq!(q, "'/tmp/`whoami`'");
+    }
+
+    #[test]
+    fn neutralizes_dollar_paren_substitution() {
+        let q = shell_single_quote("/tmp/$(id)").unwrap();
+        assert_eq!(q, "'/tmp/$(id)'");
+    }
+
+    #[test]
+    fn neutralizes_pipe() {
+        let q = shell_single_quote("/a|b").unwrap();
+        assert_eq!(q, "'/a|b'");
+    }
+
+    #[test]
+    fn neutralizes_glob_star() {
+        // The original allowlist let `*` through and let `source /tmp/*.sh` glob.
+        let q = shell_single_quote("/tmp/*.sh").unwrap();
+        assert_eq!(q, "'/tmp/*.sh'");
+    }
+
+    #[test]
+    fn neutralizes_newline() {
+        let q = shell_single_quote("/a\nb").unwrap();
+        assert_eq!(q, "'/a\nb'");
+    }
+
+    #[test]
+    fn escapes_internal_single_quote() {
+        // Caller's path with a single quote: foo'bar becomes 'foo'\''bar'
+        let q = shell_single_quote("/a'b").unwrap();
+        assert_eq!(q, "'/a'\\''b'");
+    }
+
+    #[test]
+    fn rejects_nul_byte() {
+        assert_eq!(shell_single_quote("/a\0b"), None);
+    }
+
+    #[test]
+    fn quotes_unicode_paths() {
+        let q = shell_single_quote("/Users/zac/プロファイル").unwrap();
+        assert_eq!(q, "'/Users/zac/プロファイル'");
     }
 }

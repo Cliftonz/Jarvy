@@ -34,6 +34,7 @@ pub enum ShellType {
     Zsh,
     Fish,
     Sh,
+    PowerShell,
 }
 
 impl ShellType {
@@ -41,6 +42,7 @@ impl ShellType {
     pub fn export_syntax(&self) -> (&'static str, &'static str) {
         match self {
             ShellType::Fish => ("set -gx ", ""),
+            ShellType::PowerShell => ("$env:", ""),
             _ => ("export ", ""),
         }
     }
@@ -52,6 +54,14 @@ impl ShellType {
             ShellType::Zsh => home.join(".zshrc"),
             ShellType::Fish => home.join(".config/fish/config.fish"),
             ShellType::Sh => home.join(".profile"),
+            #[cfg(windows)]
+            ShellType::PowerShell => {
+                home.join("Documents/PowerShell/Microsoft.PowerShell_profile.ps1")
+            }
+            #[cfg(not(windows))]
+            ShellType::PowerShell => {
+                home.join(".config/powershell/Microsoft.PowerShell_profile.ps1")
+            }
         }
     }
 
@@ -68,6 +78,7 @@ impl std::fmt::Display for ShellType {
             ShellType::Zsh => write!(f, "zsh"),
             ShellType::Fish => write!(f, "fish"),
             ShellType::Sh => write!(f, "sh"),
+            ShellType::PowerShell => write!(f, "powershell"),
         }
     }
 }
@@ -106,6 +117,8 @@ pub fn detect_shell() -> ShellType {
             return ShellType::Bash;
         } else if shell_lower.contains("fish") {
             return ShellType::Fish;
+        } else if shell_lower.contains("pwsh") || shell_lower.contains("powershell") {
+            return ShellType::PowerShell;
         }
     }
 
@@ -127,6 +140,7 @@ pub fn parse_shell(s: &str) -> Result<ShellType, ShellError> {
         "zsh" => Ok(ShellType::Zsh),
         "fish" => Ok(ShellType::Fish),
         "sh" => Ok(ShellType::Sh),
+        "powershell" | "pwsh" => Ok(ShellType::PowerShell),
         _ => Err(ShellError::UnsupportedShell(s.to_string())),
     }
 }

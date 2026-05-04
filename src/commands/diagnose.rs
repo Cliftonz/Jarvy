@@ -141,7 +141,7 @@ pub struct Fix {
 }
 
 /// Run the diagnose command
-pub fn run_diagnose(tool: &str, fix: bool, export: bool, _scope: &str, output_format: &str) {
+pub fn run_diagnose(tool: &str, fix: bool, export: bool, _scope: &str, output_format: &str) -> i32 {
     // Check if tool exists in registry - spec is required for diagnosis
     let tool_spec = match get_tool_spec(tool) {
         Some(spec) => spec,
@@ -156,7 +156,7 @@ pub fn run_diagnose(tool: &str, fix: bool, export: bool, _scope: &str, output_fo
                     tool
                 );
             }
-            std::process::exit(1);
+            return 1;
         }
     };
 
@@ -205,6 +205,8 @@ pub fn run_diagnose(tool: &str, fix: bool, export: bool, _scope: &str, output_fo
             }
         }
     }
+
+    0
 }
 
 /// Generate diagnostic report for a tool

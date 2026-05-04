@@ -8,6 +8,12 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::LazyLock;
+
+static BRACED_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}").unwrap());
+static UNBRACED_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"\$([A-Za-z_][A-Za-z0-9_]*)").unwrap());
 
 /// Context for variable expansion
 #[derive(Debug, Clone)]
@@ -79,8 +85,7 @@ pub fn expand_value(value: &str, ctx: &EnvContext) -> String {
     let mut result = value.to_string();
 
     // First, expand ${VAR} syntax (braced variables)
-    let braced_re = regex::Regex::new(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}").unwrap();
-    result = braced_re
+    result = BRACED_RE
         .replace_all(&result, |caps: &regex::Captures| {
             let var_name = &caps[1];
             resolve_variable(var_name, ctx)
@@ -89,8 +94,7 @@ pub fn expand_value(value: &str, ctx: &EnvContext) -> String {
 
     // Then, expand $VAR syntax (unbraced variables)
     // Be careful not to match things like $123 or inside already expanded values
-    let unbraced_re = regex::Regex::new(r"\$([A-Za-z_][A-Za-z0-9_]*)").unwrap();
-    result = unbraced_re
+    result = UNBRACED_RE
         .replace_all(&result, |caps: &regex::Captures| {
             let var_name = &caps[1];
             resolve_variable(var_name, ctx)
@@ -114,9 +118,9 @@ fn resolve_variable(name: &str, ctx: &EnvContext) -> String {
     if name.starts_with("JARVY_") && name.ends_with("_PATH") {
         let tool_name = name
             .strip_prefix("JARVY_")
-            .unwrap()
+            .expect("guarded by starts_with check")
             .strip_suffix("_PATH")
-            .unwrap()
+            .expect("guarded by ends_with check")
             .to_lowercase();
         if let Some(path) = ctx.tool_paths.get(&tool_name) {
             return path.to_string_lossy().to_string();

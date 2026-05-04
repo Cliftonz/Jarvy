@@ -47,7 +47,7 @@ nodejs = "18.0"
 #[test]
 fn validate_valid_config_succeeds() {
     let cfg = make_valid_config();
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["validate", "--file"]).arg(cfg.path());
     cmd.assert()
@@ -58,7 +58,7 @@ fn validate_valid_config_succeeds() {
 #[test]
 fn validate_invalid_toml_fails() {
     let cfg = make_invalid_toml();
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["validate", "--file"]).arg(cfg.path());
     cmd.assert()
@@ -69,7 +69,7 @@ fn validate_invalid_toml_fails() {
 #[test]
 fn validate_unknown_tool_shows_suggestion() {
     let cfg = make_unknown_tool_config();
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["validate", "--file"]).arg(cfg.path());
     // Should suggest 'node' for 'nodejs' typo
@@ -83,7 +83,7 @@ fn validate_unknown_tool_shows_suggestion() {
 #[test]
 fn validate_strict_mode_treats_warnings_as_errors() {
     let cfg = make_unknown_tool_config();
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["validate", "--file"])
         .arg(cfg.path())
@@ -94,7 +94,7 @@ fn validate_strict_mode_treats_warnings_as_errors() {
 #[test]
 fn validate_json_format_output() {
     let cfg = make_valid_config();
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["validate", "--file"])
         .arg(cfg.path())
@@ -111,7 +111,7 @@ fn validate_json_format_output() {
 #[test]
 fn validate_accepts_from_flag() {
     // Test that --from flag is accepted (will fail to fetch, but arg should parse)
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["validate", "--from", "https://example.com/nonexistent.toml"]);
     // Should fail with network error, not argument parsing error
@@ -125,7 +125,7 @@ fn validate_accepts_from_flag() {
 #[test]
 fn validate_accepts_header_flag() {
     // Test that --header flag is accepted
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args([
         "validate",
@@ -142,7 +142,7 @@ fn validate_accepts_header_flag() {
 fn setup_accepts_header_flag() {
     // Test that --header flag is accepted on setup command
     let cfg = make_valid_config();
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.env("JARVY_FAST_TEST", "1");
     cmd.args(["setup", "--file"])
@@ -155,7 +155,7 @@ fn setup_accepts_header_flag() {
 #[test]
 fn setup_from_url_accepts_header_flag() {
     // Test that setup --from with --header is accepted
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args([
         "setup",
@@ -179,7 +179,7 @@ fn setup_from_url_accepts_header_flag() {
 
 #[test]
 fn validate_nonexistent_file_fails_gracefully() {
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["validate", "--file", "/nonexistent/path/jarvy.toml"]);
     cmd.assert().failure();
@@ -189,7 +189,7 @@ fn validate_nonexistent_file_fails_gracefully() {
 fn validate_empty_config_warns_no_provisioner() {
     let mut f = NamedTempFile::new().unwrap();
     writeln!(f, "# Empty config file").unwrap();
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["validate", "--file"]).arg(f.path());
     // Empty config is valid TOML but produces a warning about missing provisioner

@@ -2,7 +2,8 @@
 //!
 //! Measures parsing performance for small, medium, and large config files.
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 
 /// Small config - basic tools only
 const SMALL_CONFIG: &str = r#"

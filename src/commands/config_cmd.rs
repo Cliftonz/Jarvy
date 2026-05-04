@@ -6,7 +6,7 @@ use crate::cli::ConfigAction;
 use crate::team;
 
 /// Handle config subcommands
-pub fn run_config(action: &ConfigAction) {
+pub fn run_config(action: &ConfigAction) -> i32 {
     match action {
         ConfigAction::Show {
             file,
@@ -34,10 +34,10 @@ pub fn run_config(action: &ConfigAction) {
                     }
                     Err(e) => {
                         eprintln!("Error resolving config: {:?}", e);
-                        std::process::exit(1);
+                        return 1;
                     }
                 }
-                return;
+                return 0;
             }
 
             if *resolved {
@@ -74,7 +74,7 @@ pub fn run_config(action: &ConfigAction) {
                     }
                     Err(e) => {
                         eprintln!("Error resolving config: {:?}", e);
-                        std::process::exit(1);
+                        return 1;
                     }
                 }
             } else {
@@ -91,7 +91,7 @@ pub fn run_config(action: &ConfigAction) {
                                     );
                                 } else {
                                     eprintln!("Failed to parse config file");
-                                    std::process::exit(1);
+                                    return 1;
                                 }
                             }
                             "yaml" => {
@@ -103,7 +103,7 @@ pub fn run_config(action: &ConfigAction) {
                                     );
                                 } else {
                                     eprintln!("Failed to parse config file");
-                                    std::process::exit(1);
+                                    return 1;
                                 }
                             }
                             _ => {
@@ -114,7 +114,7 @@ pub fn run_config(action: &ConfigAction) {
                     }
                     Err(e) => {
                         eprintln!("Failed to read config file: {}", e);
-                        std::process::exit(1);
+                        return 1;
                     }
                 }
             }
@@ -147,9 +147,10 @@ pub fn run_config(action: &ConfigAction) {
                 }
                 Err(e) => {
                     eprintln!("Error resolving config: {:?}", e);
-                    std::process::exit(1);
+                    return 1;
                 }
             }
         }
     }
+    0
 }

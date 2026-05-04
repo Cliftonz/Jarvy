@@ -41,10 +41,9 @@ pub fn run_setup(
     jobs: usize,
     sequential: bool,
     ignore_missing_deps: bool,
-    insecure: bool,
     header: &[String],
     machine_id: Option<&str>,
-) {
+) -> i32 {
     // Determine effective parallelism level
     let parallel_jobs = if sequential { 1 } else { jobs.max(1) };
 
@@ -79,18 +78,18 @@ pub fn run_setup(
 
     // Determine config file path: fetch from URL or use local file
     let config_path = if let Some(url) = from {
-        match fetch_remote_config(url, insecure, header) {
+        match fetch_remote_config(url, header) {
             Ok(path) => path,
             Err(e) => {
                 eprintln!("Error fetching remote config: {}", e);
-                std::process::exit(error_codes::CONFIG_ERROR);
+                return error_codes::CONFIG_ERROR;
             }
         }
     } else {
         file.to_string()
     };
 
-    let config = Config::new(&config_path);
+    let config = Config::new_with_workspace(&config_path);
     let hooks_config = config.get_hooks();
     let hook_settings = HookConfig::from(&hooks_config.config);
 
@@ -110,7 +109,7 @@ pub fn run_setup(
                     Err(e) => {
                         if !hook_settings.continue_on_error {
                             eprintln!("Pre-setup hook failed: {}", e);
-                            std::process::exit(error_codes::HOOK_FAILED);
+                            return error_codes::HOOK_FAILED;
                         }
                         eprintln!("Warning: Pre-setup hook failed: {}", e);
                     }
@@ -409,7 +408,7 @@ pub fn run_setup(
                         Err(e) => {
                             if !hook_settings.continue_on_error {
                                 eprintln!("Post-install hook for {} failed: {}", tool_name, e);
-                                std::process::exit(error_codes::HOOK_FAILED);
+                                return error_codes::HOOK_FAILED;
                             }
                             eprintln!("Warning: Post-install hook for {} failed: {}", tool_name, e);
                         }
@@ -639,7 +638,7 @@ pub fn run_setup(
                     Err(e) => {
                         if !hook_settings.continue_on_error {
                             eprintln!("Post-setup hook failed: {}", e);
-                            std::process::exit(error_codes::HOOK_FAILED);
+                            return error_codes::HOOK_FAILED;
                         }
                         eprintln!("Warning: Post-setup hook failed: {}", e);
                     }
@@ -764,6 +763,8 @@ pub fn run_setup(
     if !dry_run {
         let _ = mark_initialized();
     }
+
+    0
 }
 
 /// Detect install method for a tool based on its path

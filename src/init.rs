@@ -4,17 +4,32 @@ use std::fs;
 use std::io::Write;
 use uuid::Uuid;
 
+use crate::shell_init::ShellInitConfig;
 use crate::telemetry::TelemetryConfig;
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub(crate) struct CliConfig {
     pub settings: Settings,
     /// Telemetry configuration (OTLP endpoint, signals, etc.)
     #[serde(default)]
     pub telemetry: TelemetryConfig,
+    /// Shell init configuration for `jarvy ensure`
+    #[serde(default)]
+    pub shell_init: Option<ShellInitConfig>,
+    /// MCP server preferences
+    #[serde(default)]
+    pub mcp: McpPreferences,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+/// MCP preferences stored in ~/.jarvy/config.toml
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct McpPreferences {
+    /// Auto-approve tool installations without prompting
+    #[serde(default)]
+    pub auto_approve_installs: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct Settings {
     /// Legacy telemetry switch (kept for backward compatibility)
     /// Use [telemetry] section for full configuration
@@ -37,7 +52,39 @@ impl Default for Settings {
     }
 }
 
+/// Lazily-cached parse of `~/.jarvy/config.toml`. The OnceLock is populated
+/// the first time `initialize()` is invoked. Mutating writes through
+/// `save_global_config` / `modify_global_config` invalidate the cache so a
+/// subsequent `initialize()` call sees the new values.
+static GLOBAL_CONFIG: std::sync::OnceLock<std::sync::RwLock<Option<CliConfig>>> =
+    std::sync::OnceLock::new();
+
+fn config_cache() -> &'static std::sync::RwLock<Option<CliConfig>> {
+    GLOBAL_CONFIG.get_or_init(|| std::sync::RwLock::new(None))
+}
+
+/// Drop the cached `CliConfig` so the next `initialize()` call re-reads from
+/// disk. Called by save paths to avoid stale reads.
+pub(crate) fn invalidate_global_config_cache() {
+    if let Ok(mut guard) = config_cache().write() {
+        *guard = None;
+    }
+}
+
 pub(crate) fn initialize() -> CliConfig {
+    if let Ok(guard) = config_cache().read() {
+        if let Some(cfg) = guard.as_ref() {
+            return cfg.clone();
+        }
+    }
+    let fresh = initialize_from_disk();
+    if let Ok(mut guard) = config_cache().write() {
+        *guard = Some(fresh.clone());
+    }
+    fresh
+}
+
+fn initialize_from_disk() -> CliConfig {
     // Test probe: allow tests to assert initialization ordering without side-effects
     if std::env::var("JARVY_INIT_PROBE").as_deref() == Ok("1") {
         eprintln!("TEST: initialize called");
@@ -48,7 +95,10 @@ pub(crate) fn initialize() -> CliConfig {
     }
 
     // check jarvy config for the usr
-    let home_dir = dirs::home_dir().expect("Failed to get home directory");
+    let Some(home_dir) = dirs::home_dir() else {
+        eprintln!("Failed to get home directory");
+        return CliConfig::default();
+    };
 
     // Create the .jarvy directory path
     let jarvy_dir = home_dir.join(".jarvy");
@@ -58,7 +108,10 @@ pub(crate) fn initialize() -> CliConfig {
 
     // Create the .jarvy directory if it doesn't exist
     if !jarvy_dir.exists() {
-        fs::create_dir(&jarvy_dir).expect("Unable to create jarvy config file");
+        if let Err(e) = fs::create_dir(&jarvy_dir) {
+            eprintln!("Unable to create jarvy config directory: {e}");
+            return CliConfig::default();
+        }
         println!(
             r"
         Jarvy tool collects telemetry data to help us improve your experience.
@@ -75,11 +128,21 @@ pub(crate) fn initialize() -> CliConfig {
         let config = CliConfig {
             settings: Settings::default(),
             telemetry: TelemetryConfig::default(),
+            shell_init: None,
+            mcp: McpPreferences::default(),
         };
-        let toml = toml::to_string(&config).expect("serialize default config");
-        let mut file = fs::File::create(&config_file_path).expect("Unable to create config file");
-        file.write_all(toml.as_bytes())
-            .expect("Unable to write content to config file");
+        let toml = toml::to_string(&config).unwrap_or_default();
+        let mut file = match fs::File::create(&config_file_path) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Unable to create config file: {e}");
+                return CliConfig::default();
+            }
+        };
+        if let Err(e) = file.write_all(toml.as_bytes()) {
+            eprintln!("Unable to write content to config file: {e}");
+            return CliConfig::default();
+        }
     }
 
     // Read existing or just-created config.toml
@@ -93,6 +156,151 @@ pub(crate) fn initialize() -> CliConfig {
     };
 
     config
+}
+
+/// Save the global config back to ~/.jarvy/config.toml
+pub fn save_global_config(config: &CliConfig) -> Result<(), String> {
+    let path = global_config_path().ok_or_else(|| "no home directory".to_string())?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("failed to create config dir: {e}"))?;
+    }
+    let toml =
+        toml::to_string_pretty(config).map_err(|e| format!("failed to serialize config: {e}"))?;
+    fs::write(&path, toml).map_err(|e| format!("failed to write config: {e}"))?;
+    invalidate_global_config_cache();
+    Ok(())
+}
+
+/// Single source of truth for the global config path: `~/.jarvy/config.toml`.
+pub fn global_config_path() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|h| h.join(".jarvy").join("config.toml"))
+}
+
+/// Load the current global config (returning `Default` if missing/unreadable),
+/// hand it to `modify`, then atomically persist the result.
+///
+/// Use this instead of hand-rolling load → mutate → write in callers.
+pub(crate) fn modify_global_config<F>(modify: F) -> Result<(), String>
+where
+    F: FnOnce(&mut CliConfig),
+{
+    let path = global_config_path().ok_or_else(|| "no home directory".to_string())?;
+    let mut config: CliConfig = if path.exists() {
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        if content.trim().is_empty() {
+            CliConfig::default()
+        } else {
+            toml::from_str(&content).unwrap_or_default()
+        }
+    } else {
+        CliConfig::default()
+    };
+    modify(&mut config);
+    save_global_config(&config)
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// Serializes tests that mutate $HOME and the global config file. Cargo
+    /// runs unit tests in parallel by default; without serialization these
+    /// tests would race on `~/.jarvy/config.toml`.
+    static HOME_MUTEX: Mutex<()> = Mutex::new(());
+
+    fn with_isolated_home<F: FnOnce(&std::path::Path)>(f: F) {
+        let _guard = HOME_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let prev_home = std::env::var("HOME").ok();
+        // SAFETY: tests are serialized via HOME_MUTEX so set_var/remove_var
+        // races are prevented by construction.
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("HOME", tmp.path());
+        }
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            f(tmp.path());
+        }));
+        #[allow(unsafe_code)]
+        unsafe {
+            match prev_home {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+        if let Err(payload) = res {
+            std::panic::resume_unwind(payload);
+        }
+    }
+
+    #[test]
+    fn save_global_config_creates_jarvy_dir_when_missing() {
+        with_isolated_home(|home| {
+            let cfg = CliConfig::default();
+            save_global_config(&cfg).expect("save");
+            assert!(home.join(".jarvy").join("config.toml").exists());
+        });
+    }
+
+    #[test]
+    fn modify_global_config_updates_existing_field() {
+        with_isolated_home(|home| {
+            // Seed with a config that has telemetry disabled.
+            let mut initial = CliConfig::default();
+            initial.telemetry.enabled = false;
+            save_global_config(&initial).expect("seed");
+
+            modify_global_config(|cfg| {
+                cfg.telemetry.enabled = true;
+                cfg.mcp.auto_approve_installs = true;
+            })
+            .expect("modify");
+
+            let path = home.join(".jarvy").join("config.toml");
+            let content = std::fs::read_to_string(path).unwrap();
+            let reloaded: CliConfig = toml::from_str(&content).expect("reparse");
+            assert!(reloaded.telemetry.enabled);
+            assert!(reloaded.mcp.auto_approve_installs);
+        });
+    }
+
+    #[test]
+    fn modify_global_config_creates_when_missing() {
+        with_isolated_home(|home| {
+            // No config exists yet.
+            assert!(!home.join(".jarvy").join("config.toml").exists());
+            modify_global_config(|cfg| {
+                cfg.mcp.auto_approve_installs = true;
+            })
+            .expect("create + modify");
+            let content = std::fs::read_to_string(home.join(".jarvy").join("config.toml")).unwrap();
+            assert!(content.contains("auto_approve_installs"));
+        });
+    }
+
+    #[test]
+    fn modify_global_config_is_roundtrip_safe() {
+        with_isolated_home(|_home| {
+            modify_global_config(|cfg| {
+                cfg.settings.fingerprint = Some("0123abcd".to_string());
+                cfg.telemetry.enabled = true;
+            })
+            .expect("first");
+            modify_global_config(|cfg| {
+                // Verify previously-written field is read back, not lost.
+                assert_eq!(cfg.settings.fingerprint.as_deref(), Some("0123abcd"));
+                cfg.settings.fingerprint = None;
+            })
+            .expect("second");
+            modify_global_config(|cfg| {
+                assert!(cfg.settings.fingerprint.is_none());
+                assert!(cfg.telemetry.enabled);
+            })
+            .expect("third");
+        });
+    }
 }
 
 fn get_hwid_fingerprint() -> Option<String> {

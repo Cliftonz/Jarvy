@@ -73,6 +73,35 @@ pub fn default_use_sudo() -> Option<bool> {
     }
 }
 
+/// Spawn a command, capturing its output, and emit a structured warning +
+/// telemetry counter on failure. Replaces the duplicated
+/// `match Command::new(...).output() { Err(e) => { eprintln!(...); return; } }`
+/// pattern that proliferated in setup/provisioner during the panic-removal
+/// sweep.
+///
+/// Returns `None` on spawn failure so callers can keep the
+/// `let Some(out) = run_capture(...) else { return; };` shape that mirrors
+/// the prior eprintln+return idiom but routes through tracing.
+///
+/// `stage` should be a bounded label (e.g. `"hard_dep_check"`,
+/// `"macos_setup"`) — used as a low-cardinality telemetry attribute.
+pub fn run_capture(cmd: &str, args: &[&str], stage: &str, context: &str) -> Option<Output> {
+    match Command::new(cmd).args(args).output() {
+        Ok(out) => Some(out),
+        Err(e) => {
+            tracing::warn!(
+                event = "setup.subprocess.failed",
+                stage = %stage,
+                command = %cmd,
+                context = %context,
+                error = %e,
+            );
+            eprintln!("{context}: {e}");
+            None
+        }
+    }
+}
+
 #[must_use = "this Result may contain an error that should be handled"]
 pub fn run(cmd: &str, args: &[&str]) -> Result<Output, InstallError> {
     // Fast, deterministic tests: allow skipping external command execution.

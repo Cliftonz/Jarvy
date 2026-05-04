@@ -304,6 +304,36 @@ pub struct Config {
     /// Telemetry/OTEL configuration (project-level override for security audit)
     #[serde(default)]
     pub telemetry: Option<crate::telemetry::TelemetryConfig>,
+    /// Custom project commands for interactive menu
+    #[serde(default)]
+    #[allow(dead_code)] // Read by interactive module via direct TOML parsing
+    pub commands: CommandsConfig,
+    /// Workspace configuration for monorepo support
+    #[serde(default)]
+    #[allow(dead_code)] // Used by workspace module for config inheritance
+    pub workspace: Option<crate::workspace::WorkspaceConfig>,
+}
+
+/// Custom project commands that override the interactive menu defaults.
+///
+/// # Example
+/// ```toml
+/// [commands]
+/// run = "npm start"
+/// test = "npm test"
+/// setup = "jarvy setup"
+/// ```
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct CommandsConfig {
+    /// Command to run the project (default: "cargo run")
+    #[serde(default)]
+    pub run: Option<String>,
+    /// Command to test the project (default: "cargo test")
+    #[serde(default)]
+    pub test: Option<String>,
+    /// Command to set up the dev environment (default: "jarvy setup")
+    #[serde(default)]
+    pub setup: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Default)]
@@ -394,6 +424,99 @@ impl Config {
             Err(e) => {
                 telemetry::config_parse_error(config_path, &e.to_string());
                 println!("Failed to parse config file: {}", e);
+                process::exit(crate::error_codes::CONFIG_ERROR);
+            }
+        }
+    }
+
+    /// Load the config at `config_path`, walking up to find a workspace root and
+    /// merging inherited sections from the root config when present.
+    ///
+    /// When the current directory is inside a workspace member, sections listed
+    /// in the root's `[workspace] inherit = [...]` are merged in (member wins
+    /// on conflict; for `provisioner`, individual tools merge tool-by-tool).
+    ///
+    /// Falls back to plain `Config::new(config_path)` semantics when no
+    /// workspace root is discovered.
+    pub fn new_with_workspace(config_path: &str) -> Self {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let Some(ctx) = crate::workspace::find_workspace_root(&cwd) else {
+            return Self::new(config_path);
+        };
+
+        // If the active config_path IS the root config, plain load is fine.
+        let abs_config_path =
+            std::fs::canonicalize(config_path).unwrap_or_else(|_| PathBuf::from(config_path));
+        let abs_root =
+            std::fs::canonicalize(&ctx.root_config).unwrap_or_else(|_| ctx.root_config.clone());
+        if abs_config_path == abs_root {
+            return Self::new(config_path);
+        }
+
+        // We are in a member. Read root + member as toml::Value, merge, then
+        // deserialize. This avoids re-implementing every Config field merge.
+        let root_text = match fs::read_to_string(&ctx.root_config) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(
+                    event = "workspace.root_read_failed",
+                    path = %ctx.root_config.display(),
+                    error = %e,
+                );
+                return Self::new(config_path);
+            }
+        };
+        let member_text = match fs::read_to_string(config_path) {
+            Ok(s) => s,
+            Err(e) => {
+                telemetry::config_parse_error(config_path, &e.to_string());
+                println!("Failed to read config file at: {}", config_path);
+                process::exit(crate::error_codes::CONFIG_ERROR);
+            }
+        };
+
+        let root_value = match toml::from_str::<toml::Value>(&root_text) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    event = "workspace.root_parse_failed",
+                    path = %ctx.root_config.display(),
+                    error = %e,
+                );
+                return Self::new(config_path);
+            }
+        };
+        let member_value = match toml::from_str::<toml::Value>(&member_text) {
+            Ok(v) => v,
+            Err(e) => {
+                telemetry::config_parse_error(config_path, &e.to_string());
+                println!("Failed to parse config file: {}", e);
+                process::exit(crate::error_codes::CONFIG_ERROR);
+            }
+        };
+
+        let merged =
+            crate::workspace::merge_configs(&root_value, &member_value, &ctx.workspace.inherit);
+
+        match merged.try_into::<Config>() {
+            Ok(config) => {
+                tracing::info!(
+                    event = "workspace.config_merged",
+                    member = ctx.current_member.as_deref().unwrap_or(""),
+                    inherit_count = ctx.workspace.inherit.len(),
+                );
+                telemetry::config_loaded(
+                    config_path,
+                    config.tools.len(),
+                    config.has_hooks(),
+                    config.has_env(),
+                    config.services.enabled,
+                );
+                config
+            }
+            Err(e) => {
+                telemetry::config_parse_error(config_path, &e.to_string());
+                println!("Failed to parse merged workspace config: {}", e);
                 process::exit(crate::error_codes::CONFIG_ERROR);
             }
         }
@@ -639,9 +762,17 @@ docker = "latest"
 # update_rc = false
 # add_to_gitignore = true
 "#;
-    let mut file = File::create("jarvy.toml").expect("Could not create file");
-    file.write_all(default_config.as_bytes())
-        .expect("Could not write to file");
+    let mut file = match File::create("jarvy.toml") {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Could not create jarvy.toml: {e}");
+            return;
+        }
+    };
+    if let Err(e) = file.write_all(default_config.as_bytes()) {
+        eprintln!("Could not write to jarvy.toml: {e}");
+        return;
+    }
     println!("Created jarvy.toml with default configuration");
 }
 

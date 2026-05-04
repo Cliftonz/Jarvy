@@ -150,8 +150,9 @@ mod tests {
     }
 
     #[test]
+    #[allow(unsafe_code)]
     fn test_config_value_from_env() {
-        // Set env var for test
+        // SAFETY: test-only, single-threaded access to env var
         unsafe { std::env::set_var("TEST_GIT_USER", "Jane Doe") };
 
         let value = ConfigValue::FromEnv {
@@ -164,8 +165,9 @@ mod tests {
     }
 
     #[test]
+    #[allow(unsafe_code)]
     fn test_config_value_from_env_with_default() {
-        // Ensure env var is not set
+        // SAFETY: test-only, single-threaded access to env var
         unsafe { std::env::remove_var("TEST_GIT_USER_MISSING") };
 
         let value = ConfigValue::FromEnv {
@@ -176,7 +178,9 @@ mod tests {
     }
 
     #[test]
+    #[allow(unsafe_code)]
     fn test_config_value_from_env_no_default() {
+        // SAFETY: test-only, single-threaded access to env var
         unsafe { std::env::remove_var("TEST_GIT_USER_NONE") };
 
         let value = ConfigValue::FromEnv {

@@ -72,6 +72,13 @@ This folder contains PRDs for improving Jarvy based on a comprehensive codebase 
 | 47 | [Multi-Project/Monorepo Support](047-multi-project-monorepo-support.md) | Scale | 8.5 days | Workspace configs with inheritance |
 | 48 | [Pre-Commit Hook Installation](048-pre-commit-hook-installation.md) | Quality | 7 days | pre-commit, husky, lefthook integration |
 
+### Tier 9: Polish & Agent Readiness
+
+| # | PRD | Impact | Effort | Description |
+|---|-----|--------|--------|-------------|
+| 51 | [Universal Structured Output](051-universal-structured-output.md) | Agent DX | 3-4 days | `--format json` on all commands for AI agents and CI |
+| 52 | [Progress Indicators](052-progress-indicators.md) | User DX | 3-4 days | Spinners and progress bars via `indicatif` |
+
 ## Recommended Implementation Order
 
 ```
@@ -152,6 +159,8 @@ Phase 9: Advanced Capabilities (4+ weeks)
 | No insight into slow installations | [046](046-per-tool-performance-analytics.md) |
 | Monorepos need multiple configs | [047](047-multi-project-monorepo-support.md) |
 | Pre-commit hooks need manual setup | [048](048-pre-commit-hook-installation.md) |
+| Some commands lack JSON output | [051](051-universal-structured-output.md) |
+| No progress feedback during installs | [052](052-progress-indicators.md) |
 
 ### Dependencies Between PRDs
 

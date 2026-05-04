@@ -1,17 +1,12 @@
 //! Integration tests for service management features (docker-compose, tilt).
 
+mod common;
+
 use assert_cmd::prelude::*;
+use common::jarvy_cmd;
 use predicates::prelude::*;
 use std::io::Write;
-use std::process::Command;
 use tempfile::TempDir;
-
-/// Helper to run jarvy with test mode enabled
-fn jarvy_cmd() -> Command {
-    let mut c = Command::cargo_bin("jarvy").unwrap();
-    c.env("JARVY_TEST_MODE", "1");
-    c
-}
 
 // =====================================================================
 // Services Command Help Tests

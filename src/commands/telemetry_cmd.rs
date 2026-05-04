@@ -1,13 +1,11 @@
 //! Telemetry command handler - manage telemetry settings
 
-use std::fs;
-
 use crate::cli::TelemetryAction;
 use crate::init;
 use crate::telemetry;
 
 /// Handle telemetry subcommands
-pub fn run_telemetry(action: &TelemetryAction, _global_config: &init::CliConfig) {
+pub fn run_telemetry(action: &TelemetryAction, global_config: &init::CliConfig) {
     match action {
         TelemetryAction::Status {} => {
             let config = telemetry::config();
@@ -37,10 +35,41 @@ pub fn run_telemetry(action: &TelemetryAction, _global_config: &init::CliConfig)
             } else {
                 println!("Status:    \x1b[33mnot initialized\x1b[0m");
             }
+            // Surface OTEL bootstrap state so a degraded exporter is visible
+            // here instead of only as a single eprintln! at startup.
+            match crate::analytics::telemetry_bootstrap_state() {
+                crate::analytics::TelemetryBootstrapState::Healthy => {
+                    println!("Exporter:  \x1b[32mhealthy\x1b[0m");
+                }
+                crate::analytics::TelemetryBootstrapState::Disabled => {
+                    println!("Exporter:  disabled");
+                }
+                crate::analytics::TelemetryBootstrapState::Degraded => {
+                    println!(
+                        "Exporter:  \x1b[31mdegraded\x1b[0m \
+                         (OTLP failed to initialize — see startup log for reason)"
+                    );
+                }
+            }
+            println!();
+
+            // Show machine fingerprint
+            let fp = global_config
+                .settings
+                .fingerprint
+                .as_deref()
+                .unwrap_or("not set");
+            println!("Machine ID: {}", fp);
+            println!("  This is a one-way hash of hardware identifiers (CPU, OS, disk serial).");
+            println!("  It cannot be reversed to recover your hardware details.");
+            println!("  Run `jarvy telemetry disable` to clear it.");
             println!();
             println!("Configuration sources:");
             println!("  - Config file: ~/.jarvy/config.toml [telemetry] section");
             println!("  - Environment: JARVY_TELEMETRY, JARVY_OTLP_ENDPOINT");
+            println!(
+                "  - Privacy details: https://github.com/bearbinary/jarvy/blob/main/PRIVACY.md"
+            );
         }
         TelemetryAction::Enable {} => {
             update_telemetry_config(true, None);
@@ -49,7 +78,8 @@ pub fn run_telemetry(action: &TelemetryAction, _global_config: &init::CliConfig)
         }
         TelemetryAction::Disable {} => {
             update_telemetry_config(false, None);
-            println!("Telemetry disabled.");
+            clear_machine_fingerprint();
+            println!("Telemetry disabled. Machine fingerprint cleared.");
         }
         TelemetryAction::SetEndpoint { url } => {
             update_telemetry_config(true, Some(url.clone()));
@@ -110,40 +140,45 @@ pub fn run_telemetry(action: &TelemetryAction, _global_config: &init::CliConfig)
     }
 }
 
+/// Clear the machine fingerprint from ~/.jarvy/config.toml
+fn clear_machine_fingerprint() {
+    // Skip when no config exists at all — preserves prior behavior of
+    // silently doing nothing when the file is absent.
+    let Some(path) = init::global_config_path() else {
+        return;
+    };
+    if !path.exists() {
+        return;
+    }
+    if let Err(e) = init::modify_global_config(|config| {
+        config.settings.fingerprint = None;
+    }) {
+        tracing::warn!(
+            event = "telemetry.fingerprint.clear_failed",
+            error = %e,
+        );
+        return;
+    }
+    tracing::info!(event = "telemetry.fingerprint.cleared");
+}
+
 /// Update telemetry configuration in ~/.jarvy/config.toml
 pub fn update_telemetry_config(enabled: bool, endpoint: Option<String>) {
-    let home_dir = match dirs::home_dir() {
-        Some(h) => h,
-        None => {
-            eprintln!("Could not determine home directory");
-            return;
+    if let Err(e) = init::modify_global_config(|config| {
+        config.telemetry.enabled = enabled;
+        if let Some(ep) = endpoint.clone() {
+            config.telemetry.endpoint = ep;
         }
-    };
-    let config_path = home_dir.join(".jarvy").join("config.toml");
-
-    // Read existing config
-    let mut config: init::CliConfig = if config_path.exists() {
-        let content = fs::read_to_string(&config_path).unwrap_or_default();
-        toml::from_str(&content).unwrap_or_default()
-    } else {
-        init::CliConfig::default()
-    };
-
-    // Update telemetry settings
-    config.telemetry.enabled = enabled;
-    if let Some(ep) = endpoint {
-        config.telemetry.endpoint = ep;
+    }) {
+        eprintln!("Failed to update telemetry config: {e}");
+        return;
     }
-
-    // Write back
-    match toml::to_string_pretty(&config) {
-        Ok(content) => {
-            if let Err(e) = fs::write(&config_path, content) {
-                eprintln!("Failed to write config: {}", e);
-            }
-        }
-        Err(e) => {
-            eprintln!("Failed to serialize config: {}", e);
-        }
-    }
+    tracing::info!(
+        event = if enabled {
+            "telemetry.enabled"
+        } else {
+            "telemetry.disabled"
+        },
+        fingerprint_cleared = !enabled,
+    );
 }

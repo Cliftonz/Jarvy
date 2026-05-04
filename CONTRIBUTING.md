@@ -187,6 +187,10 @@ This creates the necessary files in `src/tools/<tool-name>/`.
 
 ### Tool Implementation Pattern
 
+Each tool lives in `src/tools/<name>/` with two files:
+- `mod.rs` -- re-exports with `pub use <name>::*;`
+- `<name>.rs` -- tool definition using the `define_tool!` macro
+
 ```rust
 //! tool-name - Brief description
 use crate::define_tool;
@@ -196,8 +200,17 @@ define_tool!(TOOL_NAME, {
     macos: { brew: "tool-name" },
     linux: { uniform: "tool-name" },
     windows: { winget: "Publisher.ToolName" },
+    // Optional fields:
+    // bsd: { pkg: "tool-name" },
+    // custom_install: Some(custom_install_fn),
+    // default_hook: { description: "Configure tool", script: "echo setup" },
+    // depends_on: &["docker"],
+    // depends_on_one_of: &["minikube", "kind", "docker"],
+    // category: "devops",
 });
 ```
+
+See `src/tools/spec.rs` for the full `ToolSpec` struct and macro documentation.
 
 ## Commit Messages
 

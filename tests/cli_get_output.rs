@@ -26,7 +26,7 @@ fn get_with_output_suppresses_stdout_and_writes_file() {
     let path = out.path().to_path_buf();
     drop(out); // allow jarvy to open it itself
 
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c.args(["get", "--file"])
         .arg(cfg.path())
@@ -50,7 +50,7 @@ fn get_write_failure_emits_error_and_exits_success() {
     let temp = tempdir().unwrap();
     let dir_path = temp.path();
 
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c.args(["get", "--file"])
         .arg(cfg.path())

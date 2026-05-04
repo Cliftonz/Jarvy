@@ -7,7 +7,7 @@
 //! - Interactive prompt
 
 use super::config::{NetworkConfig, ProxyAuth};
-use std::io::{self, Write};
+use std::io;
 
 /// Inject authentication credentials into a proxy URL
 ///
@@ -35,19 +35,15 @@ pub fn inject_credentials(proxy_url: &str, auth: &ProxyAuth) -> Result<String, S
     }
 }
 
-/// Prompt user for password interactively
+/// Prompt user for password interactively with hidden input.
 ///
-/// Uses rpassword for hidden input if available, falls back to plain input
+/// Uses inquire's Password prompt which masks characters on the terminal.
 #[allow(dead_code)] // Public API for interactive password prompting
 pub fn prompt_password(prompt: &str) -> io::Result<String> {
-    print!("{}", prompt);
-    io::stdout().flush()?;
-
-    // Try to use hidden input (rpassword-like behavior)
-    // For now, use standard input (rpassword can be added as dependency if needed)
-    let mut password = String::new();
-    io::stdin().read_line(&mut password)?;
-    Ok(password.trim().to_string())
+    inquire::Password::new(prompt)
+        .without_confirmation()
+        .prompt()
+        .map_err(|e| io::Error::other(e.to_string()))
 }
 
 /// Get the proxy URL with credentials injected if authentication is configured

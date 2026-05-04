@@ -296,6 +296,10 @@ pub struct ToolSpec {
     /// If none is installed or in config, a warning is shown but installation proceeds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depends_on_one_of: Option<&'static [&'static str]>,
+
+    /// Optional category for filtering and organization (e.g., "devops", "language", "editor").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<&'static str>,
 }
 
 impl ToolSpec {
@@ -507,6 +511,7 @@ macro_rules! define_tool {
         $(default_hook: { description: $hook_desc:expr, script: $hook_script:expr $(, platform: $hook_platform:expr)? },)?
         $(depends_on: $deps:expr,)?
         $(depends_on_one_of: $flex_deps:expr,)?
+        $(category: $category:expr,)?
     }) => {
         pub static $name: $crate::tools::spec::ToolSpec = $crate::tools::spec::ToolSpec {
             name: stringify!($name),
@@ -519,6 +524,7 @@ macro_rules! define_tool {
             default_hook: define_tool!(@default_hook $($hook_desc, $hook_script $(, $hook_platform)?)?),
             depends_on: define_tool!(@depends_on $($deps)?),
             depends_on_one_of: define_tool!(@depends_on_one_of $($flex_deps)?),
+            category: define_tool!(@category $($category)?),
         };
 
         #[allow(dead_code)] // Public API for tool installation
@@ -634,6 +640,10 @@ macro_rules! define_tool {
     // Flexible dependency helpers (one-of)
     (@depends_on_one_of) => { None };
     (@depends_on_one_of $deps:expr) => { Some($deps) };
+
+    // Category helper
+    (@category) => { None };
+    (@category $cat:expr) => { Some($cat) };
 }
 
 #[allow(unused_imports)]
@@ -672,6 +682,9 @@ pub struct ToolIndexEntry {
     pub bsd: Option<BsdInstall>,
     /// Custom installation info
     pub custom_install: CustomInstallInfo,
+    /// Tool category for filtering (e.g., "devops", "language", "editor")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
 }
 
 impl From<&ToolSpec> for ToolIndexEntry {
@@ -687,6 +700,7 @@ impl From<&ToolSpec> for ToolIndexEntry {
             custom_install: CustomInstallInfo {
                 has_custom_installer: spec.custom_install.is_some(),
             },
+            category: spec.category.map(|s| s.to_string()),
         }
     }
 }
@@ -736,6 +750,7 @@ pub fn generate_tool_index() -> ToolIndex {
             custom_install: CustomInstallInfo {
                 has_custom_installer: true,
             },
+            category: None,
         });
     }
 
@@ -1438,6 +1453,7 @@ mod tests {
         default_hook: None,
         depends_on: None,
         depends_on_one_of: None,
+        category: None,
     };
 
     // Test ToolSpec with a default hook
@@ -1455,6 +1471,7 @@ mod tests {
         )),
         depends_on: None,
         depends_on_one_of: None,
+        category: None,
     };
 
     #[test]
@@ -1526,6 +1543,7 @@ mod tests {
             default_hook: None,
             depends_on: None,
             depends_on_one_of: None,
+            category: None,
         };
         assert!(!tool.is_satisfied("1.0"));
     }
@@ -1558,6 +1576,7 @@ mod tests {
             default_hook: None,
             depends_on: None,
             depends_on_one_of: None,
+            category: None,
         };
         let entry = ToolIndexEntry::from(&custom_tool);
         assert!(entry.custom_install.has_custom_installer);
@@ -1762,6 +1781,7 @@ mod tests {
             )),
             depends_on: None,
             depends_on_one_of: None,
+            category: None,
         };
 
         // Hook should be available on current platform

@@ -258,8 +258,23 @@ fn get_binary_path(name: &str) -> Option<String> {
     None
 }
 
-/// Compute SHA256 checksum of a file
+/// Returns true when the given checksum string is in the legacy short-hash
+/// format that earlier jarvy versions wrote (FNV-style 16-char hex). Lock
+/// files containing such hashes are still readable but cannot be re-verified
+/// against the new SHA-256 output.
+pub(crate) fn is_legacy_checksum(checksum: &str) -> bool {
+    checksum.len() == 16 && checksum.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Returns true for a well-formed SHA-256 hex digest (lowercase or upper).
+#[allow(dead_code)] // Public API — exposed for migration callers and tests
+pub(crate) fn is_sha256_checksum(checksum: &str) -> bool {
+    checksum.len() == 64 && checksum.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Compute SHA-256 checksum of a file
 fn compute_checksum(path: &str) -> Result<String, LockError> {
+    use sha2::{Digest, Sha256};
     use std::fs::File;
     use std::io::Read;
 
@@ -268,22 +283,20 @@ fn compute_checksum(path: &str) -> Result<String, LockError> {
         error: e.to_string(),
     })?;
 
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)
-        .map_err(|e| LockError::IoError {
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let n = file.read(&mut buffer).map_err(|e| LockError::IoError {
             path: path.to_string(),
             error: e.to_string(),
         })?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
 
-    // Simple checksum using built-in hasher (not cryptographic, but good enough for integrity)
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    buffer.hash(&mut hasher);
-    let hash = hasher.finish();
-
-    Ok(format!("{:016x}", hash))
+    Ok(hex::encode(hasher.finalize()))
 }
 
 #[cfg(test)]
@@ -322,5 +335,68 @@ mod tests {
     #[test]
     fn test_extract_version_no_match() {
         assert_eq!(extract_version("no version here"), None);
+    }
+
+    #[test]
+    fn compute_checksum_known_vector_empty_file() {
+        let tmp = tempfile::NamedTempFile::new().expect("create tempfile");
+        // Empty file: well-known SHA-256.
+        let path = tmp.path().to_str().unwrap();
+        let hash = compute_checksum(path).expect("hash empty file");
+        assert_eq!(
+            hash,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert!(is_sha256_checksum(&hash));
+    }
+
+    #[test]
+    fn compute_checksum_known_vector_hello_world() {
+        let mut tmp = tempfile::NamedTempFile::new().expect("create tempfile");
+        std::io::Write::write_all(&mut tmp, b"hello world").expect("write");
+        let path = tmp.path().to_str().unwrap();
+        let hash = compute_checksum(path).expect("hash hello world");
+        assert_eq!(
+            hash,
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        );
+    }
+
+    #[test]
+    fn compute_checksum_streams_large_file_consistently() {
+        // Larger than the 8KiB read buffer to exercise the streaming loop.
+        let mut tmp = tempfile::NamedTempFile::new().expect("create tempfile");
+        let chunk = vec![0xABu8; 8192];
+        for _ in 0..3 {
+            std::io::Write::write_all(&mut tmp, &chunk).expect("write");
+        }
+        std::io::Write::write_all(&mut tmp, b"trailing").expect("write trailing");
+        let path = tmp.path().to_str().unwrap();
+        let hash_a = compute_checksum(path).unwrap();
+        let hash_b = compute_checksum(path).unwrap();
+        assert_eq!(hash_a, hash_b, "checksum must be deterministic");
+        assert_eq!(hash_a.len(), 64);
+    }
+
+    #[test]
+    fn legacy_checksum_detection() {
+        // Old FNV-style 16-char hex.
+        assert!(is_legacy_checksum("0123456789abcdef"));
+        assert!(!is_legacy_checksum(
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        ));
+        assert!(!is_legacy_checksum(""));
+        assert!(!is_legacy_checksum("nothex0123456789"));
+    }
+
+    #[test]
+    fn sha256_checksum_detection() {
+        assert!(is_sha256_checksum(
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        ));
+        // Wrong length.
+        assert!(!is_sha256_checksum("0123456789abcdef"));
+        // Correct length but non-hex content.
+        assert!(!is_sha256_checksum(&"x".repeat(64)));
     }
 }

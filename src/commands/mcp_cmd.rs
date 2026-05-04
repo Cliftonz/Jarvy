@@ -5,9 +5,11 @@ use std::path::PathBuf;
 use crate::mcp;
 
 /// Run the MCP server
-pub fn run_mcp(config: Option<PathBuf>) {
+pub fn run_mcp(config: Option<PathBuf>) -> i32 {
     if let Err(e) = mcp::run(config) {
         eprintln!("MCP server error: {}", e);
-        std::process::exit(1);
+        return 1;
     }
+
+    0
 }

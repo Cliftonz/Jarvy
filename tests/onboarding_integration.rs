@@ -7,9 +7,8 @@
 
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
-use std::io::Write;
 use std::process::Command;
-use tempfile::{NamedTempFile, TempDir};
+use tempfile::TempDir;
 
 // ============================================================================
 // jarvy init tests
@@ -20,7 +19,7 @@ fn init_with_template_creates_config_file() {
     let dir = TempDir::new().unwrap();
     let output_path = dir.path().join("jarvy.toml");
 
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args([
         "init",
@@ -42,7 +41,7 @@ fn init_with_template_creates_config_file() {
 
 #[test]
 fn init_with_template_stdout_outputs_to_stdout() {
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["init", "--template", "essential", "--stdout"]);
 
@@ -54,7 +53,7 @@ fn init_with_template_stdout_outputs_to_stdout() {
 
 #[test]
 fn init_with_unknown_template_fails() {
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["init", "--template", "nonexistent-template", "--stdout"]);
 
@@ -65,12 +64,12 @@ fn init_with_unknown_template_fails() {
 
 #[test]
 fn init_non_interactive_requires_template() {
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["init", "--non-interactive"]);
 
     // Should exit with warning status (not create a file)
-    cmd.assert();
+    let _ = cmd.assert();
 }
 
 // ============================================================================
@@ -79,7 +78,7 @@ fn init_non_interactive_requires_template() {
 
 #[test]
 fn templates_list_shows_available_templates() {
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["templates", "list"]);
 
@@ -93,7 +92,7 @@ fn templates_list_shows_available_templates() {
 
 #[test]
 fn templates_show_displays_template_details() {
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["templates", "show", "react"]);
 
@@ -105,7 +104,7 @@ fn templates_show_displays_template_details() {
 
 #[test]
 fn templates_show_unknown_template_fails() {
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["templates", "show", "nonexistent-template"]);
 
@@ -119,7 +118,7 @@ fn templates_use_creates_config_file() {
     let dir = TempDir::new().unwrap();
     let output_path = dir.path().join("jarvy.toml");
 
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.current_dir(dir.path());
     cmd.args([
@@ -145,7 +144,7 @@ fn templates_use_respects_output_path() {
     let dir = TempDir::new().unwrap();
     let custom_output = dir.path().join("custom-config.toml");
 
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args([
         "templates",
@@ -169,7 +168,7 @@ fn templates_use_respects_output_path() {
 
 #[test]
 fn quickstart_non_interactive_without_tty_cancels() {
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["quickstart", "--non-interactive"]);
 
@@ -183,7 +182,7 @@ fn quickstart_non_interactive_without_tty_cancels() {
 
 #[test]
 fn quickstart_help_shows_options() {
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.args(["quickstart", "--help"]);
 
     cmd.assert()
@@ -198,7 +197,7 @@ fn quickstart_help_shows_options() {
 
 #[test]
 fn essential_template_contains_core_tools() {
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["init", "--template", "essential", "--stdout"]);
 
@@ -210,7 +209,7 @@ fn essential_template_contains_core_tools() {
 
 #[test]
 fn react_template_contains_node_tools() {
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["init", "--template", "react", "--stdout"]);
 
@@ -222,7 +221,7 @@ fn react_template_contains_node_tools() {
 
 #[test]
 fn rust_template_contains_rust_tools() {
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["init", "--template", "rust-cli", "--stdout"]);
 
@@ -234,7 +233,7 @@ fn rust_template_contains_rust_tools() {
 
 #[test]
 fn python_api_template_contains_python_tools() {
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["init", "--template", "python-api", "--stdout"]);
 
@@ -246,7 +245,7 @@ fn python_api_template_contains_python_tools() {
 
 #[test]
 fn k8s_admin_template_contains_kubernetes_tools() {
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.args(["init", "--template", "k8s-admin", "--stdout"]);
 
@@ -268,7 +267,7 @@ fn init_does_not_overwrite_existing_file_by_default() {
     // Create an existing file
     std::fs::write(&config_path, "# existing config\n").unwrap();
 
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.current_dir(dir.path());
     cmd.args(["init", "--template", "essential"]);
@@ -290,7 +289,7 @@ fn templates_use_does_not_overwrite_existing_file() {
     // Create an existing file
     std::fs::write(&config_path, "# existing config\n").unwrap();
 
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     cmd.env("JARVY_TEST_MODE", "1");
     cmd.current_dir(dir.path());
     cmd.args(["templates", "use", "essential"]);

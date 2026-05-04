@@ -45,10 +45,10 @@ proptest! {
     #[test]
     fn prop_version_antisymmetric(v1 in semver_strategy(), v2 in semver_strategy()) {
         if v1 < v2 {
-            prop_assert!(!(v2 < v1));
+            prop_assert!(v2 >= v1);
             prop_assert!(v2 > v1);
         } else if v1 > v2 {
-            prop_assert!(!(v2 > v1));
+            prop_assert!(v2 <= v1);
             prop_assert!(v2 < v1);
         } else {
             prop_assert_eq!(v1, v2);

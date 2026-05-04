@@ -408,16 +408,20 @@ mod tests {
         let mut roles = HashMap::new();
 
         // Base role
-        let mut base_def = RoleDefinition::default();
-        base_def.description = Some("Base development tools".to_string());
-        base_def.tools = vec!["git".to_string(), "docker".to_string()];
+        let base_def = RoleDefinition {
+            description: Some("Base development tools".to_string()),
+            tools: vec!["git".to_string(), "docker".to_string()],
+            ..Default::default()
+        };
         roles.insert("base".to_string(), RoleDefinitionWrapper::Simple(base_def));
 
         // Frontend role that extends base
-        let mut frontend_def = RoleDefinition::default();
-        frontend_def.description = Some("Frontend development".to_string());
-        frontend_def.extends = Some(RoleExtends::Single("base".to_string()));
-        frontend_def.tools = vec!["node".to_string(), "bun".to_string()];
+        let mut frontend_def = RoleDefinition {
+            description: Some("Frontend development".to_string()),
+            extends: Some(RoleExtends::Single("base".to_string())),
+            tools: vec!["node".to_string(), "bun".to_string()],
+            ..Default::default()
+        };
         frontend_def
             .tool_versions
             .insert("node".to_string(), RoleToolSpec::Simple("20".to_string()));
@@ -427,29 +431,35 @@ mod tests {
         );
 
         // Backend role that extends base
-        let mut backend_def = RoleDefinition::default();
-        backend_def.extends = Some(RoleExtends::Single("base".to_string()));
-        backend_def.tools = vec!["rust".to_string(), "go".to_string()];
+        let backend_def = RoleDefinition {
+            extends: Some(RoleExtends::Single("base".to_string())),
+            tools: vec!["rust".to_string(), "go".to_string()],
+            ..Default::default()
+        };
         roles.insert(
             "backend".to_string(),
             RoleDefinitionWrapper::Simple(backend_def),
         );
 
         // Senior frontend that extends frontend
-        let mut senior_def = RoleDefinition::default();
-        senior_def.extends = Some(RoleExtends::Single("frontend".to_string()));
-        senior_def.tools = vec!["kubectl".to_string()];
+        let senior_def = RoleDefinition {
+            extends: Some(RoleExtends::Single("frontend".to_string())),
+            tools: vec!["kubectl".to_string()],
+            ..Default::default()
+        };
         roles.insert(
             "senior-frontend".to_string(),
             RoleDefinitionWrapper::Simple(senior_def),
         );
 
         // Fullstack that extends both frontend and backend
-        let mut fullstack_def = RoleDefinition::default();
-        fullstack_def.extends = Some(RoleExtends::Multiple(vec![
-            "frontend".to_string(),
-            "backend".to_string(),
-        ]));
+        let fullstack_def = RoleDefinition {
+            extends: Some(RoleExtends::Multiple(vec![
+                "frontend".to_string(),
+                "backend".to_string(),
+            ])),
+            ..Default::default()
+        };
         roles.insert(
             "fullstack".to_string(),
             RoleDefinitionWrapper::Simple(fullstack_def),
@@ -533,20 +543,26 @@ mod tests {
         let mut config = RolesConfig::default();
 
         // Create circular: A -> B -> C -> A
-        let mut role_a = RoleDefinition::default();
-        role_a.extends = Some(RoleExtends::Single("role_c".to_string()));
+        let role_a = RoleDefinition {
+            extends: Some(RoleExtends::Single("role_c".to_string())),
+            ..Default::default()
+        };
         config
             .roles
             .insert("role_a".to_string(), RoleDefinitionWrapper::Simple(role_a));
 
-        let mut role_b = RoleDefinition::default();
-        role_b.extends = Some(RoleExtends::Single("role_a".to_string()));
+        let role_b = RoleDefinition {
+            extends: Some(RoleExtends::Single("role_a".to_string())),
+            ..Default::default()
+        };
         config
             .roles
             .insert("role_b".to_string(), RoleDefinitionWrapper::Simple(role_b));
 
-        let mut role_c = RoleDefinition::default();
-        role_c.extends = Some(RoleExtends::Single("role_b".to_string()));
+        let role_c = RoleDefinition {
+            extends: Some(RoleExtends::Single("role_b".to_string())),
+            ..Default::default()
+        };
         config
             .roles
             .insert("role_c".to_string(), RoleDefinitionWrapper::Simple(role_c));

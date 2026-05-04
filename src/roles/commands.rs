@@ -378,17 +378,21 @@ mod tests {
     fn create_test_config() -> RolesConfig {
         let mut roles = HashMap::new();
 
-        let mut frontend = RoleDefinition::default();
-        frontend.description = Some("Frontend tools".to_string());
-        frontend.tools = vec!["node".to_string(), "bun".to_string()];
+        let frontend = RoleDefinition {
+            description: Some("Frontend tools".to_string()),
+            tools: vec!["node".to_string(), "bun".to_string()],
+            ..Default::default()
+        };
         roles.insert(
             "frontend".to_string(),
             RoleDefinitionWrapper::Simple(frontend),
         );
 
-        let mut backend = RoleDefinition::default();
-        backend.description = Some("Backend tools".to_string());
-        backend.tools = vec!["rust".to_string(), "go".to_string()];
+        let backend = RoleDefinition {
+            description: Some("Backend tools".to_string()),
+            tools: vec!["rust".to_string(), "go".to_string()],
+            ..Default::default()
+        };
         roles.insert(
             "backend".to_string(),
             RoleDefinitionWrapper::Simple(backend),

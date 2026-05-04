@@ -3,7 +3,7 @@ use predicates::prelude::*;
 use std::process::Command;
 
 fn cmd() -> Command {
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c
 }
@@ -22,7 +22,7 @@ fn multiple_unknown_tokens_fall_back_once() {
 
 #[test]
 fn top_level_unknown_flag_is_clap_error() {
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.arg("--not-a-flag");
     c.assert()
         .failure()

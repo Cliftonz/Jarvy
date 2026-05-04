@@ -3,16 +3,29 @@
 # Usage: curl -fsSL https://raw.githubusercontent.com/bearbinary/jarvy/main/dist/scripts/install.sh | bash
 #
 # Environment variables:
-#   JARVY_VERSION     - Version to install (default: latest)
-#   JARVY_INSTALL_DIR - Installation directory (default: ~/.local/bin)
+#   JARVY_VERSION        - Version to install (default: latest)
+#   JARVY_CHANNEL        - Release channel: stable (default), beta, nightly
+#                          beta accepts -rc.N and -beta.N tags
+#                          nightly accepts every tag including -alpha.N
+#   JARVY_INSTALL_DIR    - Installation directory (default: ~/.local/bin)
 #   JARVY_NO_MODIFY_PATH - Set to 1 to skip PATH modification
 
 set -euo pipefail
 
 JARVY_VERSION="${JARVY_VERSION:-latest}"
+JARVY_CHANNEL="${JARVY_CHANNEL:-stable}"
 JARVY_INSTALL_DIR="${JARVY_INSTALL_DIR:-$HOME/.local/bin}"
 JARVY_REPO="bearbinary/jarvy"
 JARVY_NO_MODIFY_PATH="${JARVY_NO_MODIFY_PATH:-0}"
+
+# Validate channel
+case "$JARVY_CHANNEL" in
+    stable|beta|nightly) ;;
+    *)
+        echo "ERROR: Unknown JARVY_CHANNEL '$JARVY_CHANNEL'. Expected: stable, beta, nightly." >&2
+        exit 1
+        ;;
+esac
 
 # Colors for output
 RED='\033[0;31m'
@@ -84,17 +97,62 @@ detect_platform() {
     echo "${arch}-${os}"
 }
 
-# Get latest version from GitHub API
-get_latest_version() {
-    local response
-    response=$(curl -fsSL "https://api.github.com/repos/${JARVY_REPO}/releases/latest" 2>/dev/null)
+# Channel filter: returns 0 if the given tag matches JARVY_CHANNEL.
+# stable rejects any tag containing '-'.
+# beta accepts plain tags plus -rc.N / -beta.N.
+# nightly accepts all tags.
+matches_channel() {
+    local tag="$1"
+    case "$JARVY_CHANNEL" in
+        stable)
+            [[ "$tag" != *-* ]]
+            ;;
+        beta)
+            [[ "$tag" != *-* ]] || [[ "$tag" == *-rc.* ]] || [[ "$tag" == *-beta.* ]]
+            ;;
+        nightly)
+            return 0
+            ;;
+    esac
+}
 
+# Get latest version from GitHub API for the configured channel.
+# stable -> /releases/latest (skips drafts and prereleases).
+# beta/nightly -> /releases (includes prereleases); pick the first tag that
+# matches the channel filter.
+get_latest_version() {
+    if [ "$JARVY_CHANNEL" = "stable" ]; then
+        local response
+        response=$(curl -fsSL "https://api.github.com/repos/${JARVY_REPO}/releases/latest" 2>/dev/null)
+        if [ -z "$response" ]; then
+            log_error "Failed to fetch latest stable release from GitHub"
+            exit 1
+        fi
+        echo "$response" | grep '"tag_name"' | head -1 | sed -E 's/.*"v?([^"]+)".*/\1/'
+        return 0
+    fi
+
+    # beta or nightly
+    local response
+    response=$(curl -fsSL "https://api.github.com/repos/${JARVY_REPO}/releases?per_page=30" 2>/dev/null)
     if [ -z "$response" ]; then
-        log_error "Failed to fetch latest version from GitHub"
+        log_error "Failed to fetch releases from GitHub"
         exit 1
     fi
 
-    echo "$response" | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/'
+    # GitHub API returns releases in chronological order (newest first).
+    # Walk tag_name lines until one matches the channel.
+    local tag
+    while IFS= read -r tag; do
+        # tag arrives as "vX.Y.Z" or "vX.Y.Z-rc.N"
+        if matches_channel "$tag"; then
+            echo "${tag#v}"
+            return 0
+        fi
+    done < <(echo "$response" | grep '"tag_name"' | sed -E 's/.*"(v?[^"]+)".*/\1/')
+
+    log_error "No release matching channel '$JARVY_CHANNEL' found in the most recent 30 releases"
+    exit 1
 }
 
 # Verify checksum
@@ -179,7 +237,8 @@ main() {
 
     # Get version
     if [ "$JARVY_VERSION" = "latest" ]; then
-        log_info "Fetching latest version..."
+        log_info "Channel: $JARVY_CHANNEL"
+        log_info "Fetching latest version on '$JARVY_CHANNEL' channel..."
         version="$(get_latest_version)"
     else
         version="${JARVY_VERSION#v}"  # Remove 'v' prefix if present

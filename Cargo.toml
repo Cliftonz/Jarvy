@@ -22,52 +22,63 @@ include = [
 [badges]
 maintenance = { status = "actively-developed" }
 
+[package.metadata.docs.rs]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
-clap = { version = "4.5.6", features = ["derive"] }
-clap_complete = "4.5"
+clap = { version = "4.6", features = ["derive"] }
+clap_complete = "4.6"
 strsim = "0.11"
-inquire = "0.9.1"
-serde = { version = "1.0.204", features = ["derive"] }
-toml = "0.9.5"
+inquire = "0.9"
+serde = { version = "1.0", features = ["derive"] }
+toml = "1.1"
 serde_json = "1.0"
 serde_yaml = "0.9"
-predicates = "3.1.0"
-tracing = "0.1.40"
-dirs = "6.0.0"
-tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json"] }
+predicates = "3.1"
+tracing = "0.1"
+dirs = "6.0"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
-opentelemetry = { version = "0.31.0", features = ["metrics"] }
-opentelemetry-otlp = { version = "0.31.0", features = ["logs", "http-proto", "metrics"] }
-opentelemetry_sdk = { version = "0.31.0", features = ["metrics"] }
-opentelemetry-appender-tracing = "0.31.0"
-thiserror = "2.0.16"
-ureq = { version = "3.1.2", features = ["json"] }
-uuid = { version = "1.10.0", features = ["v7"] }
+opentelemetry = { version = "0.31", features = ["metrics"] }
+opentelemetry-otlp = { version = "0.31", features = ["logs", "http-proto", "metrics"] }
+opentelemetry_sdk = { version = "0.31", features = ["metrics"] }
+opentelemetry-appender-tracing = "0.31"
+thiserror = "2.0"
+ureq = { version = "3.3", features = ["json"] }
+uuid = { version = "1.23", features = ["v7"] }
 machineid-rs = "1.2"
 semver = "1.0"
-regex = "1.11"
-once_cell = "1.20"
-inventory = "0.3.21"
+regex = "1.12"
+once_cell = "1.21"
+inventory = "0.3"
 wait-timeout = "0.2"
 rpassword = "7.3"
 rayon = "1.10"
 rustls = "0.23"
-zip = "2.2"
+zip = "8.5"
 hostname = "0.4"
 sys-info = "0.9"
 num_cpus = "1.16"
 chrono = { version = "0.4", features = ["serde"] }
-self_update = "0.41"
-sha2 = "0.10"
+self_update = "0.44"
+sha2 = "0.11"
 hex = "0.4"
 shellexpand = "3.1"
-which = "7.0"
+tempfile = "3.27"
+which = "8.0"
 
 [dev-dependencies]
-tempfile = "3.20.0"
-assert_cmd = "2.0.17"
-proptest = "1.5"
-criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3.27"
+assert_cmd = "2.2"
+proptest = "1.11"
+criterion = { version = "0.8", features = ["html_reports"] }
 
 [[bench]]
 name = "config_parsing"

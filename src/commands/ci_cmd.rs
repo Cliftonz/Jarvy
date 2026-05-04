@@ -4,7 +4,7 @@ use crate::ci;
 use crate::error_codes;
 
 /// Run the ci-config command
-pub fn run_ci_config(provider: ci::CiProvider, output: &str, dry_run: bool) {
+pub fn run_ci_config(provider: ci::CiProvider, output: &str, dry_run: bool) -> i32 {
     let template = match ci::CiConfigTemplate::for_provider(provider) {
         Some(t) => t,
         None => {
@@ -13,7 +13,7 @@ pub fn run_ci_config(provider: ci::CiProvider, output: &str, dry_run: bool) {
                 provider
             );
             eprintln!("Supported providers: github, gitlab, circleci, azure, bitbucket");
-            std::process::exit(error_codes::CONFIG_ERROR);
+            return error_codes::CONFIG_ERROR;
         }
     };
 
@@ -30,10 +30,12 @@ pub fn run_ci_config(provider: ci::CiProvider, output: &str, dry_run: bool) {
             }
             Err(e) => {
                 eprintln!("Error generating CI config: {}", e);
-                std::process::exit(error_codes::CONFIG_ERROR);
+                return error_codes::CONFIG_ERROR;
             }
         }
     }
+
+    0
 }
 
 /// Run the ci-info command

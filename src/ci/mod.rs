@@ -337,6 +337,7 @@ mod tests {
     // Use a mutex to serialize tests that modify environment variables
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+    #[allow(unsafe_code)]
     fn with_env<F, R>(vars: &[(&str, &str)], f: F) -> R
     where
         F: FnOnce() -> R,
@@ -367,6 +368,7 @@ mod tests {
         result
     }
 
+    #[allow(unsafe_code)]
     fn with_cleared_env<F, R>(vars_to_clear: &[&str], f: F) -> R
     where
         F: FnOnce() -> R,

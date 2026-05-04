@@ -1,15 +1,10 @@
 //! Integration tests for CI/CD detection and integration features.
 
-use assert_cmd::prelude::*;
-use predicates::prelude::*;
-use std::process::Command;
+mod common;
 
-/// Helper to run jarvy with test mode enabled
-fn jarvy_cmd() -> Command {
-    let mut c = Command::cargo_bin("jarvy").unwrap();
-    c.env("JARVY_TEST_MODE", "1");
-    c
-}
+use assert_cmd::prelude::*;
+use common::jarvy_cmd;
+use predicates::prelude::*;
 
 // =====================================================================
 // CI Info Command Tests

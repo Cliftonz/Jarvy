@@ -859,3 +859,5 @@ jarvy ticket clean [--older-than DAYS]
 - **MCP Server**: `docs/mcp-server.md` - Claude Desktop/Cursor/VS Code integration
 - **Security**: `SECURITY.md`, `docs/MAINTAINER_SECURITY_SETUP.md`
 - **Releases**: `docs/MAINTAINER_RELEASE_GUIDE.md`
+
+---

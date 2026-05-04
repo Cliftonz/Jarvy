@@ -3,14 +3,14 @@ use predicates::prelude::*;
 use std::process::Command;
 
 fn cmd() -> Command {
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c
 }
 
 #[test]
 fn help_shows_usage_and_exits_zero() {
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.arg("--help");
     c.assert()
         .success()
@@ -19,7 +19,7 @@ fn help_shows_usage_and_exits_zero() {
 
 #[test]
 fn version_exits_zero() {
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.arg("-V");
     c.assert().success();
 }
@@ -73,7 +73,7 @@ fn case_mismatch_subcommand_is_unknown() {
 
 #[test]
 fn negative_malformed_get_flag_errors() {
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.args(["get", "--unknown-flag"]);
     c.assert()
         .failure()
@@ -82,7 +82,7 @@ fn negative_malformed_get_flag_errors() {
 
 #[test]
 fn negative_invalid_format_variant_errors() {
-    let mut c = Command::cargo_bin("jarvy").unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.args(["get", "--format", "frobnicate"]);
     c.assert().failure().stderr(
         predicate::str::contains("possible values").or(predicate::str::contains("valid values")),

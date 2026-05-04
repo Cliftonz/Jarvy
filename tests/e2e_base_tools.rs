@@ -21,13 +21,12 @@
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tempfile::NamedTempFile;
 
 /// Result of a single tool installation test
@@ -538,8 +537,9 @@ fn e2e_base_tools_installation() {
 
 /// Quick smoke test that verifies jarvy can parse configs
 #[test]
+#[allow(unsafe_code)]
 fn e2e_smoke_config_parsing() {
-    // Enable fast test mode
+    // SAFETY: test-only, single-threaded access to env var
     unsafe {
         std::env::set_var("JARVY_FAST_TEST", "1");
     }

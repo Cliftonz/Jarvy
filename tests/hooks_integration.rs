@@ -9,7 +9,6 @@
 //! - --no-hooks flag
 //! - --dry-run output
 
-use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
@@ -34,7 +33,7 @@ pre_setup = "echo 'Pre-setup hook executed'"
 "#,
     );
 
-    let mut cmd = Command::cargo_bin("jarvy").expect("Failed to find binary");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.arg("setup")
         .arg("--file")
         .arg(&config)
@@ -61,7 +60,7 @@ post_setup = "echo 'Post-setup hook executed'"
 "#,
     );
 
-    let mut cmd = Command::cargo_bin("jarvy").expect("Failed to find binary");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.arg("setup")
         .arg("--file")
         .arg(&config)
@@ -88,7 +87,7 @@ post_install = "echo 'Git installed'"
 "#,
     );
 
-    let mut cmd = Command::cargo_bin("jarvy").expect("Failed to find binary");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.arg("setup")
         .arg("--file")
         .arg(&config)
@@ -116,7 +115,7 @@ post_setup = "echo 'This should not run either'"
 "#,
     );
 
-    let mut cmd = Command::cargo_bin("jarvy").expect("Failed to find binary");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.arg("setup")
         .arg("--file")
         .arg(&config)
@@ -150,7 +149,7 @@ continue_on_error = true
 "#,
     );
 
-    let mut cmd = Command::cargo_bin("jarvy").expect("Failed to find binary");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.arg("setup")
         .arg("--file")
         .arg(&config)
@@ -178,7 +177,7 @@ post_install = "echo $JARVY_TOOL $JARVY_VERSION"
 "#,
     );
 
-    let mut cmd = Command::cargo_bin("jarvy").expect("Failed to find binary");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.arg("setup")
         .arg("--file")
         .arg(&config)
@@ -205,7 +204,7 @@ pre_setup = "echo 'Test'"
 "#,
     );
 
-    let mut cmd = Command::cargo_bin("jarvy").expect("Failed to find binary");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.arg("setup")
         .arg("--file")
         .arg(&config)
@@ -242,7 +241,7 @@ post_install = "docker --version"
 "#,
     );
 
-    let mut cmd = Command::cargo_bin("jarvy").expect("Failed to find binary");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.arg("setup")
         .arg("--file")
         .arg(&config)
@@ -268,7 +267,7 @@ git = "latest"
 "#,
     );
 
-    let mut cmd = Command::cargo_bin("jarvy").expect("Failed to find binary");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.arg("setup")
         .arg("--file")
         .arg(&config)
@@ -283,7 +282,7 @@ git = "latest"
 
 #[test]
 fn test_cli_help_shows_hook_flags() {
-    let mut cmd = Command::cargo_bin("jarvy").expect("Failed to find binary");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.arg("setup").arg("--help");
 
     cmd.assert()
@@ -308,7 +307,7 @@ git = "latest"
 "#,
     );
 
-    let mut cmd = Command::cargo_bin("jarvy").expect("Failed to find binary");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.arg("setup")
         .arg("--file")
         .arg(&config)
@@ -337,7 +336,7 @@ post_install = "echo 'User hook'"
 "#,
     );
 
-    let mut cmd = Command::cargo_bin("jarvy").expect("Failed to find binary");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.arg("setup")
         .arg("--file")
         .arg(&config)
@@ -363,7 +362,7 @@ git = "latest"
 "#,
     );
 
-    let mut cmd = Command::cargo_bin("jarvy").expect("Failed to find binary");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.arg("setup")
         .arg("--file")
         .arg(&config)
@@ -389,7 +388,7 @@ starship = "latest"
 "#,
     );
 
-    let mut cmd = Command::cargo_bin("jarvy").expect("Failed to find binary");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.arg("setup")
         .arg("--file")
         .arg(&config)
@@ -416,7 +415,7 @@ terraform = "latest"
 "#,
     );
 
-    let mut cmd = Command::cargo_bin("jarvy").expect("Failed to find binary");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.arg("setup")
         .arg("--file")
         .arg(&config)
@@ -446,7 +445,7 @@ post_install = "echo 'Custom git setup'"
 "#,
     );
 
-    let mut cmd = Command::cargo_bin("jarvy").expect("Failed to find binary");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.arg("setup")
         .arg("--file")
         .arg(&config)

@@ -1,3 +1,8 @@
+---
+title: "Hooks - Jarvy"
+description: "Run custom shell scripts before and after tool installations with Jarvy hooks."
+---
+
 # Hooks
 
 Jarvy hooks allow you to run custom shell scripts at specific points during the setup process. This is useful for:

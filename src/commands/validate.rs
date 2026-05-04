@@ -553,26 +553,32 @@ fn find_similar_tool(name: &str, known_tools: &[String]) -> Option<String> {
 }
 
 fn is_valid_version(version: &str) -> bool {
+    use std::sync::LazyLock;
+
+    static SIMPLE_RE: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"^\d+(\.\d+)*$").unwrap());
+    static SEMVER_RE: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"^[<>=^~]+\d+(\.\d+)*$").unwrap());
+    static RANGE_RE: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"^\d+(\.\d+)*\s*-\s*\d+(\.\d+)*$").unwrap());
+
     // Accept common version formats
     if version == "latest" {
         return true;
     }
 
     // Simple version (1, 1.2, 1.2.3)
-    let simple_re = regex::Regex::new(r"^\d+(\.\d+)*$").unwrap();
-    if simple_re.is_match(version) {
+    if SIMPLE_RE.is_match(version) {
         return true;
     }
 
     // Semver with operator (>=1.0, ^1.2, ~1.2.3, =1.0.0)
-    let semver_re = regex::Regex::new(r"^[<>=^~]+\d+(\.\d+)*$").unwrap();
-    if semver_re.is_match(version) {
+    if SEMVER_RE.is_match(version) {
         return true;
     }
 
     // Range (1.0 - 2.0)
-    let range_re = regex::Regex::new(r"^\d+(\.\d+)*\s*-\s*\d+(\.\d+)*$").unwrap();
-    if range_re.is_match(version) {
+    if RANGE_RE.is_match(version) {
         return true;
     }
 
@@ -580,9 +586,11 @@ fn is_valid_version(version: &str) -> bool {
 }
 
 fn is_valid_env_name(name: &str) -> bool {
-    // Environment variable names should match [A-Za-z_][A-Za-z0-9_]*
-    let re = regex::Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap();
-    re.is_match(name)
+    use std::sync::LazyLock;
+
+    static ENV_NAME_RE: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap());
+    ENV_NAME_RE.is_match(name)
 }
 
 fn find_key_line(content: &str, key: &str) -> Option<usize> {

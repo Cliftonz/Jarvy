@@ -7,7 +7,7 @@ use crate::config;
 use crate::lock;
 
 /// Handle lock subcommands
-pub fn run_lock(action: &LockAction) {
+pub fn run_lock(action: &LockAction) -> i32 {
     match action {
         LockAction::Generate { file, output } => {
             let config = config::Config::new(file);
@@ -25,13 +25,13 @@ pub fn run_lock(action: &LockAction) {
                         }
                         Err(e) => {
                             eprintln!("Failed to save lock file: {}", e);
-                            std::process::exit(1);
+                            return 1;
                         }
                     }
                 }
                 Err(e) => {
                     eprintln!("Failed to generate lock file: {}", e);
-                    std::process::exit(1);
+                    return 1;
                 }
             }
         }
@@ -40,7 +40,7 @@ pub fn run_lock(action: &LockAction) {
             if !path.exists() {
                 eprintln!("Lock file not found: {}", lock_file);
                 eprintln!("Generate one with: jarvy lock generate");
-                std::process::exit(1);
+                return 1;
             }
 
             match lock::LockFile::load(path) {
@@ -86,7 +86,7 @@ pub fn run_lock(action: &LockAction) {
                 }
                 Err(e) => {
                     eprintln!("Failed to load lock file: {}", e);
-                    std::process::exit(1);
+                    return 1;
                 }
             }
         }
@@ -97,7 +97,7 @@ pub fn run_lock(action: &LockAction) {
             let path = Path::new(lock_file);
             if !path.exists() {
                 eprintln!("Lock file not found: {}", lock_file);
-                std::process::exit(1);
+                return 1;
             }
 
             match lock::LockFile::load(path) {
@@ -147,14 +147,16 @@ pub fn run_lock(action: &LockAction) {
                     }
 
                     if !result.all_match {
-                        std::process::exit(1);
+                        return 1;
                     }
                 }
                 Err(e) => {
                     eprintln!("Failed to load lock file: {}", e);
-                    std::process::exit(1);
+                    return 1;
                 }
             }
         }
     }
+
+    0
 }

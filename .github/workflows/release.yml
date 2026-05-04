@@ -25,9 +25,58 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # PRD-051: Tag-signing enforcement.
+  # Refuses any tag-triggered release whose tag is not signed (GPG or SSH).
+  # Skipped on workflow_dispatch — manual runs use the operator's audit trail.
+  verify_tag:
+    name: Verify Tag Signature
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout (fetch tags + signers)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # We need the tag object itself, plus any allowed-signer config in
+          # the repo if SSH signing is in use.
+      - name: Verify tag is signed
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          echo "Verifying signature on tag: $TAG"
+
+          # If the repo ships an allowed_signers file for SSH-signed tags,
+          # configure git to use it before verifying.
+          if [ -f .github/allowed_signers ]; then
+            git config gpg.ssh.allowedSignersFile .github/allowed_signers
+          fi
+
+          # `git tag -v` returns non-zero if the tag is unsigned or the key
+          # is unknown. Both fail the build by design.
+          if ! git tag -v "$TAG" 2>&1 | tee /tmp/tagverify.log; then
+            echo ""
+            echo "ERROR: Tag $TAG is not signed, or the signing key is not"
+            echo "trusted by this runner."
+            echo ""
+            echo "Sign tags with:"
+            echo "  git tag -s $TAG -m 'release: $TAG'   # GPG"
+            echo "  git -c gpg.format=ssh tag -s $TAG -m 'release: $TAG'   # SSH"
+            echo ""
+            echo "Ensure the signing public key is registered on the"
+            echo "maintainer's GitHub profile (Settings -> SSH and GPG keys),"
+            echo "and listed in .github/allowed_signers if SSH signing is used."
+            exit 1
+          fi
+
   build_and_package:
     name: Build & Package
     runs-on: ${{ matrix.platform }}
+    needs: [verify_tag]
+    # verify_tag is skipped on workflow_dispatch; allow that to count as success.
+    if: always() && (needs.verify_tag.result == 'success' || needs.verify_tag.result == 'skipped')
     permissions:
       contents: read
     strategy:
@@ -301,10 +350,26 @@ jobs:
           sha256sum sbom.* >> ../artifacts/SHA256SUMS.txt
           mv ../artifacts/SHA256SUMS.txt ../
 
+      # PRD-051: Detect pre-release tags and route them through the beta
+      # channel. Any tag containing a hyphen (e.g. v1.2.3-rc.1, v1.2.3-beta.2,
+      # v1.2.3-alpha.1) is published as a GitHub prerelease so it does not
+      # become "latest" for users on the stable channel.
+      - name: Detect prerelease
+        id: detect_prerelease
+        run: |
+          if [[ "${VERSION}" == *-* ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "Detected prerelease tag: $VERSION"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "Detected stable tag: $VERSION"
+          fi
+
       - name: Release to GitHub
         uses: softprops/action-gh-release@v2
         with:
           draft: true
+          prerelease: ${{ steps.detect_prerelease.outputs.is_prerelease }}
           generate_release_notes: true
           tag_name: ${{ env.VERSION }}
           files: |

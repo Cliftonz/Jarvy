@@ -101,9 +101,28 @@ impl PasswordSource {
             PasswordSource::Env(var) => {
                 std::env::var(var).map_err(|_| format!("Environment variable {} not set", var))
             }
-            PasswordSource::File(path) => std::fs::read_to_string(path)
-                .map(|s| s.trim().to_string())
-                .map_err(|e| format!("Failed to read password file {}: {}", path, e)),
+            PasswordSource::File(path) => {
+                // Warn if password file has overly permissive permissions.
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Ok(metadata) = std::fs::metadata(path) {
+                        let mode = metadata.permissions().mode();
+                        if mode & 0o077 != 0 {
+                            let safe_path = crate::network::redact_home(path);
+                            tracing::warn!(
+                                event = "proxy.password_permissive_perms",
+                                path = %safe_path,
+                                mode = format!("{:o}", mode & 0o777),
+                                "proxy password file has permissive permissions; chmod 600 recommended"
+                            );
+                        }
+                    }
+                }
+                std::fs::read_to_string(path)
+                    .map(|s| s.trim().to_string())
+                    .map_err(|e| format!("Failed to read password file {}: {}", path, e))
+            }
             PasswordSource::Prompt => {
                 Err("Interactive password prompt not available in this context".to_string())
             }
@@ -194,8 +213,10 @@ mod tests {
 
     #[test]
     fn test_should_bypass_exact_match() {
-        let mut config = NetworkConfig::default();
-        config.no_proxy = Some(NoProxy::String("localhost,127.0.0.1".to_string()));
+        let config = NetworkConfig {
+            no_proxy: Some(NoProxy::String("localhost,127.0.0.1".to_string())),
+            ..Default::default()
+        };
 
         assert!(config.should_bypass("localhost"));
         assert!(config.should_bypass("127.0.0.1"));
@@ -204,8 +225,10 @@ mod tests {
 
     #[test]
     fn test_should_bypass_suffix_match() {
-        let mut config = NetworkConfig::default();
-        config.no_proxy = Some(NoProxy::String(".corp.com".to_string()));
+        let config = NetworkConfig {
+            no_proxy: Some(NoProxy::String(".corp.com".to_string())),
+            ..Default::default()
+        };
 
         assert!(config.should_bypass("foo.corp.com"));
         assert!(config.should_bypass("bar.foo.corp.com"));
@@ -215,8 +238,10 @@ mod tests {
 
     #[test]
     fn test_effective_proxy_fallback() {
-        let mut config = NetworkConfig::default();
-        config.https_proxy = Some("https://proxy:8080".to_string());
+        let config = NetworkConfig {
+            https_proxy: Some("https://proxy:8080".to_string()),
+            ..Default::default()
+        };
 
         // HTTP falls back to HTTPS proxy
         assert_eq!(config.effective_http_proxy(), Some("https://proxy:8080"));

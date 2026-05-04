@@ -1,3 +1,8 @@
+---
+title: "MCP Server - Jarvy"
+description: "Use Jarvy as an MCP server to let AI agents like Claude, GPT, and Cursor discover and install development tools."
+---
+
 # Jarvy MCP Server
 
 Jarvy exposes a Model Context Protocol (MCP) server that enables LLMs like Claude, GPT, and other AI assistants to safely discover, verify, and install development tools.

@@ -40,8 +40,22 @@ impl BinaryInstaller {
         })
     }
 
-    /// Install a release via direct binary download
+    /// Install a release via direct binary download.
+    ///
+    /// Defaults to fail-closed Sigstore signature verification. Pass
+    /// `allow_unsigned = true` only when the operator has explicitly opted
+    /// into unsigned updates via the `--allow-unsigned` CLI flag or
+    /// `JARVY_ALLOW_UNSIGNED_UPDATE=1` env var.
     pub fn install(&self, release: &GitHubRelease) -> Result<InstallResult, UpdateError> {
+        self.install_with_options(release, false)
+    }
+
+    /// Install a release with explicit signature-policy control.
+    pub fn install_with_options(
+        &self,
+        release: &GitHubRelease,
+        allow_unsigned: bool,
+    ) -> Result<InstallResult, UpdateError> {
         // Get current binary path
         let current_exe = std::env::current_exe().map_err(|e| {
             UpdateError::InstallationFailed(format!("Cannot find current exe: {}", e))
@@ -66,6 +80,24 @@ impl BinaryInstaller {
             println!("Verifying checksum...");
             let checksums = self.download_checksums(checksum_asset)?;
             self.verify_archive_checksum(&archive_path, &asset.name, &checksums)?;
+        }
+
+        // Verify Sigstore signature — fail closed unless the operator has
+        // explicitly opted into unsigned updates.
+        let allow_unsigned = allow_unsigned || super::signature::unsigned_override_from_env();
+        let outcome = super::signature::verify_sigstore_signature(&archive_path)
+            .map_err(|e| UpdateError::InstallationFailed(format!("signature error: {e}")))?;
+        if let Err(reason) =
+            super::signature::signature_outcome_is_acceptable(&outcome, allow_unsigned)
+        {
+            eprintln!("\x1b[31m[SECURITY]\x1b[0m {reason}");
+            return Err(UpdateError::InstallationFailed(reason));
+        }
+        if matches!(outcome, super::signature::SignatureOutcome::Verified) {
+            println!(
+                "\x1b[32m[VERIFIED]\x1b[0m Sigstore signature verified for {}",
+                archive_path.display()
+            );
         }
 
         // Extract the binary
@@ -200,16 +232,36 @@ impl BinaryInstaller {
         self.find_binary(&extract_dir, binary_name)
     }
 
-    /// Extract tar.gz archive
+    /// Extract tar.gz archive.
+    ///
+    /// Uses the system `tar` with flags that prevent classic path-traversal
+    /// vectors (`--no-same-owner`, no absolute paths, no symlink writes
+    /// outside `dest`). Each entry's resolved path is also re-validated to
+    /// be inside `dest` post-extract to defend against older tar versions
+    /// that don't honor every flag.
     fn extract_tar_gz(&self, archive: &Path, dest: &Path) -> Result<(), UpdateError> {
         use std::process::Command;
 
+        let dest_canon = fs::canonicalize(dest).map_err(|e| {
+            UpdateError::InstallationFailed(format!("canonicalize destination: {e}"))
+        })?;
+
+        // Args that are accepted by both GNU tar and BSD tar:
+        //   -x   extract
+        //   -z   gzip
+        //   -f   from file
+        //   --no-same-owner   never restore archived uid/gid
+        //   --no-same-permissions  never restore archived mode bits
+        // Note: BSD tar interprets -P inverted compared to GNU; we instead
+        // post-validate that no extracted path escaped `dest`.
         let status = Command::new("tar")
             .args([
                 "-xzf",
                 archive.to_string_lossy().as_ref(),
                 "-C",
-                dest.to_string_lossy().as_ref(),
+                dest_canon.to_string_lossy().as_ref(),
+                "--no-same-owner",
+                "--no-same-permissions",
             ])
             .status()
             .map_err(|e| {
@@ -220,6 +272,17 @@ impl BinaryInstaller {
             return Err(UpdateError::InstallationFailed(
                 "tar extraction returned non-zero".to_string(),
             ));
+        }
+
+        // Walk the extracted tree and refuse to install if any entry resolved
+        // outside the destination — catches symlink/PaxHeader escapes that
+        // older GNU tar versions are vulnerable to.
+        if let Err(e) = verify_no_tar_escape(&dest_canon) {
+            return Err(UpdateError::InstallationFailed(format!(
+                "tar archive contained a path that escaped {}: {}",
+                dest_canon.display(),
+                e
+            )));
         }
 
         Ok(())
@@ -331,9 +394,53 @@ impl BinaryInstaller {
     }
 }
 
+/// Walk every entry under `dest_canon` and verify the canonicalized path is
+/// still contained in `dest_canon`. Refuses symlinks pointing outside the
+/// extraction root. Errors describe the offending path.
+fn verify_no_tar_escape(dest_canon: &Path) -> Result<(), String> {
+    // Inline shallow recursive walk; we don't want a new dependency.
+    fn walk(root: &Path, dir: &Path) -> Result<(), String> {
+        let entries = fs::read_dir(dir).map_err(|e| format!("read_dir failed: {e}"))?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let metadata = match entry.metadata() {
+                Ok(m) => m,
+                Err(e) => return Err(format!("metadata failed for {}: {e}", path.display())),
+            };
+            // For symlinks, canonicalize follows the link target; ensure the
+            // target resolves inside `root`.
+            let resolved = fs::canonicalize(&path)
+                .map_err(|e| format!("canonicalize failed for {}: {e}", path.display()))?;
+            if !resolved.starts_with(root) {
+                return Err(format!(
+                    "path {} resolves to {} which is outside {}",
+                    path.display(),
+                    resolved.display(),
+                    root.display()
+                ));
+            }
+            if metadata.is_dir() && !metadata.is_symlink() {
+                walk(root, &path)?;
+            }
+        }
+        Ok(())
+    }
+    walk(dest_canon, dest_canon)
+}
+
 impl Default for BinaryInstaller {
     fn default() -> Self {
-        Self::new().expect("Failed to create BinaryInstaller")
+        match Self::new() {
+            Ok(installer) => installer,
+            Err(e) => {
+                eprintln!("Warning: failed to create BinaryInstaller: {e}");
+                // Provide a fallback using temp directories
+                Self {
+                    backup_dir: std::env::temp_dir().join("jarvy-backup"),
+                    staging_dir: std::env::temp_dir().join("jarvy-staging"),
+                }
+            }
+        }
     }
 }
 

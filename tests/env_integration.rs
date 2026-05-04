@@ -1,6 +1,5 @@
 //! Integration tests for environment variables feature (PRD-008)
 
-use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::tempdir;
@@ -8,7 +7,7 @@ use tempfile::tempdir;
 /// Test that env command shows help correctly
 #[test]
 fn test_env_command_help() {
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.args(["env", "--help"])
         .assert()
         .success()
@@ -38,7 +37,7 @@ DATABASE_URL = "postgres://localhost/db"
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.args(["env", "--file", config_path.to_str().unwrap(), "--dry-run"])
         .env("JARVY_TEST_MODE", "1")
         .assert()
@@ -69,7 +68,7 @@ PWD_VAR = "$PWD"
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.args(["env", "--file", config_path.to_str().unwrap(), "--dry-run"])
         .env("JARVY_TEST_MODE", "1")
         .assert()
@@ -104,7 +103,7 @@ MY_VAR = "my_value"
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.args(["env", "--file", config_path.to_str().unwrap(), "--export"])
         .env("JARVY_TEST_MODE", "1")
         .assert()
@@ -130,7 +129,7 @@ SHELL_VAR = "shell_value"
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.args([
         "env",
         "--file",
@@ -166,7 +165,7 @@ FISH_VAR = "fish_value"
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.args([
         "env",
         "--file",
@@ -203,7 +202,7 @@ generate_dotenv = true
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.args([
         "setup",
         "--file",
@@ -232,7 +231,7 @@ jq = "latest"
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.args(["env", "--file", config_path.to_str().unwrap(), "--dry-run"])
         .env("JARVY_TEST_MODE", "1")
         .assert()
@@ -257,7 +256,7 @@ SPACED_VAR = "value with spaces"
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("jarvy").unwrap();
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("jarvy");
     cmd.args(["env", "--file", config_path.to_str().unwrap(), "--dry-run"])
         .env("JARVY_TEST_MODE", "1")
         .assert()

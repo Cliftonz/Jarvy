@@ -13,30 +13,22 @@ use crate::config::Config;
 use crate::drift::{DriftDetector, DriftFixer, DriftReporter, DriftStatus, EnvironmentState};
 
 /// Handle drift subcommands
-pub fn run_drift(file: &str, action: &DriftAction) {
+pub fn run_drift(file: &str, action: &DriftAction) -> i32 {
     let project_dir = Path::new(file)
         .parent()
         .unwrap_or(Path::new("."))
         .to_path_buf();
 
     match action {
-        DriftAction::Check { output_format } => {
-            run_drift_check(&project_dir, file, output_format);
-        }
-        DriftAction::Status { verbose } => {
-            run_drift_status(&project_dir, *verbose);
-        }
-        DriftAction::Accept { tools } => {
-            run_drift_accept(&project_dir, file, tools.as_deref());
-        }
-        DriftAction::Fix { dry_run, force: _ } => {
-            run_drift_fix(&project_dir, file, *dry_run);
-        }
+        DriftAction::Check { output_format } => run_drift_check(&project_dir, file, output_format),
+        DriftAction::Status { verbose } => run_drift_status(&project_dir, *verbose),
+        DriftAction::Accept { tools } => run_drift_accept(&project_dir, file, tools.as_deref()),
+        DriftAction::Fix { dry_run, force: _ } => run_drift_fix(&project_dir, file, *dry_run),
     }
 }
 
 /// Run drift check command
-fn run_drift_check(project_dir: &Path, config_file: &str, output_format: &str) {
+fn run_drift_check(project_dir: &Path, config_file: &str, output_format: &str) -> i32 {
     // Load config
     let config = Config::new(config_file);
     let drift_config = config.drift.clone().unwrap_or_default();
@@ -44,7 +36,7 @@ fn run_drift_check(project_dir: &Path, config_file: &str, output_format: &str) {
     if !drift_config.enabled {
         println!("Drift detection is disabled in configuration.");
         println!("Enable it by setting [drift] enabled = true in jarvy.toml");
-        return;
+        return 0;
     }
 
     // Load baseline state
@@ -54,11 +46,11 @@ fn run_drift_check(project_dir: &Path, config_file: &str, output_format: &str) {
             println!("\x1b[33m⚠\x1b[0m No baseline state found.");
             println!("  Run 'jarvy setup' to capture the initial state, or");
             println!("  Run 'jarvy drift accept' to create a baseline from current state.");
-            std::process::exit(1);
+            return 1;
         }
         Err(e) => {
             eprintln!("Failed to load state: {}", e);
-            std::process::exit(1);
+            return 1;
         }
     };
 
@@ -68,7 +60,7 @@ fn run_drift_check(project_dir: &Path, config_file: &str, output_format: &str) {
         Ok(report) => report,
         Err(e) => {
             eprintln!("Drift detection failed: {}", e);
-            std::process::exit(1);
+            return 1;
         }
     };
 
@@ -78,34 +70,34 @@ fn run_drift_check(project_dir: &Path, config_file: &str, output_format: &str) {
             Ok(json) => println!("{}", json),
             Err(e) => {
                 eprintln!("Failed to serialize report: {}", e);
-                std::process::exit(1);
+                return 1;
             }
         }
     } else {
         DriftReporter::print_report(&report);
     }
 
-    // Exit with appropriate code
+    // Return appropriate code
     match report.status {
-        DriftStatus::NoDrift => std::process::exit(0),
-        DriftStatus::DriftDetected => std::process::exit(1),
-        DriftStatus::NoBaseline => std::process::exit(2),
+        DriftStatus::NoDrift => 0,
+        DriftStatus::DriftDetected => 1,
+        DriftStatus::NoBaseline => 2,
     }
 }
 
 /// Run drift status command
-fn run_drift_status(project_dir: &Path, verbose: bool) {
+fn run_drift_status(project_dir: &Path, verbose: bool) -> i32 {
     let state = match EnvironmentState::load(project_dir) {
         Ok(Some(state)) => state,
         Ok(None) => {
             println!("\x1b[33m⚠\x1b[0m No baseline state found.");
             println!("  The baseline is captured automatically after 'jarvy setup'.");
             println!("  Or run 'jarvy drift accept' to create one manually.");
-            return;
+            return 0;
         }
         Err(e) => {
             eprintln!("Failed to load state: {}", e);
-            std::process::exit(1);
+            return 1;
         }
     };
 
@@ -142,10 +134,12 @@ fn run_drift_status(project_dir: &Path, verbose: bool) {
             }
         }
     }
+
+    0
 }
 
 /// Run drift accept command
-fn run_drift_accept(project_dir: &Path, config_file: &str, tools_filter: Option<&str>) {
+fn run_drift_accept(project_dir: &Path, config_file: &str, tools_filter: Option<&str>) -> i32 {
     // Load config to get tracked files
     let config = Config::new(config_file);
     let drift_config = config.drift.clone().unwrap_or_default();
@@ -200,7 +194,7 @@ fn run_drift_accept(project_dir: &Path, config_file: &str, tools_filter: Option<
     // Save state
     if let Err(e) = state.save(project_dir) {
         eprintln!("Failed to save state: {}", e);
-        std::process::exit(1);
+        return 1;
     }
 
     println!("\x1b[32m✓\x1b[0m Baseline state updated");
@@ -220,17 +214,19 @@ fn run_drift_accept(project_dir: &Path, config_file: &str, tools_filter: Option<
             }
         );
     }
+
+    0
 }
 
 /// Run drift fix command
-fn run_drift_fix(project_dir: &Path, config_file: &str, dry_run: bool) {
+fn run_drift_fix(project_dir: &Path, config_file: &str, dry_run: bool) -> i32 {
     // Load config
     let config = Config::new(config_file);
     let drift_config = config.drift.clone().unwrap_or_default();
 
     if !drift_config.enabled {
         println!("Drift detection is disabled in configuration.");
-        return;
+        return 0;
     }
 
     // Load baseline state
@@ -239,11 +235,11 @@ fn run_drift_fix(project_dir: &Path, config_file: &str, dry_run: bool) {
         Ok(None) => {
             println!("\x1b[33m⚠\x1b[0m No baseline state found.");
             println!("  Run 'jarvy setup' first to establish a baseline.");
-            std::process::exit(1);
+            return 1;
         }
         Err(e) => {
             eprintln!("Failed to load state: {}", e);
-            std::process::exit(1);
+            return 1;
         }
     };
 
@@ -253,13 +249,13 @@ fn run_drift_fix(project_dir: &Path, config_file: &str, dry_run: bool) {
         Ok(report) => report,
         Err(e) => {
             eprintln!("Drift detection failed: {}", e);
-            std::process::exit(1);
+            return 1;
         }
     };
 
     if report.status == DriftStatus::NoDrift {
         println!("\x1b[32m✓\x1b[0m No drift detected, nothing to fix.");
-        return;
+        return 0;
     }
 
     if dry_run {
@@ -271,6 +267,8 @@ fn run_drift_fix(project_dir: &Path, config_file: &str, dry_run: bool) {
     let results = fixer.fix_all(&report);
 
     DriftFixer::print_summary(&results);
+
+    0
 }
 
 /// Get installed version of a tool

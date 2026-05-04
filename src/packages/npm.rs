@@ -137,8 +137,10 @@ mod tests {
 
     #[test]
     fn test_detect_package_manager_explicit() {
-        let mut config = NpmConfig::default();
-        config.package_manager = Some(NpmPackageManager::Pnpm);
+        let config = NpmConfig {
+            package_manager: Some(NpmPackageManager::Pnpm),
+            ..Default::default()
+        };
         let handler = NpmHandler::new(config, PathBuf::from("/tmp/nonexistent"));
         let pm = handler.detect_package_manager();
         assert_eq!(pm, NpmPackageManager::Pnpm);

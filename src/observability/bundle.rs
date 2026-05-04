@@ -25,6 +25,7 @@ use crate::observability::Sanitizer;
 use serde::Serialize;
 use std::io::Write;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 /// Scope of data to include in bundle
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,20 +44,23 @@ pub enum BundleScope {
     All,
 }
 
-impl BundleScope {
-    /// Parse scope from string
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for BundleScope {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "system" => Some(BundleScope::System),
-            "config" => Some(BundleScope::Config),
-            "tools" => Some(BundleScope::Tools),
-            "environment" | "env" => Some(BundleScope::Environment),
-            "network" => Some(BundleScope::Network),
-            "all" => Some(BundleScope::All),
-            _ => None,
+            "system" => Ok(BundleScope::System),
+            "config" => Ok(BundleScope::Config),
+            "tools" => Ok(BundleScope::Tools),
+            "environment" | "env" => Ok(BundleScope::Environment),
+            "network" => Ok(BundleScope::Network),
+            "all" => Ok(BundleScope::All),
+            _ => Err(format!("unknown bundle scope: {s}")),
         }
     }
+}
 
+impl BundleScope {
     /// Parse comma-separated scope list
     pub fn parse_list(s: &str) -> Vec<Self> {
         if s.is_empty() || s == "all" {
@@ -64,7 +68,7 @@ impl BundleScope {
         }
 
         s.split(',')
-            .filter_map(|part| BundleScope::from_str(part.trim()))
+            .filter_map(|part| part.trim().parse().ok())
             .collect()
     }
 }
@@ -106,18 +110,34 @@ impl SystemInfo {
             std::env::consts::ARCH.to_string()
         };
 
-        let hostname = hostname::get()
+        // Hostname: hash by default so org/project names cannot leak via
+        // ticket bundles. Set JARVY_BUNDLE_INCLUDE_HOSTNAME=1 to include the
+        // raw hostname (e.g., when the user is the maintainer themselves).
+        let raw_hostname = hostname::get()
             .map(|h| h.to_string_lossy().to_string())
             .unwrap_or_else(|_| "unknown".to_string());
+        let include_raw_hostname = matches!(
+            std::env::var("JARVY_BUNDLE_INCLUDE_HOSTNAME").as_deref(),
+            Ok("1") | Ok("true")
+        );
+        let hostname = if include_raw_hostname {
+            raw_hostname
+        } else {
+            use sha2::{Digest, Sha256};
+            let h = Sha256::digest(raw_hostname.as_bytes());
+            format!("hashed-{}", &hex::encode(h)[..16])
+        };
 
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "unknown".to_string());
 
+        // Paths: replace home prefix with `~` so usernames / project names
+        // don't end up in the ZIP.
         let home_dir = dirs::home_dir()
-            .map(|p| p.to_string_lossy().to_string())
+            .map(|p| crate::network::redact_home(&p.to_string_lossy()))
             .unwrap_or_else(|| "unknown".to_string());
 
         let current_dir = std::env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
+            .map(|p| crate::network::redact_home(&p.to_string_lossy()))
             .unwrap_or_else(|_| "unknown".to_string());
 
         let jarvy_version = env!("CARGO_PKG_VERSION").to_string();
@@ -591,10 +611,10 @@ mod tests {
 
     #[test]
     fn test_bundle_scope_parsing() {
-        assert_eq!(BundleScope::from_str("system"), Some(BundleScope::System));
-        assert_eq!(BundleScope::from_str("TOOLS"), Some(BundleScope::Tools));
-        assert_eq!(BundleScope::from_str("env"), Some(BundleScope::Environment));
-        assert_eq!(BundleScope::from_str("unknown"), None);
+        assert_eq!("system".parse::<BundleScope>(), Ok(BundleScope::System));
+        assert_eq!("TOOLS".parse::<BundleScope>(), Ok(BundleScope::Tools));
+        assert_eq!("env".parse::<BundleScope>(), Ok(BundleScope::Environment));
+        assert!("unknown".parse::<BundleScope>().is_err());
     }
 
     #[test]

@@ -6,7 +6,7 @@ use crate::config::Config;
 use crate::services;
 
 /// Run the services command
-pub fn run_services(action: &ServicesAction, file: &str) {
+pub fn run_services(action: &ServicesAction, file: &str) -> i32 {
     let config = Config::new(file);
     let services_config = config.services.clone();
 
@@ -14,7 +14,7 @@ pub fn run_services(action: &ServicesAction, file: &str) {
     if !services_config.enabled {
         eprintln!("Services are not enabled in the configuration.");
         eprintln!("Add [services] enabled = true to your jarvy.toml");
-        return;
+        return 0;
     }
 
     // Detect CI environment (available for future auto-start integration)
@@ -37,7 +37,7 @@ pub fn run_services(action: &ServicesAction, file: &str) {
         None => {
             eprintln!("No service configuration found.");
             eprintln!("Supported: docker-compose.yml, compose.yml, Tiltfile");
-            return;
+            return 0;
         }
     };
 
@@ -47,7 +47,7 @@ pub fn run_services(action: &ServicesAction, file: &str) {
     if !backend_impl.is_installed() {
         eprintln!("{} is not installed.", backend);
         eprintln!("Install it with: jarvy setup");
-        return;
+        return 0;
     }
 
     match action {
@@ -60,7 +60,7 @@ pub fn run_services(action: &ServicesAction, file: &str) {
                 }
                 Err(e) => {
                     eprintln!("Failed to start services: {}", e);
-                    std::process::exit(1);
+                    return 1;
                 }
             }
         }
@@ -72,7 +72,7 @@ pub fn run_services(action: &ServicesAction, file: &str) {
                 }
                 Err(e) => {
                     eprintln!("Failed to stop services: {}", e);
-                    std::process::exit(1);
+                    return 1;
                 }
             }
         }
@@ -87,7 +87,7 @@ pub fn run_services(action: &ServicesAction, file: &str) {
             }
             Err(e) => {
                 eprintln!("Failed to get service status: {}", e);
-                std::process::exit(1);
+                return 1;
             }
         },
         ServicesAction::Restart { foreground } => {
@@ -99,9 +99,10 @@ pub fn run_services(action: &ServicesAction, file: &str) {
                 }
                 Err(e) => {
                     eprintln!("Failed to restart services: {}", e);
-                    std::process::exit(1);
+                    return 1;
                 }
             }
         }
     }
+    0
 }

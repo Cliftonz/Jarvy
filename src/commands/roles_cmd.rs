@@ -4,7 +4,7 @@ use crate::config;
 use crate::roles;
 
 /// Handle roles subcommands
-pub fn run_roles(file: &str, action: &roles::RolesAction) {
+pub fn run_roles(file: &str, action: &roles::RolesAction) -> i32 {
     let config = config::Config::new(file);
 
     if let Err(e) = roles::handle_roles_command(
@@ -13,6 +13,8 @@ pub fn run_roles(file: &str, action: &roles::RolesAction) {
         config.get_assigned_roles().and_then(|v| v.first().copied()),
     ) {
         eprintln!("Error: {}", e);
-        std::process::exit(1);
+        return 1;
     }
+
+    0
 }

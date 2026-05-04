@@ -121,6 +121,25 @@ impl Default for VerificationResult {
 pub fn verify_lock(lock: &LockFile, platform: &str) -> VerificationResult {
     let mut result = VerificationResult::new();
 
+    // Detect legacy short-hash checksums and warn so users know to regenerate.
+    let legacy_count: usize = lock
+        .tools
+        .values()
+        .chain(lock.platforms.values().flat_map(|m| m.values()))
+        .filter(|t| {
+            t.checksum
+                .as_deref()
+                .is_some_and(super::generate::is_legacy_checksum)
+        })
+        .count();
+    if legacy_count > 0 {
+        tracing::warn!(
+            event = "lock.legacy_checksum_detected",
+            count = legacy_count,
+            "lock file contains legacy short-hash checksums; regenerate with `jarvy lock generate`"
+        );
+    }
+
     for (name, locked_tool) in &lock.tools {
         // Check for platform-specific override
         let tool = lock.get_tool(name, platform).unwrap_or(locked_tool);

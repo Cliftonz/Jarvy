@@ -45,6 +45,68 @@ pub use resolve::*;
 #[allow(unused_imports)]
 pub use testing::*;
 
+/// Redact home-directory prefix from a path string for safe logging/telemetry.
+///
+/// Replaces a leading `$HOME` with `~` so paths that contain user names do
+/// not leak into shared ticket bundles or remote telemetry sinks.
+#[allow(dead_code)] // Public API for safe path logging
+pub fn redact_home(path: &str) -> String {
+    let home = dirs::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if !home.is_empty() && path.starts_with(&home) {
+        path.replacen(&home, "~", 1)
+    } else {
+        path.to_string()
+    }
+}
+
+/// Redact credentials from a proxy or git URL for safe logging.
+///
+/// Handles three credential shapes that appear in real configs:
+/// - `scheme://user:password@host` → `scheme://user:***@host`
+/// - `scheme://token@host` (userinfo-only token, e.g. `https://ghp_xxx@github.com`)
+///   → `scheme://***@host`
+/// - `scheme://:password@host` (password-only) → `scheme://:***@host`
+///
+/// Returns `Cow::Borrowed` when the URL has no `userinfo@` segment so callers
+/// that log on the no-credentials path do not pay an allocation.
+#[allow(dead_code)] // Public API for safe proxy URL logging
+pub fn redact_credentials(url: &str) -> std::borrow::Cow<'_, str> {
+    let Some(proto_end) = url.find("://") else {
+        return std::borrow::Cow::Borrowed(url);
+    };
+    // Only consider an `@` that occurs in the authority section (before the
+    // first `/`, `?`, or `#` after the scheme). This prevents redacting `@`
+    // characters that appear in paths or query strings.
+    let after_scheme = &url[proto_end + 3..];
+    let authority_end = after_scheme
+        .find(['/', '?', '#'])
+        .unwrap_or(after_scheme.len());
+    let authority = &after_scheme[..authority_end];
+    let Some(at_offset_in_authority) = authority.find('@') else {
+        return std::borrow::Cow::Borrowed(url);
+    };
+
+    let proto_part = &url[..proto_end + 3];
+    let creds_part = &authority[..at_offset_in_authority];
+    let after_at = &url[proto_end + 3 + at_offset_in_authority..];
+
+    // No `:` => userinfo-only (e.g. token-as-username). Redact the whole creds.
+    let redacted = match creds_part.find(':') {
+        Some(colon) => {
+            let username = &creds_part[..colon];
+            if username.is_empty() {
+                format!("{}:***{}", proto_part, after_at)
+            } else {
+                format!("{}{}:***{}", proto_part, username, after_at)
+            }
+        }
+        None => format!("{}***{}", proto_part, after_at),
+    };
+    std::borrow::Cow::Owned(redacted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,6 +126,56 @@ mod tests {
         let redacted = redact_credentials(url);
         assert!(redacted.contains("user:***"));
         assert!(!redacted.contains("secret"));
+    }
+
+    #[test]
+    fn redact_userinfo_only_token() {
+        // GitHub-style PATs are passed as the userinfo with no password.
+        let url = "https://ghp_abcd1234@github.com/owner/repo.git";
+        let redacted = redact_credentials(url);
+        assert_eq!(
+            &*redacted, "https://***@github.com/owner/repo.git",
+            "userinfo-only token must be fully redacted"
+        );
+        assert!(!redacted.contains("ghp_abcd1234"));
+    }
+
+    #[test]
+    fn redact_password_only() {
+        let url = "http://:secret@host:8080";
+        let redacted = redact_credentials(url);
+        assert_eq!(&*redacted, "http://:***@host:8080");
+    }
+
+    #[test]
+    fn redact_no_credentials_borrows() {
+        let url = "https://github.com/owner/repo.git";
+        let redacted = redact_credentials(url);
+        assert!(matches!(redacted, std::borrow::Cow::Borrowed(_)));
+        assert_eq!(&*redacted, url);
+    }
+
+    #[test]
+    fn redact_does_not_target_at_in_path() {
+        // The `@` in the path/query must not be mistaken for userinfo.
+        let url = "https://github.com/owner/repo/blob/main/file.txt?ref=abc@v1";
+        let redacted = redact_credentials(url);
+        assert_eq!(&*redacted, url);
+    }
+
+    #[test]
+    fn redact_socks5() {
+        let url = "socks5://u:p@host:1080";
+        let redacted = redact_credentials(url);
+        assert_eq!(&*redacted, "socks5://u:***@host:1080");
+    }
+
+    #[test]
+    fn redact_unparseable_returns_original() {
+        // No scheme => not a URL we can confidently parse; return as-is.
+        let weird = "not://valid".replace("://", "");
+        let redacted = redact_credentials(&weird);
+        assert_eq!(&*redacted, &weird);
     }
 
     #[test]
@@ -97,24 +209,4 @@ mod tests {
         let prompt = PasswordSource::Prompt;
         assert!(matches!(prompt, PasswordSource::Prompt));
     }
-}
-
-/// Redact credentials from a proxy URL for safe logging
-#[allow(dead_code)] // Public API for safe proxy URL logging
-pub fn redact_credentials(url: &str) -> String {
-    // Pattern: http://user:password@host:port
-    if let Some(at_pos) = url.find('@') {
-        if let Some(proto_end) = url.find("://") {
-            let before_creds = &url[..proto_end + 3];
-            let after_at = &url[at_pos..];
-
-            // Find username:password part
-            let creds_part = &url[proto_end + 3..at_pos];
-            if let Some(colon) = creds_part.find(':') {
-                let username = &creds_part[..colon];
-                return format!("{}{}:***{}", before_creds, username, after_at);
-            }
-        }
-    }
-    url.to_string()
 }

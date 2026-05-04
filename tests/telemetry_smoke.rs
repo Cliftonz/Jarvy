@@ -74,10 +74,7 @@ fn handle_client(
     let to_read = content_len.saturating_sub(already);
     let mut remaining = to_read;
     while remaining > 0 {
-        let n = match stream.read(&mut tmp) {
-            Ok(n) => n,
-            Err(_) => 0,
-        };
+        let n: usize = stream.read(&mut tmp).unwrap_or_default();
         if n == 0 {
             break;
         }
@@ -150,7 +147,7 @@ fn telemetry_smoke_error_logs_only() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Run the CLI with telemetry enabled and smoke trigger
-    let mut cmd = Command::cargo_bin("jarvy")?;
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     let assert = cmd
         .env("JARVY_TEST_MODE", "1")
         .env("JARVY_TELEMETRY_SMOKE", "1")

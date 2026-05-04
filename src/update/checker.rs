@@ -343,10 +343,10 @@ mod tests {
 
     #[test]
     fn test_update_state_has_update() {
-        let mut state = UpdateState::default();
-
-        // Set available version higher than current
-        state.available_version = Some("999.0.0".to_string());
+        let mut state = UpdateState {
+            available_version: Some("999.0.0".to_string()),
+            ..Default::default()
+        };
         assert!(state.has_update());
 
         // Set available version lower
@@ -370,8 +370,10 @@ mod tests {
 
     #[test]
     fn test_checker_should_check_disabled() {
-        let mut config = UpdateConfig::default();
-        config.enabled = false;
+        let config = UpdateConfig {
+            enabled: false,
+            ..Default::default()
+        };
 
         let checker = UpdateChecker::with_config(config);
         assert!(!checker.should_check());
@@ -379,8 +381,10 @@ mod tests {
 
     #[test]
     fn test_checker_should_check_pinned() {
-        let mut config = UpdateConfig::default();
-        config.pinned_version = Some("1.0.0".to_string());
+        let config = UpdateConfig {
+            pinned_version: Some("1.0.0".to_string()),
+            ..Default::default()
+        };
 
         let checker = UpdateChecker::with_config(config);
         assert!(!checker.should_check());

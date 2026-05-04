@@ -375,8 +375,10 @@ mod tests {
 
     #[test]
     fn test_role_definition_get_tools() {
-        let mut def = RoleDefinition::default();
-        def.tools = vec!["node".to_string(), "bun".to_string()];
+        let mut def = RoleDefinition {
+            tools: vec!["node".to_string(), "bun".to_string()],
+            ..Default::default()
+        };
         def.tool_versions
             .insert("node".to_string(), RoleToolSpec::Simple("20".to_string()));
         def.tool_versions

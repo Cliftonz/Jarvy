@@ -38,6 +38,26 @@ pub fn list_resources() -> Vec<McpResourceDefinition> {
             description: "Current platform, OS version, and available package managers".to_string(),
             mime_type: "application/json".to_string(),
         },
+        McpResourceDefinition {
+            uri: "jarvy://config".to_string(),
+            name: "Project Config".to_string(),
+            description: "Parsed jarvy.toml configuration for the current project".to_string(),
+            mime_type: "application/json".to_string(),
+        },
+        McpResourceDefinition {
+            uri: "jarvy://doctor".to_string(),
+            name: "Environment Health".to_string(),
+            description: "Doctor diagnostics for configured tools (installed, versions, issues)"
+                .to_string(),
+            mime_type: "application/json".to_string(),
+        },
+        McpResourceDefinition {
+            uri: "jarvy://schema".to_string(),
+            name: "Config Schema".to_string(),
+            description: "JSON Schema for jarvy.toml (for editor autocomplete and validation)"
+                .to_string(),
+            mime_type: "application/schema+json".to_string(),
+        },
     ]
 }
 
@@ -46,6 +66,9 @@ pub fn read_resource(uri: &str) -> McpResult<String> {
     match uri {
         "jarvy://tools/index" => read_tools_index(),
         "jarvy://platform/info" => read_platform_info(),
+        "jarvy://config" => read_project_config(),
+        "jarvy://doctor" => read_doctor_results(),
+        "jarvy://schema" => read_config_schema(),
         _ if uri.starts_with("jarvy://tools/") => {
             let tool_name = uri.strip_prefix("jarvy://tools/").unwrap();
             read_tool_details(tool_name)
@@ -264,6 +287,29 @@ fn extract_version_number(output: &str) -> Option<String> {
     }
     // Fallback: return first line trimmed
     output.lines().next().map(|s| s.trim().to_string())
+}
+
+/// Read the project's jarvy.toml as JSON
+fn read_project_config() -> McpResult<String> {
+    let config_path = "./jarvy.toml";
+    let content = std::fs::read_to_string(config_path)
+        .map_err(|e| McpError::internal_error(format!("Cannot read {}: {}", config_path, e)))?;
+    let parsed: toml::Value = toml::from_str(&content)
+        .map_err(|e| McpError::internal_error(format!("Invalid TOML: {}", e)))?;
+    serde_json::to_string_pretty(&parsed).map_err(|e| McpError::internal_error(e.to_string()))
+}
+
+/// Read doctor diagnostics as JSON
+fn read_doctor_results() -> McpResult<String> {
+    let result = crate::commands::doctor::run_doctor(None, None);
+    serde_json::to_string_pretty(&result).map_err(|e| McpError::internal_error(e.to_string()))
+}
+
+/// Read the JSON Schema for jarvy.toml
+fn read_config_schema() -> McpResult<String> {
+    let schema_output = crate::commands::schema::generate_schema();
+    serde_json::to_string_pretty(&schema_output.schema)
+        .map_err(|e| McpError::internal_error(e.to_string()))
 }
 
 #[cfg(test)]

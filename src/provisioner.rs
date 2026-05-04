@@ -1,49 +1,65 @@
 use std::env;
-use std::process::Command;
 use std::str;
 
 use crate::telemetry;
+use crate::tools::common::run_capture;
 
 pub fn install_homebrew() {
     // Macos Only
-    let test_brew_cmd = Command::new("brew")
-        .arg("--version")
-        .output()
-        .expect("Failed to run brew");
+    let Some(test_brew_cmd) =
+        run_capture("brew", &["--version"], "macos_setup", "Failed to run brew")
+    else {
+        return;
+    };
 
     if !test_brew_cmd.status.success() {
         println!("Installing Homebrew");
         let start = telemetry::now();
 
         let curl_cmd = r#"/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)""#;
-        let _output = Command::new("sh")
-            .arg("-c")
-            .arg(curl_cmd)
-            .output()
-            .expect("Failed to execute command");
+        if run_capture(
+            "sh",
+            &["-c", curl_cmd],
+            "macos_setup",
+            "Failed to execute Homebrew install command",
+        )
+        .is_none()
+        {
+            return;
+        }
 
-        let zprofile = format!("{}/.zprofile", env::var("HOME").unwrap());
+        let home = env::var("HOME").unwrap_or_else(|_| "~".to_string());
+        let zprofile = format!("{}/.zprofile", home);
         let apple_chip_brew_bin = "/opt/homebrew/bin";
         let brew_bin = "/usr/local/bin";
         let entry = format!(
             "export PATH={}:{}:${}",
             brew_bin,
             apple_chip_brew_bin,
-            env::var("PATH").unwrap()
+            env::var("PATH").unwrap_or_default()
         );
 
         let param_to_cmd = format!("grep -R {} {}", entry, zprofile);
 
-        let _cmd = Command::new("sh")
-            .arg("-c")
-            .arg(param_to_cmd)
-            .output()
-            .expect("Failed to execute command");
+        if run_capture(
+            "sh",
+            &["-c", &param_to_cmd],
+            "macos_setup",
+            "Failed to execute grep command",
+        )
+        .is_none()
+        {
+            return;
+        }
 
-        let after_install_test_cmd = Command::new("brew")
-            .arg("--version")
-            .output()
-            .expect("Failed to execute command");
+        let Some(after_install_test_cmd) = run_capture(
+            "brew",
+            &["--version"],
+            "macos_setup",
+            "Failed to execute brew version check",
+        ) else {
+            return;
+        };
 
         if !after_install_test_cmd.status.success() {
             eprintln!("Error: Homebrew");
@@ -58,35 +74,50 @@ pub fn install_homebrew() {
 }
 
 pub fn install_docker() {
-    let check_homebrew_output = Command::new("brew")
-        .arg("--version")
-        .output()
-        .expect("Failed to execute command");
+    let Some(check_homebrew_output) = run_capture(
+        "brew",
+        &["--version"],
+        "macos_setup",
+        "Failed to execute brew version check",
+    ) else {
+        return;
+    };
 
     // If brew not found or any other problem occurred
     if check_homebrew_output.status.success() {
-        let test_docker_output = Command::new("docker")
-            .arg("--version")
-            .output()
-            .expect("Failed to execute command");
+        let Some(test_docker_output) = run_capture(
+            "docker",
+            &["--version"],
+            "macos_setup",
+            "Failed to execute docker version check",
+        ) else {
+            return;
+        };
 
         // If docker not found or any other problem occurred
         if !test_docker_output.status.success() {
             println!("Installing Docker");
             let start = telemetry::now();
-            let brew_install_output = Command::new("brew")
-                .arg("install")
-                .arg("docker")
-                .output()
-                .expect("Failed to execute command");
+            let Some(brew_install_output) = run_capture(
+                "brew",
+                &["install", "docker"],
+                "macos_setup",
+                "Failed to execute brew install docker",
+            ) else {
+                return;
+            };
 
             // If Docker installed successfully
             if brew_install_output.status.success() {
                 // Test Docker installation
-                let after_install_test_output = Command::new("docker")
-                    .arg("--version")
-                    .output()
-                    .expect("Failed to execute command");
+                let Some(after_install_test_output) = run_capture(
+                    "docker",
+                    &["--version"],
+                    "macos_setup",
+                    "Failed to execute docker version check",
+                ) else {
+                    return;
+                };
 
                 // If Docker now runs properly
                 if after_install_test_output.status.success() {
@@ -107,16 +138,21 @@ pub fn install_docker() {
     }
 }
 
-// TODO: figure out command and process to start from cli
-pub fn start_docker_infra() {
+/// Start docker infrastructure using docker-compose.
+///
+/// # Arguments
+/// * `compose_file` - Path to the docker-compose file. Defaults to `./docker/docker-compose.yml`.
+pub fn start_docker_infra_with_config(compose_file: Option<&str>) {
+    let compose_path = compose_file.unwrap_or("./docker/docker-compose.yml");
     let start = telemetry::now();
-    let docker_compose_output = Command::new("docker-compose")
-        .arg("-f")
-        .arg("./docker//docker-compose.yml")
-        .arg("up")
-        .arg("-d")
-        .output()
-        .expect("Failed to execute command");
+    let Some(docker_compose_output) = run_capture(
+        "docker-compose",
+        &["-f", compose_path, "up", "-d"],
+        "docker_infra",
+        "Failed to execute docker-compose command",
+    ) else {
+        return;
+    };
 
     if docker_compose_output.status.success() {
         println!("Successfully started Docker Infrastructure");

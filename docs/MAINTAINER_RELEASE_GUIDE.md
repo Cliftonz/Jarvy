@@ -676,7 +676,7 @@ Use this checklist when performing a release:
 
 ### Package Manager Updates
 - [ ] **crates.io**: `cargo publish` (automatic via CI)
-- [ ] **Homebrew**: Update `jarvy.rb` with new version and checksums
+- [ ] **Homebrew**: Update `jarvy.rb` with a new version and checksums
 - [ ] **AUR**: Update PKGBUILD and push to aur.archlinux.org
 - [ ] **winget**: Submit PR to microsoft/winget-pkgs
 - [ ] **Chocolatey**: Pack and push to community repository

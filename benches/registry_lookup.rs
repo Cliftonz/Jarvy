@@ -2,8 +2,9 @@
 //!
 //! Measures the performance of looking up tools in the global registry.
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::collections::HashMap;
+use std::hint::black_box;
 
 /// Simulate registry lookup with a HashMap (similar to the actual registry)
 fn create_mock_registry() -> HashMap<String, &'static str> {

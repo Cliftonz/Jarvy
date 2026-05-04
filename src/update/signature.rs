@@ -66,6 +66,148 @@ pub fn find_checksum(checksums_content: &str, filename: &str) -> Option<String> 
         .map(|(sum, _)| sum)
 }
 
+/// Anchored Fulcio cert-identity regex. Anchors the host (`github.com`),
+/// the repo path, the workflow file, and the tag-ref so a Fulcio cert whose
+/// Subject merely *contains* `github.com/bearbinary/jarvy` (e.g. an attacker
+/// fork's workflow URL with that substring) is rejected.
+pub(crate) const COSIGN_CERT_IDENTITY_REGEX: &str = concat!(
+    r"^https://github\.com/bearbinary/jarvy/\.github/workflows/[^@]+@",
+    r"refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z\.\-]+)?$",
+);
+
+/// Result of a Sigstore verification attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignatureOutcome {
+    /// `cosign verify-blob` succeeded.
+    Verified,
+    /// `cosign` is not on PATH.
+    CosignMissing,
+    /// `.sig` or `.pem` files were not found alongside the artifact.
+    SignatureFilesMissing,
+    /// Cosign ran and rejected the artifact.
+    Rejected(String),
+}
+
+/// Verify a file's Sigstore signature using cosign.
+///
+/// Returns a `SignatureOutcome` describing what happened — fail-OPEN handling
+/// (treating cosign-missing or sig-missing as success) is **the caller's
+/// decision**. The installer fails closed unless explicit override is granted.
+pub fn verify_sigstore_signature(file_path: &Path) -> Result<SignatureOutcome, VerifyError> {
+    use std::process::Command;
+
+    // Check if cosign is available
+    if Command::new("cosign").arg("version").output().is_err() {
+        tracing::warn!(
+            event = "update.signature.skipped",
+            reason = "cosign_missing",
+            file = %file_path.display(),
+        );
+        return Ok(SignatureOutcome::CosignMissing);
+    }
+
+    let sig_path = file_path.with_extension(format!(
+        "{}.sig",
+        file_path.extension().unwrap_or_default().to_string_lossy()
+    ));
+    let cert_path = file_path.with_extension(format!(
+        "{}.pem",
+        file_path.extension().unwrap_or_default().to_string_lossy()
+    ));
+
+    if !sig_path.exists() || !cert_path.exists() {
+        tracing::warn!(
+            event = "update.signature.skipped",
+            reason = "sig_files_missing",
+            file = %file_path.display(),
+        );
+        return Ok(SignatureOutcome::SignatureFilesMissing);
+    }
+
+    let output = Command::new("cosign")
+        .args([
+            "verify-blob",
+            "--signature",
+            &sig_path.to_string_lossy(),
+            "--certificate",
+            &cert_path.to_string_lossy(),
+            "--certificate-identity-regexp",
+            COSIGN_CERT_IDENTITY_REGEX,
+            "--certificate-oidc-issuer",
+            "https://token.actions.githubusercontent.com",
+        ])
+        .arg(file_path)
+        .output()
+        .map_err(VerifyError::Io)?;
+
+    if output.status.success() {
+        tracing::info!(
+            event = "update.signature.verified",
+            file = %file_path.display(),
+        );
+        Ok(SignatureOutcome::Verified)
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        tracing::error!(
+            event = "update.signature.failed",
+            file = %file_path.display(),
+            error = %stderr,
+        );
+        Ok(SignatureOutcome::Rejected(stderr))
+    }
+}
+
+/// Decide whether a `SignatureOutcome` should permit installation to proceed.
+///
+/// `allow_unsigned` should be set only when the operator has explicitly opted
+/// into unsigned updates (CLI `--allow-unsigned` flag or
+/// `JARVY_ALLOW_UNSIGNED_UPDATE=1` env). Default (`false`) is fail-closed.
+pub fn signature_outcome_is_acceptable(
+    outcome: &SignatureOutcome,
+    allow_unsigned: bool,
+) -> Result<(), String> {
+    match outcome {
+        SignatureOutcome::Verified => Ok(()),
+        SignatureOutcome::CosignMissing => {
+            if allow_unsigned {
+                Ok(())
+            } else {
+                Err(
+                    "cosign is not installed; install it (https://docs.sigstore.dev/cosign/) \
+                     or re-run with --allow-unsigned to accept supply-chain risk"
+                        .to_string(),
+                )
+            }
+        }
+        SignatureOutcome::SignatureFilesMissing => {
+            if allow_unsigned {
+                Ok(())
+            } else {
+                Err(
+                    "release does not include .sig/.pem files; refusing to install \
+                     unsigned binary. Re-run with --allow-unsigned to override."
+                        .to_string(),
+                )
+            }
+        }
+        SignatureOutcome::Rejected(stderr) => Err(format!(
+            "Sigstore verification rejected the artifact: {stderr}"
+        )),
+    }
+}
+
+/// Read `JARVY_ALLOW_UNSIGNED_UPDATE` and treat any value that is not "0",
+/// "false", or empty as "permit unsigned updates."
+pub fn unsigned_override_from_env() -> bool {
+    match std::env::var("JARVY_ALLOW_UNSIGNED_UPDATE") {
+        Ok(v) => {
+            let t = v.trim().to_ascii_lowercase();
+            !t.is_empty() && t != "0" && t != "false" && t != "no"
+        }
+        Err(_) => false,
+    }
+}
+
 /// Errors during verification
 #[derive(Debug, thiserror::Error)]
 pub enum VerifyError {
@@ -77,6 +219,9 @@ pub enum VerifyError {
 
     #[error("Checksum not found for file: {0}")]
     ChecksumNotFound(String),
+
+    #[error("Signature verification failed: {0}")]
+    SignatureInvalid(String),
 }
 
 #[cfg(test)]
@@ -143,6 +288,117 @@ cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc *jarvy-windows-
         );
         assert_eq!(checksums[0].1, "jarvy-darwin-aarch64.tar.gz");
         assert_eq!(checksums[2].1, "jarvy-windows-x86_64.zip");
+    }
+
+    #[test]
+    fn cert_identity_regex_is_anchored() {
+        let re = regex::Regex::new(COSIGN_CERT_IDENTITY_REGEX).expect("valid regex");
+        // Legitimate identity from a release-tag workflow.
+        assert!(re.is_match(
+            "https://github.com/bearbinary/jarvy/.github/workflows/release.yml@refs/tags/v1.2.3"
+        ));
+        assert!(re.is_match(
+            "https://github.com/bearbinary/jarvy/.github/workflows/release.yml@refs/tags/v1.2.3-rc.1"
+        ));
+        // Substring attack: attacker repo's path happens to contain the substring.
+        assert!(!re.is_match(
+            "https://github.com/attacker/repo/.github/workflows/foo.yml@refs/heads/main\
+             github.com/bearbinary/jarvy"
+        ));
+        // Non-tag ref must be rejected (workflow-on-branch).
+        assert!(!re.is_match(
+            "https://github.com/bearbinary/jarvy/.github/workflows/release.yml@refs/heads/main"
+        ));
+        // Wrong host.
+        assert!(!re.is_match(
+            "https://gitlab.com/bearbinary/jarvy/.github/workflows/release.yml@refs/tags/v1.0.0"
+        ));
+    }
+
+    #[test]
+    fn cosign_missing_is_not_acceptable_by_default() {
+        let outcome = SignatureOutcome::CosignMissing;
+        assert!(signature_outcome_is_acceptable(&outcome, false).is_err());
+    }
+
+    #[test]
+    fn cosign_missing_acceptable_with_override() {
+        let outcome = SignatureOutcome::CosignMissing;
+        assert!(signature_outcome_is_acceptable(&outcome, true).is_ok());
+    }
+
+    #[test]
+    fn sig_files_missing_is_not_acceptable_by_default() {
+        let outcome = SignatureOutcome::SignatureFilesMissing;
+        assert!(signature_outcome_is_acceptable(&outcome, false).is_err());
+    }
+
+    #[test]
+    fn rejected_outcome_never_acceptable() {
+        let outcome = SignatureOutcome::Rejected("bad cert".into());
+        assert!(signature_outcome_is_acceptable(&outcome, true).is_err());
+        assert!(signature_outcome_is_acceptable(&outcome, false).is_err());
+    }
+
+    #[test]
+    fn verified_outcome_always_acceptable() {
+        let outcome = SignatureOutcome::Verified;
+        assert!(signature_outcome_is_acceptable(&outcome, false).is_ok());
+        assert!(signature_outcome_is_acceptable(&outcome, true).is_ok());
+    }
+
+    #[test]
+    fn unsigned_override_env_parsing() {
+        // Use unique var per test concern; the underlying impl reads
+        // JARVY_ALLOW_UNSIGNED_UPDATE so we set it directly.
+        // SAFETY: tests run in parallel by default. We restore before exit.
+        let key = "JARVY_ALLOW_UNSIGNED_UPDATE";
+        let prev = std::env::var(key).ok();
+
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::remove_var(key);
+        }
+        assert!(!unsigned_override_from_env());
+
+        for truthy in ["1", "true", "yes", "TRUE", "Y"] {
+            #[allow(unsafe_code)]
+            unsafe {
+                std::env::set_var(key, truthy);
+            }
+            // Note: "Y" is not in the falsy list, so it's truthy by default.
+            assert!(
+                unsigned_override_from_env(),
+                "expected truthy for value {truthy:?}"
+            );
+        }
+
+        for falsy in ["0", "false", "no", ""] {
+            #[allow(unsafe_code)]
+            unsafe {
+                std::env::set_var(key, falsy);
+            }
+            assert!(
+                !unsigned_override_from_env(),
+                "expected falsy for value {falsy:?}"
+            );
+        }
+
+        // Restore.
+        match prev {
+            Some(v) => {
+                #[allow(unsafe_code)]
+                unsafe {
+                    std::env::set_var(key, v);
+                }
+            }
+            None => {
+                #[allow(unsafe_code)]
+                unsafe {
+                    std::env::remove_var(key);
+                }
+            }
+        }
     }
 
     #[test]

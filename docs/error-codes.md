@@ -1,3 +1,8 @@
+---
+title: "Error Codes - Jarvy"
+description: "Standard exit codes used by the Jarvy CLI with remediation steps."
+---
+
 # Jarvy Standard Error Codes
 
 This page lists the standard exit codes used by the Jarvy CLI. Each entry includes a stable anchor so you can link directly to it from your website or documentation.

@@ -3,14 +3,23 @@
 #
 # Environment variables:
 #   JARVY_VERSION     - Version to install (default: latest)
+#   JARVY_CHANNEL     - Release channel: stable (default), beta, nightly
+#                       beta accepts -rc.N and -beta.N tags
+#                       nightly accepts every tag including -alpha.N
 #   JARVY_INSTALL_DIR - Installation directory (default: $env:LOCALAPPDATA\Programs\jarvy)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 $JarvyVersion = if ($env:JARVY_VERSION) { $env:JARVY_VERSION } else { "latest" }
+$JarvyChannel = if ($env:JARVY_CHANNEL) { $env:JARVY_CHANNEL } else { "stable" }
 $InstallDir = if ($env:JARVY_INSTALL_DIR) { $env:JARVY_INSTALL_DIR } else { "$env:LOCALAPPDATA\Programs\jarvy" }
 $JarvyRepo = "bearbinary/jarvy"
+
+if ($JarvyChannel -notin @('stable', 'beta', 'nightly')) {
+    Write-Host "[ERROR] Unknown JARVY_CHANNEL '$JarvyChannel'. Expected: stable, beta, nightly." -ForegroundColor Red
+    exit 1
+}
 
 function Write-Info {
     param([string]$Message)
@@ -36,10 +45,34 @@ function Write-Err {
     Write-Host $Message
 }
 
+function Test-ChannelMatch {
+    param([string]$Tag)
+    switch ($JarvyChannel) {
+        'stable'  { return $Tag -notmatch '-' }
+        'beta'    { return ($Tag -notmatch '-') -or ($Tag -match '-rc\.') -or ($Tag -match '-beta\.') }
+        'nightly' { return $true }
+    }
+    return $false
+}
+
 function Get-LatestVersion {
     try {
-        $response = Invoke-RestMethod -Uri "https://api.github.com/repos/$JarvyRepo/releases/latest" -Method Get
-        return $response.tag_name -replace '^v', ''
+        if ($JarvyChannel -eq 'stable') {
+            $response = Invoke-RestMethod -Uri "https://api.github.com/repos/$JarvyRepo/releases/latest" -Method Get
+            return $response.tag_name -replace '^v', ''
+        }
+
+        # beta or nightly: walk recent releases (newest first) and pick the
+        # first one that matches the channel.
+        $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$JarvyRepo/releases?per_page=30" -Method Get
+        foreach ($release in $releases) {
+            if ($release.draft) { continue }
+            if (Test-ChannelMatch -Tag $release.tag_name) {
+                return $release.tag_name -replace '^v', ''
+            }
+        }
+        Write-Err "No release matching channel '$JarvyChannel' in the most recent 30 releases"
+        exit 1
     }
     catch {
         Write-Err "Failed to fetch latest version: $_"
@@ -89,7 +122,8 @@ function Install-Jarvy {
     # Get version
     $version = $JarvyVersion
     if ($version -eq "latest") {
-        Write-Info "Fetching latest version..."
+        Write-Info "Channel: $JarvyChannel"
+        Write-Info "Fetching latest version on '$JarvyChannel' channel..."
         $version = Get-LatestVersion
     }
     else {

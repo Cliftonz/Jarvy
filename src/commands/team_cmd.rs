@@ -7,7 +7,7 @@ use crate::remote::fetch_remote_config;
 use crate::team;
 
 /// Handle team subcommands
-pub fn run_team(action: &TeamAction) {
+pub fn run_team(action: &TeamAction) -> i32 {
     use team::registry::Registry;
 
     match action {
@@ -27,7 +27,7 @@ pub fn run_team(action: &TeamAction) {
                 }
                 Err(e) => {
                     eprintln!("Error: {}", e);
-                    std::process::exit(1);
+                    return 1;
                 }
             }
         }
@@ -38,7 +38,7 @@ pub fn run_team(action: &TeamAction) {
             if sources.is_empty() {
                 println!("No team sources registered.");
                 println!("Add one with: jarvy team add <name> <url>");
-                return;
+                return 0;
             }
 
             println!("Team Configuration Sources");
@@ -73,7 +73,7 @@ pub fn run_team(action: &TeamAction) {
                             "No configs found for '{}'. Run 'jarvy team sync {}' first.",
                             source, source
                         );
-                        return;
+                        return 0;
                     }
                     println!("Available configs from '{}':", source);
                     println!();
@@ -89,7 +89,7 @@ pub fn run_team(action: &TeamAction) {
                 }
                 None => {
                     eprintln!("Source '{}' not found.", source);
-                    std::process::exit(1);
+                    return 1;
                 }
             }
         }
@@ -103,7 +103,7 @@ pub fn run_team(action: &TeamAction) {
 
             if sources_to_sync.is_empty() {
                 println!("No sources to sync.");
-                return;
+                return 0;
             }
 
             for source_name in sources_to_sync {
@@ -133,7 +133,7 @@ pub fn run_team(action: &TeamAction) {
                 }
                 Err(e) => {
                     eprintln!("Error: {}", e);
-                    std::process::exit(1);
+                    return 1;
                 }
             }
         }
@@ -142,18 +142,18 @@ pub fn run_team(action: &TeamAction) {
             match registry.get_config_url(from) {
                 Some(url) => {
                     println!("Fetching config from {}...", url);
-                    match fetch_remote_config(&url, false, &[]) {
+                    match fetch_remote_config(&url, &[]) {
                         Ok(cached_path) => {
                             // Copy to output location
                             if let Err(e) = fs::copy(&cached_path, output) {
                                 eprintln!("Failed to write config: {}", e);
-                                std::process::exit(1);
+                                return 1;
                             }
                             println!("Created {} from {}", output, from);
                         }
                         Err(e) => {
                             eprintln!("Error fetching config: {}", e);
-                            std::process::exit(1);
+                            return 1;
                         }
                     }
                 }
@@ -162,9 +162,10 @@ pub fn run_team(action: &TeamAction) {
                         "Config '{}' not found. Use 'jarvy team browse <source>' to see available configs.",
                         from
                     );
-                    std::process::exit(1);
+                    return 1;
                 }
             }
         }
     }
+    0
 }

@@ -26,13 +26,17 @@
 //! - `jarvy completions` - Generate shell completions
 
 // Existing command modules
+pub mod audit;
 pub mod completions;
 pub mod diagnose;
 pub mod diff;
 pub mod doctor;
+pub mod explain;
 pub mod export;
 pub mod init;
+pub mod migrate;
 pub mod quickstart;
+pub mod schema;
 pub mod search;
 pub mod templates;
 pub mod upgrade;
@@ -44,6 +48,7 @@ pub mod ci_cmd;
 pub mod config_cmd;
 pub mod configure_cmd;
 pub mod drift_cmd;
+pub mod ensure_cmd;
 pub mod env_cmd;
 pub mod get;
 pub mod lock_cmd;
@@ -52,6 +57,7 @@ pub mod mcp_cmd;
 pub mod roles_cmd;
 pub mod services_cmd;
 pub mod setup_cmd;
+pub mod shell_init_cmd;
 pub mod team_cmd;
 pub mod telemetry_cmd;
 pub mod ticket_cmd;

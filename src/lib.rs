@@ -7,6 +7,7 @@ pub mod observability;
 pub mod packages;
 pub mod ticket;
 pub mod tools;
+pub mod workspace;
 
 pub use drift::{DriftConfig, DriftDetector, DriftReport, DriftStatus, EnvironmentState};
 pub use logging::{LogConfig, LogError, LogFormat, LogLevel, LogStats, Sanitizer};

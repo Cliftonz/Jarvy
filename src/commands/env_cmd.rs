@@ -18,7 +18,7 @@ pub fn run_env(
     export: bool,
     shell_type: Option<&str>,
     force: bool,
-) {
+) -> i32 {
     let config = Config::new(file);
     let env_config = config.get_env();
 
@@ -28,7 +28,7 @@ pub fn run_env(
             Ok(s) => s,
             Err(e) => {
                 eprintln!("Error: {}", e);
-                std::process::exit(error_codes::CONFIG_ERROR);
+                return error_codes::CONFIG_ERROR;
             }
         }
     } else if let Some(ref shell_str) = env_config.config.shell {
@@ -51,7 +51,7 @@ pub fn run_env(
     if export {
         let preview = preview_shell_rc(target_shell, &vars, &ctx);
         println!("{}", preview);
-        return;
+        return 0;
     }
 
     // Collect secrets (in CI mode, won't prompt)
@@ -60,7 +60,7 @@ pub fn run_env(
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error collecting secrets: {}", e);
-            std::process::exit(error_codes::CONFIG_ERROR);
+            return error_codes::CONFIG_ERROR;
         }
     };
 
@@ -75,7 +75,7 @@ pub fn run_env(
 
     if !config.has_env() {
         println!("No environment variables configured in {}", file);
-        return;
+        return 0;
     }
 
     // Generate .env file
@@ -105,7 +105,7 @@ pub fn run_env(
                     if !force {
                         eprintln!("Tip: Use --force to overwrite existing non-Jarvy .env files");
                     }
-                    std::process::exit(error_codes::CONFIG_ERROR);
+                    return error_codes::CONFIG_ERROR;
                 }
             }
         }
@@ -133,7 +133,7 @@ pub fn run_env(
                 }
                 Err(e) => {
                     eprintln!("Failed to update shell rc file: {}", e);
-                    std::process::exit(error_codes::CONFIG_ERROR);
+                    return error_codes::CONFIG_ERROR;
                 }
             }
         }
@@ -147,4 +147,6 @@ pub fn run_env(
             println!("  - Secrets: configured");
         }
     }
+
+    0
 }

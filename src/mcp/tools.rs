@@ -336,9 +336,12 @@ pub fn handle_list_tools(arguments: Option<serde_json::Value>) -> McpResult<serd
                 return false;
             }
 
-            // Filter by category (if we had categories)
-            if let Some(ref _category) = params.category {
-                // TODO: Implement category filtering when categories are added to ToolSpec
+            // Filter by category
+            if let Some(ref category) = params.category {
+                match t.category.as_deref() {
+                    Some(cat) if cat.eq_ignore_ascii_case(category) => {}
+                    _ => return false,
+                }
             }
 
             true
@@ -551,7 +554,11 @@ pub fn handle_install_tool(
     })?;
 
     // Check if confirmation should be skipped
-    let skip_confirm = config.skip_confirmation(&params.name) || !config.mcp.require_confirmation;
+    // Check global auto-approve preference from ~/.jarvy/config.toml
+    let global_auto_approve = crate::init::initialize().mcp.auto_approve_installs;
+    let skip_confirm = config.skip_confirmation(&params.name)
+        || !config.mcp.require_confirmation
+        || global_auto_approve;
 
     if !skip_confirm {
         // Prompt for confirmation
@@ -564,7 +571,23 @@ pub fn handle_install_tool(
                 return Err(McpError::user_cancelled());
             }
             ConfirmationResult::Always => {
-                // TODO: Save to config
+                // Persist "always allow" preference to ~/.jarvy/config.toml.
+                // Audit event records the security state change so a debug
+                // ticket can show when blanket auto-approval was enabled.
+                match crate::init::modify_global_config(|cfg| {
+                    cfg.mcp.auto_approve_installs = true;
+                }) {
+                    Ok(()) => tracing::info!(
+                        event = "mcp.auto_approve.enabled",
+                        tool = %params.name,
+                        client = client_name.unwrap_or("unknown"),
+                    ),
+                    Err(e) => tracing::warn!(
+                        event = "mcp.auto_approve.persist_failed",
+                        tool = %params.name,
+                        error = %e,
+                    ),
+                }
                 // Continue with install
             }
         }

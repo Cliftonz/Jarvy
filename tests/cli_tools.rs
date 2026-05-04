@@ -2,17 +2,12 @@
 //!
 //! Tests the tool index generation and listing functionality.
 
-use assert_cmd::prelude::*;
-use predicates::prelude::*;
-use std::process::Command;
-use tempfile::NamedTempFile;
+mod common;
 
-/// Helper to run jarvy with test mode enabled
-fn jarvy_cmd() -> Command {
-    let mut c = Command::cargo_bin("jarvy").unwrap();
-    c.env("JARVY_TEST_MODE", "1");
-    c
-}
+use assert_cmd::prelude::*;
+use common::jarvy_cmd;
+use predicates::prelude::*;
+use tempfile::NamedTempFile;
 
 #[test]
 fn tools_list_default_pretty() {

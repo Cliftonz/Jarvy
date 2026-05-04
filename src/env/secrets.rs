@@ -84,6 +84,54 @@ pub fn collect_secrets(
     Ok(result)
 }
 
+#[cfg(test)]
+#[cfg(unix)]
+mod permissive_perms_tests {
+    //! Verifies the structured-warning behavior for secret files with
+    //! permissive permissions. The previous `eprintln!` path was not testable.
+
+    use super::*;
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn make_secret_file(mode: u32) -> tempfile::NamedTempFile {
+        let mut tmp = tempfile::NamedTempFile::new().expect("tempfile");
+        write!(tmp, "supersecret").unwrap();
+        let mut perms = tmp.as_file().metadata().unwrap().permissions();
+        perms.set_mode(mode);
+        std::fs::set_permissions(tmp.path(), perms).unwrap();
+        tmp
+    }
+
+    fn build_ctx() -> EnvContext {
+        EnvContext::new()
+    }
+
+    #[test]
+    fn resolve_secret_with_0600_does_not_warn_about_perms() {
+        let tmp = make_secret_file(0o600);
+        let secret = SecretValue::FromFile {
+            from_file: tmp.path().to_string_lossy().to_string(),
+        };
+        let ctx = build_ctx();
+        let result = resolve_secret("TEST_SECRET", &secret, &ctx, &SecretsConfig::default());
+        assert_eq!(result.unwrap(), Some("supersecret".to_string()));
+    }
+
+    #[test]
+    fn resolve_secret_with_0644_still_returns_value() {
+        // Behavior today: warn but return. Documents the contract; tighten
+        // to `Err` once we ship a strict-secrets toggle.
+        let tmp = make_secret_file(0o644);
+        let secret = SecretValue::FromFile {
+            from_file: tmp.path().to_string_lossy().to_string(),
+        };
+        let ctx = build_ctx();
+        let result = resolve_secret("TEST_SECRET", &secret, &ctx, &SecretsConfig::default());
+        assert_eq!(result.unwrap(), Some("supersecret".to_string()));
+    }
+}
+
 /// Resolve a single secret value
 fn resolve_secret(
     name: &str,
@@ -96,6 +144,26 @@ fn resolve_secret(
             let path = expand_path(from_file, ctx);
             if !path.exists() {
                 return Err(SecretError::FileNotFound(path.display().to_string()));
+            }
+            // Warn if secret file has overly permissive permissions.
+            // Path emitted through redact_path so home-dir prefixes don't end up
+            // in shared ticket bundles.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(metadata) = fs::metadata(&path) {
+                    let mode = metadata.permissions().mode();
+                    if mode & 0o077 != 0 {
+                        let safe_path = crate::network::redact_home(&path.display().to_string());
+                        tracing::warn!(
+                            event = "secret.permissive_perms",
+                            path = %safe_path,
+                            mode = format!("{:o}", mode & 0o777),
+                            secret_name = %name,
+                            "secret file has permissive permissions; chmod 600 recommended"
+                        );
+                    }
+                }
             }
             let content = fs::read_to_string(&path)?;
             Ok(Some(content.trim().to_string()))
@@ -227,6 +295,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(unsafe_code)]
     fn test_secrets_config_default_ci_detection() {
         // Save current env
         let ci_was_set = std::env::var("CI").is_ok();
@@ -269,6 +338,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(unsafe_code)]
     fn test_resolve_secret_from_env() {
         // SAFETY: Test environment, single-threaded access
         unsafe {

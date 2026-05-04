@@ -190,8 +190,10 @@ mod tests {
 
     #[test]
     fn test_resolver_global_config() {
-        let mut config = NetworkConfig::default();
-        config.https_proxy = Some("http://proxy:8080".to_string());
+        let config = NetworkConfig {
+            https_proxy: Some("http://proxy:8080".to_string()),
+            ..Default::default()
+        };
 
         let resolver = ProxyResolver::new(Some(&config));
         let resolved = resolver.resolve_for_tool("git");
@@ -203,12 +205,17 @@ mod tests {
 
     #[test]
     fn test_resolver_tool_override() {
-        let mut config = NetworkConfig::default();
-        config.https_proxy = Some("http://proxy:8080".to_string());
-
-        let mut git_override = NetworkOverride::default();
-        git_override.https_proxy = Some("http://git-proxy:8888".to_string());
-        config.overrides.insert("git".to_string(), git_override);
+        let git_override = NetworkOverride {
+            https_proxy: Some("http://git-proxy:8888".to_string()),
+            ..Default::default()
+        };
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert("git".to_string(), git_override);
+        let config = NetworkConfig {
+            https_proxy: Some("http://proxy:8080".to_string()),
+            overrides,
+            ..Default::default()
+        };
 
         let resolver = ProxyResolver::new(Some(&config));
         let resolved = resolver.resolve_for_tool("git");
@@ -225,12 +232,17 @@ mod tests {
 
     #[test]
     fn test_resolver_tool_no_proxy_all() {
-        let mut config = NetworkConfig::default();
-        config.https_proxy = Some("http://proxy:8080".to_string());
-
-        let mut git_override = NetworkOverride::default();
-        git_override.no_proxy_all = true;
-        config.overrides.insert("git".to_string(), git_override);
+        let git_override = NetworkOverride {
+            no_proxy_all: true,
+            ..Default::default()
+        };
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert("git".to_string(), git_override);
+        let config = NetworkConfig {
+            https_proxy: Some("http://proxy:8080".to_string()),
+            overrides,
+            ..Default::default()
+        };
 
         let resolver = ProxyResolver::new(Some(&config));
         let resolved = resolver.resolve_for_tool("git");

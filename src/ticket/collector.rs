@@ -319,6 +319,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(unsafe_code)]
     fn test_collect_environment() {
         // SAFETY: Test environment modification is safe in single-threaded tests
         unsafe { std::env::set_var("SHELL", "/bin/bash") };

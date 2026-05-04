@@ -158,7 +158,7 @@ fn format_timestamp(timestamp: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::drift::{ChangedFile, DriftSummary, MissingTool, VersionChange};
+    use crate::drift::{DriftSummary, MissingTool, VersionChange};
 
     #[test]
     fn test_to_json() {
