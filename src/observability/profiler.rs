@@ -324,7 +324,7 @@ impl ProfileReport {
         if !self.phases.is_empty() {
             output.push_str("Phase breakdown:\n");
             let mut phases: Vec<_> = self.phases.iter().collect();
-            phases.sort_by(|a, b| b.1.duration.cmp(&a.1.duration));
+            phases.sort_by_key(|p| std::cmp::Reverse(p.1.duration));
 
             for (name, timing) in phases {
                 let percentage =
@@ -343,7 +343,7 @@ impl ProfileReport {
         if !self.tools.is_empty() {
             output.push_str("Tool installation times:\n");
             let mut tools = self.tools.clone();
-            tools.sort_by(|a, b| b.duration.cmp(&a.duration));
+            tools.sort_by_key(|t| std::cmp::Reverse(t.duration));
 
             let max_duration = tools
                 .first()

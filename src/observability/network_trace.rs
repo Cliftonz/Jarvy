@@ -259,7 +259,7 @@ impl NetworkTracer {
             .collect();
 
         // Sort by total bytes (largest first)
-        domains.sort_by(|a, b| b.total_bytes.cmp(&a.total_bytes));
+        domains.sort_by_key(|d| std::cmp::Reverse(d.total_bytes));
         domains
     }
 
