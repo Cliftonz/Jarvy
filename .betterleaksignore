@@ -1,0 +1,10 @@
+# betterleaks / gitleaks ignore file.
+# Each line is a finding fingerprint that should be ignored on every scan.
+# Format: <commit-sha>:<file>:<rule-id>:<line>
+# Add an entry only after confirming the finding is a synthetic test fixture
+# or a public, intentionally-published value.
+
+# Synthetic test fixture in the sanitizer's unit test. The string
+# "sk_live_abc123def456" is shaped like a Stripe key on purpose so the
+# sanitizer's regex catches it; it is not a real credential.
+762fc8b3f0ca5ffc2e1c285a526c6470a7327164:src/observability/sanitizer.rs:stripe-access-token:220
