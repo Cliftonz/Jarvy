@@ -368,7 +368,9 @@ fn detect_install_method(location: Option<&str>) -> Option<String> {
     }
 }
 
-/// Analyze a binary file
+/// Analyze a binary file (Unix). Reads POSIX mode/uid/gid from filesystem
+/// metadata, which is unavailable on Windows.
+#[cfg(unix)]
 fn analyze_binary(path: &str) -> Result<BinaryAnalysis, std::io::Error> {
     use std::os::unix::fs::MetadataExt;
 
@@ -408,6 +410,17 @@ fn analyze_binary(path: &str) -> Result<BinaryAnalysis, std::io::Error> {
         symlink_target,
         size: metadata.len(),
     })
+}
+
+// Windows stub: POSIX mode/uid/gid don't exist on Windows. The single
+// caller in this file uses `.and_then(|loc| analyze_binary(loc).ok())`,
+// so an Unsupported error degrades gracefully to `None` on Windows.
+#[cfg(not(unix))]
+fn analyze_binary(_path: &str) -> Result<BinaryAnalysis, std::io::Error> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "binary analysis is unix-only",
+    ))
 }
 
 /// Format Unix permissions
