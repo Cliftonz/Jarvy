@@ -164,7 +164,13 @@ jobs:
         run: echo "PKG_CONFIG_SYSROOT_DIR=${{ matrix.sysroot }}" >> $GITHUB_ENV
 
       - name: Install app dependencies
-        run: cargo install cargo-packager cargo-generate-rpm --locked
+        # Prebuilt binaries via taiki-e/install-action drop the install step
+        # from ~3 min of source compile per matrix slot to ~5 s of download.
+        # Side benefits: silences the core2-yanked warning that came from
+        # `cargo install --locked`, and removes ~/.cargo/bin cache pressure.
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager,cargo-generate-rpm
 
       - name: Build the application
         run: cargo build --release ${{ matrix.build_args }}
