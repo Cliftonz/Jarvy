@@ -5,5 +5,5 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-heck = "0.4"     # for case conversions
+heck = "0.5"     # for case conversions
 anyhow = "1"
