@@ -16,3 +16,7 @@ Cargo.lock
 # macOS Finder metadata
 .DS_Store
 **/.DS_Store
+
+# Local agent / mkdocs runtime artifacts
+.cache/
+.claude/scheduled_tasks.lock

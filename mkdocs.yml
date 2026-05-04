@@ -78,11 +78,25 @@ nav:
     - Quickstart: quickstart.md
     - Configuration Reference: configuration.md
     - Roles Guide: roles.md
+  - Features:
+    - Hooks: hooks.md
+    - Tool Dependencies: tool-dependencies.md
+    - Language Packages: packages.md
+    - Git Configuration: git-config.md
+    - Network & Proxy: network.md
+    - Drift Detection: drift.md
+    - Logging & Tickets: logging.md
+    - Telemetry: telemetry.md
+    - Self-Updating: self-update.md
   - Guides:
     - CI/CD Integration: ci-cd.md
-    - Hooks: hooks.md
-    - MCP Server (AI Agents): mcp-server.md
     - Error Codes: error-codes.md
+  - For AI Agents:
+    - Overview: for-ai-agents.md
+    - MCP Server: mcp-server.md
+    - Architecture: architecture.md
+    - llms.txt (concise): https://github.com/bearbinary/jarvy/blob/main/llms.txt
+    - llms-full.txt (full): https://github.com/bearbinary/jarvy/blob/main/llms-full.txt
   - Reference:
     - CLI Reference: cli.md
     - FAQ: faq.md
@@ -96,4 +110,3 @@ nav:
     - vs Homebrew Bundle: competitors/vs-homebrew-bundle.md
   - Community:
     - Contributing: contributing.md
-    - AI/LLM Reference: https://github.com/bearbinary/jarvy/blob/main/llms.txt

@@ -1,68 +1,859 @@
 # Jarvy — Full LLM Reference
 
-> Jarvy is a fast, Rust-based CLI that standardizes and automates local development environment setup across macOS, Linux, and Windows using a declarative `jarvy.toml` config file.
+> Single-file flat reference for AI agents. Optimized for one-shot context injection. For human-readable docs see https://docs.jarvy.dev. For interactive AI integration use the MCP server (`jarvy mcp`).
 
-## Q&A
+Jarvy is a fast, Rust-based, cross-platform CLI that provisions local development environments from a declarative `jarvy.toml` config file. It runs on macOS, Linux, and Windows, using each platform's native package managers (Homebrew, apt, dnf, pacman, apk, winget, Chocolatey, Scoop). It is MIT/Apache-2.0 licensed and hosted at https://github.com/bearbinary/jarvy.
 
-Q: What is Jarvy?
-A: Jarvy is an open-source, cross-platform CLI tool that provisions developer workstations from a single `jarvy.toml` configuration file. It installs tools using native package managers (Homebrew, apt, winget) and ensures every team member has an identical development environment. It replaces manual setup guides, remote dev environments like GitHub Codespaces, and ad-hoc provisioning scripts.
+This file is the canonical machine-consumption reference. It mirrors `https://docs.jarvy.dev` but flattened for easy ingestion.
 
-Q: How do I install Jarvy?
-A: Install via Cargo (`cargo install jarvy`), Homebrew (`brew install jarvy`), or download a pre-built binary from the GitHub Releases page at https://github.com/bearbinary/jarvy/releases.
+---
 
-Q: What problem does Jarvy solve?
-A: Jarvy eliminates the "works on my machine" problem. It codifies your team's required tools and versions in a version-controlled config file, so new developers can run `jarvy setup` and have a fully configured workstation in seconds instead of days.
+## 1. Installation
 
-Q: How is Jarvy different from GitHub Codespaces or DevPod?
-A: Jarvy provisions your local machine instead of a remote VM or container. After initial setup you work offline at native performance with no vendor lock-in, no recurring cloud costs, and full control of your workstation.
+```bash
+# Cargo
+cargo install jarvy
 
-Q: What does a jarvy.toml look like?
-A: A minimal config lists tools under `[provisioner]`: `git = "latest"`, `node = "20"`, `docker = "latest"`. Advanced configs add `[env]` for environment variables, `[hooks]` for post-install scripts, `[roles]` for team role-based tool sets, and `[drift]` for configuration drift detection.
+# Homebrew (macOS, Linux)
+brew install jarvy
 
-Q: Does Jarvy support CI/CD?
-A: Yes. Jarvy auto-detects 11 CI providers (GitHub Actions, GitLab CI, CircleCI, etc.), provides a `setup-jarvy` GitHub Action, and can generate CI config files with `jarvy ci-config <provider>`.
+# Direct download
+# https://github.com/bearbinary/jarvy/releases
+```
 
-Q: Can AI agents use Jarvy?
-A: Yes. Jarvy includes a built-in MCP (Model Context Protocol) server that lets LLMs discover, check, and install development tools via JSON-RPC. Run `jarvy mcp` to start the server.
+Verify:
 
-Q: How many tools does Jarvy support?
-A: Jarvy supports 174+ tools across macOS, Linux, and Windows, including Node.js, Python, Go, Rust, Docker, Kubernetes, Terraform, AWS CLI, and many more. Run `jarvy search --all` to list them.
+```bash
+jarvy --version
+```
 
-Q: Does Jarvy support team configurations?
-A: Yes. Jarvy supports role-based configurations where you define tool sets per role (frontend, backend, devops) with inheritance. Assign roles via `role = "frontend"` in jarvy.toml and manage them with `jarvy roles list/show/diff`.
+### Release Channels
 
-Q: Is Jarvy open source?
-A: Yes. Jarvy is MIT-licensed and hosted at https://github.com/bearbinary/jarvy. Contributions are welcome.
+```bash
+# Per-install
+JARVY_CHANNEL=beta curl -fsSL \
+  https://raw.githubusercontent.com/bearbinary/jarvy/main/dist/scripts/install.sh | bash
 
-## Architecture Overview
+# Per-update
+jarvy update --channel beta
 
-Jarvy is built in Rust (edition 2024) and uses a modular architecture:
+# Persistent (~/.jarvy/config.toml)
+[update]
+channel = "beta"   # stable | beta | nightly
+```
 
-- **Tool Registry**: A global `OnceLock<RwLock<HashMap>>` maps tool names to installation handler functions. Tools are defined declaratively using a `define_tool!` macro.
-- **Config System**: `jarvy.toml` is parsed via serde into a typed `Config` struct. Supports simple (`git = "2.40"`) and detailed (`git = { version = "2.40", version_manager = true }`) formats.
-- **Role System**: Role-based tool sets with inheritance (up to 5 levels deep). Roles define which tools each team member needs.
-- **MCP Server**: JSON-RPC 2.0 over stdio. Exposes tools for listing, checking, and installing development tools with safety features (dry_run default, rate limiting, audit logging).
-- **Telemetry**: OpenTelemetry-based with OTLP export for logs, metrics, and traces. Opt-in by default, auto-disabled in CI.
-- **Drift Detection**: Captures environment state after setup and detects when tools drift from expected versions.
+| Channel | Accepts |
+|---------|---------|
+| stable | `vX.Y.Z` only |
+| beta | `vX.Y.Z`, `-rc.N`, `-beta.N` |
+| nightly | All including `-alpha.N` |
 
-## CLI Commands
+---
 
-- `jarvy setup` — Provision environment from jarvy.toml
-- `jarvy init` — Create jarvy.toml interactively
-- `jarvy doctor` — Diagnose environment health
-- `jarvy diff` — Preview changes before setup
-- `jarvy search` — Find available tools
-- `jarvy explain <tool>` — Get detailed tool information
-- `jarvy audit` — Run security scanners
-- `jarvy drift check` — Detect configuration drift
-- `jarvy roles list/show/diff` — Manage role-based configs
-- `jarvy mcp` — Start MCP server for AI agents
-- `jarvy update` — Self-update Jarvy
-- `jarvy completions <shell>` — Generate shell completions
+## 2. Quick Start
 
-## Links
+```toml
+# jarvy.toml
+[provisioner]
+git = "latest"
+node = "20"
+docker = "latest"
+python = "3.12"
+```
+
+```bash
+jarvy setup
+```
+
+Every developer who runs `jarvy setup` gets the same tools and versions.
+
+### Templates
+
+```bash
+jarvy init                          # Interactive
+jarvy init --template react
+jarvy init --template rust-cli
+jarvy init --template python-api
+jarvy init --template k8s-admin
+jarvy init --template go-api
+jarvy init --stdout                 # Print without writing
+```
+
+---
+
+## 3. Configuration Reference
+
+### `[provisioner]` — Tools
+
+Simple form:
+
+```toml
+[provisioner]
+git = "latest"
+node = "20"
+python = ">=3.10"
+```
+
+Detailed form:
+
+```toml
+[provisioner]
+node = { version = "20", version_manager = true }
+python = { version = "3.12", use_sudo = false }
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `version` | string | required | Version requirement |
+| `version_manager` | bool | `true` | Use nvm/pyenv/rustup if available |
+| `use_sudo` | bool | auto | Override sudo per-tool |
+
+### Version Operators
+
+| Operator | Example | Meaning |
+|----------|---------|---------|
+| `latest` | `"latest"` | Any version |
+| bare | `"20"` | Major version 20.x.x |
+| `>=` | `">=3.10"` | 3.10 or higher |
+| `^` | `"^1.0"` | Compatible with 1.0 (>=1.0.0, <2.0.0) |
+| `~` | `"~3.12"` | Approximately 3.12 (>=3.12.0, <3.13.0) |
+| `=` | `"=1.2.3"` | Exact match |
+
+### `[hooks]` — Custom Scripts
+
+```toml
+[hooks]
+pre_setup = "echo 'Starting...'"
+post_setup = "echo 'Done'"
+
+[hooks.node]
+post_install = "npm install -g typescript"
+
+[hooks.config]
+shell = "bash"            # bash | zsh | sh | fish | powershell
+timeout = 300             # seconds
+continue_on_error = false
+```
+
+Hook env vars: `JARVY_TOOL`, `JARVY_VERSION`, `JARVY_OS`, `JARVY_ARCH`, `JARVY_HOME`.
+
+### `[env]` — Environment Variables
+
+```toml
+[env.vars]
+NODE_ENV = "development"
+EDITOR = "vim"
+API_URL = { value = "http://localhost:3000", description = "Backend API" }
+
+[env.secrets]
+API_KEY = { env = "MY_API_KEY", required = true }
+DB_PASSWORD = { from_file = "~/.secrets/db_pass" }
+
+[env.config]
+shell = "zsh"
+update_rc = false
+generate_dotenv = true
+dotenv_path = ".env"
+add_to_gitignore = false
+backup_rc = true
+```
+
+### `[roles]` — Role-Based Configurations
+
+```toml
+role = "frontend"
+# or
+role = ["frontend", "devops"]
+
+[roles.base]
+description = "Base development tools"
+tools = ["git", "docker"]
+
+[roles.frontend]
+extends = "base"
+description = "Frontend development"
+tools = ["node", "bun"]
+
+[roles.frontend.tools]
+node = "20"
+bun = "latest"
+
+[roles.senior-frontend]
+extends = "frontend"     # Max 5 levels of inheritance
+tools = ["kubectl"]
+```
+
+Direct `[provisioner]` always overrides role tools. Use `--role <name>` to override role for a single setup run.
+
+### `[services]` — Docker Compose / Tilt
+
+```toml
+[services]
+enabled = true
+auto_start = true
+compose_file = "docker-compose.yml"
+tilt_file = "Tiltfile"
+start_in_ci = false
+```
+
+### `[network]` — Proxy and TLS
+
+```toml
+[network]
+http_proxy = "http://proxy.corp.com:8080"
+https_proxy = "http://proxy.corp.com:8080"
+all_proxy = "socks5://socks.corp.com:1080"
+no_proxy = ["localhost", "127.0.0.1", ".corp.com"]
+
+[network.auth]
+username = "jdoe"
+password = { env = "PROXY_PASSWORD" }
+
+[network.tls]
+ca_bundle = "/etc/ssl/certs/corporate-ca.crt"
+insecure = false
+
+[network.overrides.git]
+https_proxy = "http://git-proxy.corp.com:8888"
+```
+
+Propagated env vars: `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` (both cases), `CURL_CA_BUNDLE`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO`, `REQUESTS_CA_BUNDLE`.
+
+### `[git]` — Git Configuration
+
+```toml
+[git]
+user_name = "Jane Doe"
+user_email = { env = "GIT_EMAIL", default = "jane@example.com" }
+
+signing = true
+signing_key = "~/.ssh/id_ed25519.pub"
+signing_format = "ssh"            # ssh | gpg, auto-detected from extension
+
+default_branch = "main"
+pull_rebase = true
+auto_stash = true
+push_autosetup = true
+editor = "vim"
+
+autocrlf = "input"                # true | false | input
+eol = "lf"
+
+credential_helper = "osxkeychain"
+
+scope = "global"                  # global | local
+
+[git.aliases]
+co = "checkout"
+br = "branch"
+ci = "commit"
+st = "status"
+lg = "log --oneline --graph --decorate"
+```
+
+`ConfigValue` resolution: plain string, `{ env = "VAR" }`, or `{ env = "VAR", default = "..." }`.
+
+Credential helper defaults: macOS=`osxkeychain`, Linux=`cache`, Windows=`manager-core`.
+
+### Language Packages — `[npm]`, `[pip]`, `[cargo]`
+
+```toml
+[npm]
+typescript = "^5.0"
+eslint = "latest"
+package_manager = "pnpm"     # auto-detected from lock file if omitted
+from_lockfile = false
+
+[pip]
+pytest = ">=7.0"
+black = "latest"
+venv = ".venv"
+create_venv = true
+from_lockfile = false
+
+[cargo]
+cargo-watch = "latest"
+cargo-nextest = "0.9"
+locked = true
+```
+
+Detailed package spec:
+
+```toml
+[cargo]
+some-crate = { version = "1.0", features = ["feat1"], locked = true }
+```
+
+npm package manager auto-detect: `pnpm-lock.yaml`→pnpm, `yarn.lock`→yarn, `bun.lockb`→bun, `package-lock.json`→npm.
+
+### `[drift]` — Drift Detection
+
+```toml
+[drift]
+enabled = true
+check_on_run = false
+track_files = [".vscode/settings.json", "package.json"]
+version_policy = "minor"     # major | minor | patch | exact
+ignore_tools = ["vim"]
+allow_upgrades = true
+```
+
+State written to `.jarvy/state.json` after successful setup.
+
+### `[logging]` — File Logging
+
+```toml
+[logging]
+enabled = true
+level = "info"           # error | warn | info | debug | trace
+format = "json"          # text | json
+max_file_size = "10MB"
+max_files = 5
+max_age_days = 30
+```
+
+Log path: `~/.jarvy/logs/jarvy.log` (rotated `.1.gz`, `.2.gz`, …).
+
+### `[workspace]` — Monorepos
+
+```toml
+[workspace]
+members = ["services/api", "services/web", "libs/shared"]
+inherit = ["provisioner", "hooks", "env"]
+```
+
+### `[privileges]`
+
+```toml
+[privileges]
+use_sudo = true
+
+[privileges.per_os]
+linux = true
+macos = false
+windows = false
+```
+
+### `[commands]` — Interactive Menu
+
+```toml
+[commands]
+run = "npm start"
+test = "npm test"
+setup = "jarvy setup"
+```
+
+### `extends` — Config Inheritance
+
+```toml
+extends = "https://raw.githubusercontent.com/org/configs/main/base.toml"
+# or
+extends = "../shared/base-jarvy.toml"
+```
+
+---
+
+## 4. CLI Reference
+
+### Core
+
+```bash
+jarvy setup [-f file] [--from URL] [--role NAME] [--dry-run]
+            [--no-hooks] [--ci|--no-ci] [-j N] [--sequential]
+            [--ignore-missing-deps] [-q|-v]
+
+jarvy init [--template NAME] [--non-interactive] [--stdout]
+
+jarvy doctor [--tools T1,T2] [--extended] [--format json] [--report PATH]
+
+jarvy diff [--changes-only] [--format json]
+```
+
+### Discovery
+
+```bash
+jarvy search <query>                # Fuzzy search
+jarvy search --all                  # List all tools
+jarvy explain <tool> [--file F] [--format json]
+jarvy tools [--index] [--default-hooks] [--format json]
+```
+
+### Configuration
+
+```bash
+jarvy validate [--from URL] [--strict]
+jarvy migrate [--apply] [--format json]
+jarvy export [--all] [--tools T1,T2] [--format json]
+jarvy configure                     # Generate default jarvy.toml
+jarvy schema [--output PATH]        # JSON Schema for jarvy.toml
+```
+
+### Roles
+
+```bash
+jarvy roles list [-v]
+jarvy roles show <name> [--resolved] [--inheritance]
+jarvy roles diff <a> <b>
+```
+
+### Team
+
+```bash
+jarvy team list
+jarvy team add <url>
+jarvy team remove <name>
+```
+
+### Environment
+
+```bash
+jarvy env [--dotenv] [--shell] [--dry-run] [--export]
+```
+
+### Drift
+
+```bash
+jarvy drift check [--format json]
+jarvy drift status [-v]
+jarvy drift accept [--tools T1,T2]
+jarvy drift fix [--dry-run]
+```
+
+Exit codes: 0=no drift, 1=drift detected, 2=no baseline.
+
+### Security
+
+```bash
+jarvy audit [--tool NAME] [--format json]
+# Scanners: betterleaks, gitleaks, trufflehog, trivy, grype, semgrep, checkov, tfsec
+```
+
+### CI/CD
+
+```bash
+jarvy ci-config <provider> [--dry-run]
+# Providers: github, gitlab, circleci, azure, jenkins, bitbucket
+jarvy ci-info
+```
+
+### Self-Update
+
+```bash
+jarvy update [--version V] [--channel C] [--rollback]
+jarvy update check
+jarvy update history
+jarvy update config
+jarvy update enable | disable
+```
+
+Env: `JARVY_UPDATE=0`, `JARVY_UPDATE_CHANNEL=beta`, `JARVY_PINNED_VERSION=1.2.3`.
+
+### Maintenance
+
+```bash
+jarvy upgrade [--tools T1,T2] [--dry-run]
+jarvy diagnose <tool> [--fix]
+```
+
+### Logging & Tickets
+
+```bash
+jarvy logs view [--lines N] [--level L]
+jarvy logs stats
+jarvy logs clean [--all]
+jarvy logs config
+
+jarvy ticket create [--tool NAME]
+jarvy ticket show <id>
+jarvy ticket list
+jarvy ticket clean [--older-than DAYS]
+```
+
+### Telemetry
+
+```bash
+jarvy telemetry status
+jarvy telemetry enable | disable
+jarvy telemetry set-endpoint <url>
+jarvy telemetry test
+jarvy telemetry preview
+```
+
+Env: `JARVY_TELEMETRY=1`, `JARVY_OTLP_ENDPOINT`, `JARVY_OTLP_PROTOCOL`, `JARVY_OTLP_LOGS`, `JARVY_OTLP_METRICS`, `JARVY_OTLP_TRACES`, `JARVY_OTLP_SAMPLE_RATE`.
+
+### Utility
+
+```bash
+jarvy completions <shell> [--instructions]
+# Shells: bash, zsh, fish, powershell
+
+jarvy mcp [--config FILE]    # Start MCP server
+```
+
+### Exit Codes
+
+| Code | Name | Meaning |
+|------|------|---------|
+| 0 | EXIT_SUCCESS | OK |
+| 2 | CONFIG_ERROR | jarvy.toml missing or malformed |
+| 3 | PREREQ_MISSING | Package manager not found |
+| 4 | NETWORK_TIMEOUT | Network or proxy failure |
+| 5 | PERMISSION_REQUIRED | Sudo needed |
+| 6 | INCOMPATIBLE_OS_ARCH | Unsupported platform |
+| 7 | HOOK_FAILED | Hook script failed |
+
+---
+
+## 5. MCP Server (AI Integration)
+
+```bash
+jarvy mcp
+```
+
+### Client Config (Claude Desktop, Cursor, Continue)
+
+```json
+{
+  "mcpServers": {
+    "jarvy": {
+      "command": "jarvy",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### MCP Tools
+
+| Tool | Parameters | Use |
+|------|-----------|-----|
+| `jarvy_list_tools` | `category?`, `platform?`, `search?` | List tools |
+| `jarvy_get_tool` | `name` | Tool detail incl. dependencies |
+| `jarvy_check_tool` | `name` | Is it installed? |
+| `jarvy_check_multiple` | `tools[]` | Bulk check |
+| `jarvy_install_tool` | `name`, `version?`, `dry_run?` | Install (dry_run=true default) |
+
+### MCP Resources
+
+- `jarvy://tools/index` — full tool catalog
+- `jarvy://platform/info` — host info
+- `jarvy://tools/{name}` — per-tool detail
+
+### MCP Prompts
+
+- `setup_dev_environment` — `project_type` arg
+- `diagnose_missing_tools`
+
+### Safety
+
+```toml
+# ~/.jarvy/mcp-config.toml
+[mcp]
+require_confirmation = true
+default_dry_run = true
+
+[rate_limits]
+checks_per_minute = 10
+installs_per_minute = 3
+
+[allowlist]
+tools = ["git", "node", "python"]
+
+# [denylist]
+# tools = ["dangerous-tool"]
+
+[audit]
+enabled = true
+log_path = "~/.jarvy/mcp-audit.log"
+```
+
+### MCP Error Codes
+
+| Code | Meaning |
+|------|---------|
+| -32001 | Tool execution failed |
+| -32002 | Tool not found |
+| -32003 | Installation denied (denylist) |
+| -32004 | Rate limited |
+| -32005 | User declined |
+| -32006 | Sudo required |
+| -32007 | Timeout |
+| -32008 | Missing dependency |
+
+Protocol version targeted: `2024-11-05`.
+
+---
+
+## 6. Tool Dependencies
+
+Two kinds:
+
+- **Strict** (`depends_on`): ALL listed tools required
+- **Flexible** (`depends_on_one_of`): AT LEAST ONE required
+
+Examples:
+
+| Tool | Strict | Flexible |
+|------|--------|----------|
+| lazydocker | docker | – |
+| kind | docker | – |
+| kubectl | – | minikube, kind, k3d, docker, podman |
+| helm | – | kubectl |
+| k9s | – | kubectl |
+| minikube | – | docker, podman |
+| dive | – | docker, podman |
+
+Jarvy topologically sorts tools by dependencies during install. Missing strict deps trigger warnings but don't block.
+
+---
+
+## 7. CI/CD
+
+### GitHub Actions
+
+```yaml
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bearbinary/jarvy/.github/actions/setup-jarvy@main
+        with:
+          method: cargo
+      - run: jarvy setup --ci
+```
+
+`--ci` enables non-interactive mode. Auto-detected providers: GitHub Actions, GitLab CI, CircleCI, Azure DevOps, Jenkins, Bitbucket Pipelines, Travis, Drone, Buildkite, Codefresh, Semaphore (11 total).
+
+### CI Detection
+
+`CI=true` → non-interactive mode. Telemetry and update checks auto-disable in CI unless overridden.
+
+---
+
+## 8. Architecture (For Code-Modifying Agents)
+
+### Module Map
+
+```
+src/main.rs                Entry point (~540 lines)
+src/cli/                   clap definitions
+  args.rs                  Cli, Commands, OutputFormat
+  subcommands.rs           Nested action enums
+src/commands/              One file per top-level command
+src/config.rs              TOML schema + validation
+src/remote.rs              Remote config fetch + cache
+src/roles/                 Role-based config inheritance
+  definition.rs            Types
+  resolver.rs              Inheritance resolver
+  commands.rs              CLI surface
+src/tools/                 Tool registry
+  spec.rs                  ToolSpec + define_tool! macro
+  registry.rs              OnceLock<RwLock<HashMap>>
+  common.rs                Os, InstallError, run/has helpers
+  <name>/<name>.rs         Per-tool definitions
+src/packages/              Language packages
+  npm.rs, pip.rs, cargo_pkg.rs
+src/git/                   Git config automation
+src/network/               Proxy, TLS, env propagation
+src/drift/                 Drift detection
+src/update/                Self-update
+src/logging/               File logging
+src/ticket/                Debug bundles
+src/services/              Docker Compose + Tilt
+src/env/                   Env vars + dotenv
+src/team/                  Shared team configs
+src/lock/                  Tool version locking
+src/mcp/                   MCP server
+src/telemetry.rs           OTEL pipeline
+src/observability/         Telemetry helpers
+src/error_codes.rs         Exit code constants
+build.rs                   Generates tool index JSON
+```
+
+### Tool Definition (`define_tool!`)
+
+```rust
+use crate::define_tool;
+
+define_tool!(JQ, {
+    command: "jq",
+    macos: { brew: "jq" },
+    linux: { uniform: "jq" },
+    windows: { winget: "jqlang.jq" },
+});
+```
+
+Variants:
+
+- `macos: { brew: "pkg" }` — Homebrew formula
+- `macos: { cask: "pkg" }` — Homebrew cask (GUI apps)
+- `linux: { uniform: "pkg" }` — Same name across distros
+- `linux: { apt: "x", dnf: "y", pacman: "z", apk: "w" }` — Per-manager
+- `windows: { winget: "Pub.Pkg" }` — Winget package ID
+- `custom_install: Some(fn_name)` — For shell-script installs (nvm, rustup)
+- `default_hook: { description: "...", script: "..." }` — Auto post-install hook
+- `depends_on: &["tool1", "tool2"]` — Strict deps
+- `depends_on_one_of: &["tool1", "tool2"]` — Flexible deps
+
+### Setup Flow
+
+1. Parse args (clap)
+2. Init telemetry (OTEL)
+3. Load config + resolve `extends`
+4. Apply role inheritance
+5. Build install plan, topologically sort by deps
+6. Pre-setup hook
+7. Parallel tool install (rayon, default 4 jobs)
+8. Per-tool post_install hooks
+9. Default hooks (tool-defined)
+10. Language packages (npm/pip/cargo)
+11. Git config
+12. Env vars + dotenv
+13. Services start
+14. Post-setup hook
+15. Drift baseline write
+
+### Test Env Vars
+
+- `JARVY_TEST_MODE=1` — disable interactive prompts
+- `JARVY_FAST_TEST=1` — skip external command execution
+
+### Verification Before Commit
+
+```bash
+cargo fmt --all
+cargo clippy --all-features -- -D warnings
+cargo check --verbose
+cargo test --verbose -- --show-output
+```
+
+CI gates: clippy `correctness=deny`, suspicious/perf/style/complexity `warn`. Edition 2024, rustc ≥ 1.85.
+
+### Conventional Commits
+
+`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`.
+
+---
+
+## 9. Telemetry
+
+OpenTelemetry (OTLP) — logs, metrics, optional traces. Opt-in. Auto-disabled in CI unless `JARVY_TELEMETRY=1`.
+
+Metrics emitted:
+- `jarvy.command.count` (counter)
+- `jarvy.tool.install.duration` (histogram)
+- `jarvy.tool.install.count` (counter)
+- `jarvy.setup.duration` (histogram)
+- `jarvy.config.tool_count` (gauge)
+
+No secrets, no file paths, no hostnames sent. Stable per-machine ID via `machineid-rs`.
+
+---
+
+## 10. Files and Locations
+
+| Path | Purpose |
+|------|---------|
+| `jarvy.toml` | Project config (committed) |
+| `.jarvy/state.json` | Drift baseline (commit or gitignore based on team policy) |
+| `~/.jarvy/config.toml` | Global Jarvy config (telemetry, update channel) |
+| `~/.jarvy/logs/jarvy.log` | Persistent logs |
+| `~/.jarvy/tickets/` | Debug bundles |
+| `~/.jarvy/backups/` | Pre-update binary backups |
+| `~/.jarvy/mcp-config.toml` | MCP server config |
+| `~/.jarvy/mcp-audit.log` | MCP operation audit log |
+
+---
+
+## 11. Common Patterns
+
+### Team config with role separation
+
+```toml
+role = "frontend"
+
+[provisioner]
+git = "latest"
+docker = "latest"
+
+[roles.base]
+tools = ["git", "docker"]
+
+[roles.frontend]
+extends = "base"
+tools = ["node", "bun", "typescript"]
+
+[roles.backend]
+extends = "base"
+tools = ["go", "python", "kubectl"]
+```
+
+### Personal info kept out of shared config
+
+```toml
+[git]
+user_name = "Jane Doe"
+user_email = { env = "GIT_EMAIL" }
+```
+
+### Project bootstrap
+
+```toml
+[provisioner]
+node = "20"
+python = "3.12"
+
+[npm]
+typescript = "^5.0"
+eslint = "latest"
+
+[pip]
+pytest = ">=7.0"
+black = "latest"
+venv = ".venv"
+
+[hooks.node]
+post_install = "corepack enable"
+```
+
+### CI gate against drift
+
+```yaml
+- run: jarvy setup --ci
+- run: jarvy drift check --format json
+```
+
+### Behind a corporate proxy
+
+```toml
+[network]
+https_proxy = "http://proxy.corp.com:8080"
+no_proxy = ["localhost", ".corp.com"]
+
+[network.tls]
+ca_bundle = "/etc/ssl/certs/corporate-ca.crt"
+```
+
+---
+
+## 12. Anti-Patterns
+
+- Putting secrets in `jarvy.toml` (use `{ env = "VAR" }`)
+- Pinning every tool to `"latest"` (pin majors at minimum)
+- Bypassing roles with multiple `jarvy.toml` files (model with `[roles.X]`)
+- Redefining tools that exist (run `jarvy search` first)
+- Scraping human-readable CLI output (use `--format json`)
+- Disabling MCP rate limits (they prevent agent runaway loops)
+
+---
+
+## 13. Links
 
 - Website: https://jarvy.dev
 - Documentation: https://docs.jarvy.dev
 - Repository: https://github.com/bearbinary/jarvy
 - Issues: https://github.com/bearbinary/jarvy/issues
+- llms.txt (concise): https://github.com/bearbinary/jarvy/blob/main/llms.txt
+- Privacy: https://github.com/bearbinary/jarvy/blob/main/PRIVACY.md
+- License: MIT OR Apache-2.0

@@ -22,9 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Entry headers must match the awk pattern: `## [vX.Y.Z]` or
   `## [vX.Y.Z] — Title` (em-dash optional). Other shapes won't be matched.
 
-See [`docs/release-testing.md`](docs/release-testing.md) for the full release
-process and [`docs/release-quirks-jarvy.md`](docs/release-quirks-jarvy.md) for
-divergences from generic release skills.
+See [`docs/release-testing.md`](https://github.com/bearbinary/jarvy/blob/main/docs/release-testing.md)
+for the full release process and
+[`docs/release-quirks-jarvy.md`](https://github.com/bearbinary/jarvy/blob/main/docs/release-quirks-jarvy.md)
+for divergences from generic release skills.
 
 ## [Unreleased]
 

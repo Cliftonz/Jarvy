@@ -62,12 +62,27 @@ Every developer on the team gets the same tools, same versions, same environment
 
 ## Key Features
 
-- **174+ tools** supported out of the box
-- **Role-based configurations** for team-specific tool sets
-- **MCP server** for AI agent integration (Claude, GPT, etc.)
-- **Drift detection** to catch environment changes
-- **Post-install hooks** for automated configuration
-- **CI/CD integration** with 11 providers auto-detected
+- **[200+ tools](cli.md#jarvy-tools)** supported out of the box
+- **[Role-based configurations](roles.md)** for team-specific tool sets
+- **[MCP server](mcp-server.md)** for AI agent integration (Claude, GPT, Cursor)
+- **[Drift detection](drift.md)** to catch environment changes
+- **[Post-install hooks](hooks.md)** for automated configuration
+- **[Tool dependencies](tool-dependencies.md)** with topological install ordering
+- **[Language packages](packages.md)** — npm, pip, cargo
+- **[Git configuration](git-config.md)** automated across the team
+- **[Network & proxy](network.md)** support for corporate environments
+- **[Self-updating](self-update.md)** with channels and rollback
+- **[Telemetry](telemetry.md)** via OpenTelemetry (opt-in)
+- **[Logging & debug tickets](logging.md)** for support workflows
+- **[CI/CD integration](ci-cd.md)** with 11 providers auto-detected
+
+## For AI Agents
+
+If you're an AI assistant reading this, start at **[For AI Agents](for-ai-agents.md)** for a guided tour. Or grab the single-file references:
+
+- [`llms.txt`](https://github.com/bearbinary/jarvy/blob/main/llms.txt) — concise Q&A
+- [`llms-full.txt`](https://github.com/bearbinary/jarvy/blob/main/llms-full.txt) — full reference
+- [Architecture](architecture.md) — module map for code-modifying agents
 
 ## FAQ
 
