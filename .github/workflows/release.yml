@@ -495,17 +495,84 @@ jobs:
           echo "--- Release notes ---"
           cat RELEASE_NOTES.md
 
-      - name: Release to GitHub
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true
-          prerelease: ${{ steps.detect_prerelease.outputs.is_prerelease }}
-          tag_name: ${{ env.VERSION }}
-          body_path: RELEASE_NOTES.md
-          files: |
-            artifacts/**/jarvy*
-            sbom/sbom.*
-            signatures/**/*.sig
-            signatures/**/*.pem
-            signatures/**/*.bundle
-            SHA256SUMS.txt
+      # Two-step release: create the draft release shell first, then
+      # upload assets serially. The previous single-step
+      # softprops/action-gh-release@v2 invocation hit a recurring
+      # parallel-upload race where one of N concurrent worker uploads
+      # would fail with "Validation Failed: size must be greater than
+      # or equal to 1" and the action's overall exit code became 1
+      # even though most assets uploaded. This dropped 7-13 sig
+      # variants per release across rc.1, rc.3, and rc.5. Serial
+      # upload eliminates the race; per-file retry handles transient
+      # GitHub API blips. Tradeoff: ~50 files × ~1s/upload = ~1 min
+      # of upload time vs the parallel ~10s, in exchange for a
+      # complete release.
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          PRERELEASE_FLAG=""
+          if [ "${{ steps.detect_prerelease.outputs.is_prerelease }}" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          # If the release already exists from a previous failed run,
+          # delete it so we start clean. (verify_tag would have caught
+          # a fully-published release; a draft is still allowed here.)
+          if gh release view "${VERSION}" >/dev/null 2>&1; then
+            echo "Release ${VERSION} already exists (likely a draft from a previous failed upload); deleting before recreating."
+            gh release delete "${VERSION}" --yes --cleanup-tag=false
+          fi
+          gh release create "${VERSION}" \
+            --draft \
+            $PRERELEASE_FLAG \
+            --notes-file RELEASE_NOTES.md \
+            --title "${VERSION}"
+
+      - name: Upload assets serially with retry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+
+          upload_one() {
+            local file="$1"
+            local attempts=3
+            local i=0
+            while [ "$i" -lt "$attempts" ]; do
+              if gh release upload "${VERSION}" "$file" --clobber; then
+                echo "✅ uploaded $file"
+                return 0
+              fi
+              i=$((i + 1))
+              echo "⚠️  upload of $file failed (attempt $i/$attempts); retrying in 3s..."
+              sleep 3
+            done
+            echo "::error::Failed to upload $file after $attempts attempts"
+            return 1
+          }
+
+          # Collect every file we want shipped, then upload one at a time.
+          # Globstar handles `artifacts/**/jarvy*`; the loop dedupes by
+          # checking it's a regular non-empty file.
+          declare -a files
+          for f in artifacts/**/jarvy*; do
+            [ -f "$f" ] && [ -s "$f" ] && files+=("$f")
+          done
+          for f in sbom/sbom.*; do
+            [ -f "$f" ] && [ -s "$f" ] && files+=("$f")
+          done
+          for f in signatures/**/*.sig signatures/**/*.pem signatures/**/*.bundle; do
+            [ -f "$f" ] && [ -s "$f" ] && files+=("$f")
+          done
+          if [ -f SHA256SUMS.txt ] && [ -s SHA256SUMS.txt ]; then
+            files+=(SHA256SUMS.txt)
+          fi
+
+          echo "Uploading ${#files[@]} assets to ${VERSION}..."
+          for f in "${files[@]}"; do
+            upload_one "$f"
+          done
+          echo "All ${#files[@]} assets uploaded successfully."
