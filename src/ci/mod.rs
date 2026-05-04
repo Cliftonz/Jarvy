@@ -342,7 +342,11 @@ mod tests {
     where
         F: FnOnce() -> R,
     {
-        let _lock = ENV_LOCK.lock().unwrap();
+        // Recover from poisoned mutex: a previous test's panic shouldn't
+        // cascade-fail every other test that needs the env-isolation lock.
+        // The data inside is only ever a unit guard, so taking the
+        // poisoned guard back is safe.
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         // Save original values and set new ones
         // SAFETY: Tests run single-threaded with ENV_LOCK mutex
@@ -373,7 +377,11 @@ mod tests {
     where
         F: FnOnce() -> R,
     {
-        let _lock = ENV_LOCK.lock().unwrap();
+        // Recover from poisoned mutex: a previous test's panic shouldn't
+        // cascade-fail every other test that needs the env-isolation lock.
+        // The data inside is only ever a unit guard, so taking the
+        // poisoned guard back is safe.
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         // Save original values and clear them
         // SAFETY: Tests run single-threaded with ENV_LOCK mutex
