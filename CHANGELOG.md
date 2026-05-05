@@ -29,7 +29,12 @@ for divergences from generic release skills.
 
 ## [Unreleased]
 
-Initial public release. Everything below ships in `v0.1.0`.
+## [v0.0.1] — Initial public release (2026-05-05)
+
+First publicly tagged stable release. Validated through the
+v0.1.0-rc.1 → v0.1.0-rc.9 soak cycle (same tree, version-string
+only differs); cut as 0.0.1 to keep the first-stable surface narrow
+and reserve room for 0.1.0 as the first feature-complete milestone.
 
 ### Features
 
@@ -105,4 +110,5 @@ Initial public release. Everything below ships in `v0.1.0`.
 - Cross-platform shell detection and hook execution
 - Workspace lint configuration; Rust 2024 edition; MSRV 1.85
 
-[Unreleased]: https://github.com/bearbinary/jarvy/compare/HEAD
+[Unreleased]: https://github.com/bearbinary/jarvy/compare/v0.0.1...HEAD
+[v0.0.1]: https://github.com/bearbinary/jarvy/releases/tag/v0.0.1
