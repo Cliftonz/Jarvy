@@ -343,7 +343,7 @@ to channels that don't auto-update from the GitHub release:
 | Channel | Process | Auto / Manual |
 |---|---|---|
 | GitHub release | Triggered by tag push | Auto |
-| crates.io | `cargo publish` (CI workflow `crates.yml`) | Auto |
+| crates.io | `cargo publish` (CI workflow `publish-packages.yml::publish-crates-io`) | Auto |
 | Homebrew tap | CI updates `bearbinary/homebrew-tap` formula | Auto |
 | `.deb`, `.rpm`, `.msi`, `.dmg`, `.AppImage` | Built and attached to the release | Auto |
 | AUR (`jarvy-bin`) | Update `PKGBUILD-bin` checksums, `makepkg --printsrcinfo`, push to `ssh://aur@aur.archlinux.org/jarvy-bin.git` | Manual |

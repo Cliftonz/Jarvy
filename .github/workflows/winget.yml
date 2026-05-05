@@ -1,9 +1,25 @@
 name: Publish to WinGet
 
 on:
-  release:
-    types: [published]
+  # workflow_dispatch ONLY. winget-releaser pushes a PR to update an
+  # *existing* manifest; it cannot create a brand-new package
+  # registration in microsoft/winget-pkgs. First-time submission for
+  # Jarvy requires a manual `wingetcreate new --urls <msi-url>` followed
+  # by a hand-reviewed PR. Once that's merged and the package
+  # `Jarvy.Jarvy` exists in winget-pkgs, change the trigger back to
+  # `release: published` so subsequent versions auto-update via this
+  # workflow.
+  #
+  # Previously this workflow was triggered on `release: published` AND
+  # was scaffolded with the wrong identifier (`Benji377.Tooka`) and
+  # fork-user (`Benji377`) from a template that was never customized
+  # for Jarvy. Every release fired the action and it failed with
+  # "Package Jarvy.Jarvy does not exist".
   workflow_dispatch:
+    inputs:
+      release-tag:
+        description: 'Release tag to publish (e.g. v0.0.3)'
+        required: true
 
 permissions:
   contents: read
@@ -12,20 +28,18 @@ jobs:
   publish:
     runs-on: windows-latest
     steps:
-      # Only fetch the latest tag when run manually
-      - name: Get latest release tag name
-        if: github.event_name == 'workflow_dispatch'
-        id: get-latest-release
-        run: |
-          "tag=$((gh api repos/${{ github.repository }}/releases/latest | ConvertFrom-Json).tag_name)" >> $env:GITHUB_OUTPUT
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - uses: vedantmgoyal9/winget-releaser@main
         with:
-          identifier: Benji377.Tooka
-          fork-user: Benji377
+          # TODO: replace with the actual published winget identifier
+          # once the package is registered. Convention is
+          # Publisher.Package; for Jarvy the conventional value is
+          # Jarvy.Jarvy. Update if the publisher namespace ends up
+          # being `BearBinary` or similar.
+          identifier: Jarvy.Jarvy
+          # TODO: replace with the GitHub user/org that holds the fork
+          # of microsoft/winget-pkgs. Likely `bearbinary` once the
+          # fork exists.
+          fork-user: bearbinary
           installers-regex: '\.msi$'
           token: ${{ secrets.WINGETCREATE_TOKEN }}
-          release-tag: ${{ github.event.release.tag_name || steps.get-latest-release.outputs.tag }}
+          release-tag: ${{ inputs.release-tag }}

@@ -29,6 +29,54 @@ for divergences from generic release skills.
 
 ## [Unreleased]
 
+## [v0.0.3] — Unblock crates.io and Homebrew downstream publish (2026-05-05)
+
+Patch release. v0.0.2 went live on the GitHub release page but the
+crates.io and Homebrew workflows that fire on `release: published`
+both failed, leaving `cargo install jarvy` and
+`brew install bearbinary/tap/jarvy` unavailable.
+
+### Fixed
+
+- **Cargo.toml** declared `readme = "README.md"` (uppercase) but the
+  tracked file is `Readme.md` (mixed case). On macOS the difference
+  is invisible (case-insensitive filesystem); on the Linux CI runner
+  it failed `cargo publish` with `readme "README.md" does not appear
+  to exist`. Both `Publish Crate` and `Publish to Package Managers`
+  workflows hit the same error. Same fix in the `include = [...]`
+  manifest list. Now matches what's actually in the git tree.
+- **`.github/workflows/winget.yml`** was scaffolded from a different
+  project's template and never customized — `identifier: Benji377.Tooka`
+  and `fork-user: Benji377` referenced a totally unrelated package.
+  Rewrote with placeholder TODO values for `Jarvy.Jarvy` /
+  `bearbinary` and changed the trigger from `release: published` to
+  `workflow_dispatch` only. winget-releaser cannot create a brand-new
+  package registration; the first submission must go through
+  `wingetcreate new` and a hand-reviewed PR to microsoft/winget-pkgs.
+  After that's merged the trigger can be flipped back.
+
+### Removed
+
+- Duplicate `.github/workflows/crates.yml` deleted. Both that and
+  `publish-packages.yml::publish-crates-io` were firing on
+  `release: published` and trying to `cargo publish`. Even if both
+  had the right secret, the second one would race-fail with "crate
+  version already exists". Kept the version inside `publish-packages.yml`
+  because it composes with the Homebrew tap update via `needs:`.
+- `docs/release-testing.md` and `docs/release-quirks-jarvy.md`
+  references to `crates.yml` updated to point at the surviving
+  workflow path.
+
+### Known issues (not fixed in this release)
+
+- **GitHub Pages** is not enabled for `bearbinary/Jarvy` repo — the
+  Deploy Docs workflow fails with `HttpError: Not Found ... Ensure
+  GitHub Pages has been enabled`. Fix is in repo Settings → Pages,
+  not in code. Until enabled, the docs site at jarvy.dev (or
+  whichever Pages URL ends up provisioned) won't update on release.
+- **winget first submission** still requires manual `wingetcreate new`
+  intervention (see Fixed above for the workflow disable).
+
 ## [v0.0.2] — Cosign verify-command case fix (2026-05-05)
 
 Patch release fixing the cosign verification snippet baked into
@@ -129,6 +177,7 @@ and reserve room for 0.1.0 as the first feature-complete milestone.
 - Cross-platform shell detection and hook execution
 - Workspace lint configuration; Rust 2024 edition; MSRV 1.85
 
-[Unreleased]: https://github.com/bearbinary/jarvy/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/bearbinary/jarvy/compare/v0.0.3...HEAD
+[v0.0.3]: https://github.com/bearbinary/jarvy/releases/tag/v0.0.3
 [v0.0.2]: https://github.com/bearbinary/jarvy/releases/tag/v0.0.2
 [v0.0.1]: https://github.com/bearbinary/jarvy/releases/tag/v0.0.1

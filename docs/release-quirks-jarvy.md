@@ -128,7 +128,7 @@ Summary:
 | Channel | Auto / Manual |
 |---|---|
 | GitHub release | Auto (CI) |
-| crates.io | Auto (`crates.yml` workflow) |
+| crates.io | Auto (`publish-packages.yml::publish-crates-io` job) |
 | Homebrew tap | Auto (CI PR to `bearbinary/homebrew-tap`) |
 | `.deb`, `.rpm`, `.msi`, `.dmg`, `.AppImage` | Auto (release.yml asset) |
 | AUR (`jarvy-bin` and `jarvy`) | Manual |
