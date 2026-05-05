@@ -29,6 +29,60 @@ for divergences from generic release skills.
 
 ## [Unreleased]
 
+## [v0.0.5] — Chocolatey install script + bundled v0.0.4 fixes (2026-05-05)
+
+Folds in everything queued for v0.0.4 (which was tagged but never
+publicly published) plus a Chocolatey install-script fix.
+
+### Fixed
+
+- **Chocolatey package** v0.0.3 failed moderation with `404 Not Found`
+  for the install URL. Two bugs in
+  `dist/windows/chocolatey/tools/chocolateyinstall.ps1`:
+  - URL pattern referenced
+    `jarvy-vVERSION_PLACEHOLDER-x86_64-pc-windows-msvc.zip` — but
+    cargo-packager produces `.msi` and `.exe`, no `.zip` for Windows.
+  - VERSION_PLACEHOLDER and SHA256_PLACEHOLDER were never substituted
+    because the publish workflow only ran sed against `jarvy.nuspec`,
+    not the install script.
+
+  Rewrote the install script to use `Install-ChocolateyPackage` with
+  `-FileType msi` and silent install args, pointing at the actual
+  `jarvy_<v>_x64_en-US.msi` asset. Updated
+  `publish-packages.yml::update-chocolatey` to substitute both files
+  AND pull the real msi SHA256 from `SHA256SUMS.txt` so the integrity
+  check passes.
+- **`cargo fmt --check`** drift in `src/team/inheritance.rs:760-768`
+  (single-quoted TOML literals from v0.0.3 needed compaction).
+- **OpenSSF Scorecard** failed on v0.0.3 tag with `Only the default
+  branch main is supported`. ossf/scorecard-action explicitly refuses
+  tag-push triggers. Restored `push: branches: [main]` for scorecard
+  only — every other validating workflow stays tag-triggered.
+- **Homebrew tap publish** now gracefully skips when
+  `HOMEBREW_TAP_DEPLOY_KEY` is not configured. Previously the missing
+  secret failed the whole `publish-packages.yml` workflow, masking
+  the success of crates.io, AUR, winget, and Chocolatey jobs.
+
+### Validated downstream (v0.0.3)
+
+After the v0.0.3 fixes, the following propagation channels worked:
+
+- ✅ crates.io: jarvy@0.0.3 + cargo-jarvy@0.0.3 published
+- ✅ AUR (jarvy-bin)
+- ✅ Submit to winget (publish-packages.yml job; separate winget.yml
+  still needs manual first submission)
+- ✅ GitHub Pages docs site (after maintainer enabled Pages)
+- ❌ Chocolatey: failed moderation due to broken install script
+  (v0.0.5 fixes)
+- ⚠️  Homebrew tap: pending secret config (now non-blocking)
+
+### Note
+
+v0.0.4 was tagged but the draft was never publicly published —
+v0.0.4's fixes ship together with the Chocolatey fix as v0.0.5 to
+reduce propagation churn (one round of crates.io / AUR / etc.
+updates instead of two back-to-back).
+
 ## [v0.0.4] — Lint formatting + scorecard + homebrew-tap guard (2026-05-05)
 
 ### Fixed
@@ -216,7 +270,8 @@ and reserve room for 0.1.0 as the first feature-complete milestone.
 - Cross-platform shell detection and hook execution
 - Workspace lint configuration; Rust 2024 edition; MSRV 1.85
 
-[Unreleased]: https://github.com/bearbinary/jarvy/compare/v0.0.4...HEAD
+[Unreleased]: https://github.com/bearbinary/jarvy/compare/v0.0.5...HEAD
+[v0.0.5]: https://github.com/bearbinary/jarvy/releases/tag/v0.0.5
 [v0.0.4]: https://github.com/bearbinary/jarvy/releases/tag/v0.0.4
 [v0.0.3]: https://github.com/bearbinary/jarvy/releases/tag/v0.0.3
 [v0.0.2]: https://github.com/bearbinary/jarvy/releases/tag/v0.0.2

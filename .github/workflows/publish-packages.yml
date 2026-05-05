@@ -175,11 +175,44 @@ jobs:
           VERSION="${VERSION#v}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Update nuspec
+      - name: Update nuspec + install script (substitute placeholders)
+        # The Chocolatey package ships TWO templated files:
+        #   - jarvy.nuspec: VERSION_PLACEHOLDER (the package version)
+        #   - tools/chocolateyinstall.ps1: VERSION_PLACEHOLDER (URL path)
+        #     plus SHA256_PLACEHOLDER (msi integrity check)
+        # The previous version of this step substituted only the
+        # nuspec, leaving chocolateyinstall.ps1 with literal
+        # VERSION_PLACEHOLDER tokens. Chocolatey's auto-verifier then
+        # fetched a 404 URL and failed moderation. Substitute both
+        # files, and fetch the real .msi SHA256 from SHA256SUMS.txt
+        # so the install integrity check passes.
         shell: bash
         run: |
+          set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
-          sed -i "s/VERSION_PLACEHOLDER/$VERSION/g" dist/windows/chocolatey/jarvy.nuspec
+          NUSPEC=dist/windows/chocolatey/jarvy.nuspec
+          INSTALL=dist/windows/chocolatey/tools/chocolateyinstall.ps1
+
+          sed -i "s/VERSION_PLACEHOLDER/$VERSION/g" "$NUSPEC"
+          sed -i "s/VERSION_PLACEHOLDER/$VERSION/g" "$INSTALL"
+
+          # Pull the .msi SHA256 from the published checksums file.
+          # Asset name pattern set by cargo-packager: jarvy_<v>_x64_en-US.msi
+          curl -fsSL \
+            "https://github.com/bearbinary/Jarvy/releases/download/v${VERSION}/SHA256SUMS.txt" \
+            -o /tmp/sha256sums.txt
+          MSI_SHA=$(awk -v p="jarvy_${VERSION}_x64_en-US.msi" \
+            '$2 ~ p { print $1; exit }' /tmp/sha256sums.txt)
+          if [ -z "$MSI_SHA" ]; then
+            echo "::error::Could not find SHA256 for jarvy_${VERSION}_x64_en-US.msi in SHA256SUMS.txt"
+            cat /tmp/sha256sums.txt
+            exit 1
+          fi
+          # Convert to uppercase to match Chocolatey convention.
+          MSI_SHA_UPPER=$(echo "$MSI_SHA" | tr 'a-z' 'A-Z')
+          sed -i "s/SHA256_PLACEHOLDER/$MSI_SHA_UPPER/g" "$INSTALL"
+
+          echo "Substituted version=$VERSION sha256=$MSI_SHA_UPPER into both files."
 
       - name: Pack and push to Chocolatey
         shell: powershell
