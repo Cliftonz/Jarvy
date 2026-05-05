@@ -65,27 +65,11 @@ jobs:
           path: results.sarif
           retention-days: 30
 
-      # Generate summary for workflow run
-      - name: Generate Scorecard summary
-        run: |
-          echo "## OpenSSF Scorecard Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "View detailed results at: https://securityscorecards.dev/viewer/?uri=github.com/${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Target Score: 8.0+" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Key checks evaluated:" >> $GITHUB_STEP_SUMMARY
-          echo "- Binary-Artifacts: No checked-in binaries" >> $GITHUB_STEP_SUMMARY
-          echo "- Branch-Protection: Require reviews, status checks" >> $GITHUB_STEP_SUMMARY
-          echo "- CI-Tests: Tests run on PRs" >> $GITHUB_STEP_SUMMARY
-          echo "- Code-Review: All changes reviewed" >> $GITHUB_STEP_SUMMARY
-          echo "- Dangerous-Workflow: No dangerous patterns" >> $GITHUB_STEP_SUMMARY
-          echo "- Dependency-Update-Tool: Dependabot enabled" >> $GITHUB_STEP_SUMMARY
-          echo "- License: License file present" >> $GITHUB_STEP_SUMMARY
-          echo "- Maintained: Recent commits" >> $GITHUB_STEP_SUMMARY
-          echo "- Pinned-Dependencies: Pinned GitHub Actions" >> $GITHUB_STEP_SUMMARY
-          echo "- SAST: Static analysis enabled" >> $GITHUB_STEP_SUMMARY
-          echo "- Security-Policy: SECURITY.md present" >> $GITHUB_STEP_SUMMARY
-          echo "- Signed-Releases: Releases signed" >> $GITHUB_STEP_SUMMARY
-          echo "- Token-Permissions: Minimal token permissions" >> $GITHUB_STEP_SUMMARY
-          echo "- Vulnerabilities: No known vulns" >> $GITHUB_STEP_SUMMARY
+      # NOTE: do NOT add `run:` steps to this job. ossf/scorecard-action's
+      # webapp publishing rejects any job containing a non-`uses:` step
+      # with the misleading error "scorecard job must only have steps with
+      # `uses`, see [...]workflow-restrictions". A previous "Generate
+      # Scorecard summary" step that wrote markdown via echo to
+      # $GITHUB_STEP_SUMMARY caused every push to fail with that error.
+      # If a summary is needed, put it in a SEPARATE job that depends on
+      # this one (`needs: analysis`); the restriction is per-job.
