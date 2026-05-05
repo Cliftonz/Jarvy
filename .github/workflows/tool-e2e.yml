@@ -1,8 +1,18 @@
 name: Tools E2E
 
 on:
-  push:
+  # Tools E2E exercises the full multi-OS install matrix; running on
+  # every push to every branch was burning ~13 min × N pushes/day.
+  # Restrict to PR validation (pre-merge gate) and release tags
+  # (post-merge integration check). workflow_dispatch covers ad-hoc
+  # validation when working on the tools registry.
   pull_request:
+    branches: [main]
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+  workflow_dispatch:
 
 permissions:
   contents: read

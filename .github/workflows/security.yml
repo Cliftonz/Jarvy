@@ -2,17 +2,23 @@
 # Implements PRD-020: Security Scanning Infrastructure
 #
 # Runs on:
-# - Every push to main
-# - Every pull request to main
-# - Daily schedule at 6 AM UTC (catch new CVEs)
+# - Every pull request to main (pre-merge gate)
+# - Every release tag (post-merge integration check)
+# - Daily schedule at 6 AM UTC (catch new CVEs even on quiet days)
+# - Manual dispatch
+#
+# push-to-main trigger was removed because every PR is already
+# validated and the merge commit matches a validated PR head.
 
 name: Security
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
   schedule:
     - cron: '0 6 * * *'  # Daily at 6 AM UTC
   workflow_dispatch:

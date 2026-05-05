@@ -1,10 +1,18 @@
 name: Test
 
 on:
-  push:
-    branches: [ "main" ]
+  # Validation runs on PRs (pre-merge gate) and on release tags
+  # (post-merge integration check). The push-to-main trigger was
+  # removed because every PR is already validated and the merge
+  # commit is identical to the validated PR head — re-running the
+  # same suite on the merge duplicates effort. Tag push covers the
+  # integrated state when a release is cut.
   pull_request:
     branches: [ "main" ]
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
   workflow_dispatch:
 
 permissions:

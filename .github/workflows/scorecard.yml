@@ -11,11 +11,18 @@
 name: OpenSSF Scorecard
 
 on:
+  # Scorecard publishes a security-posture score that's most useful
+  # when keyed to released artifacts. push-to-main was removed because
+  # the merge commit matches a validated PR head and weekly cron +
+  # release tag are sufficient touchpoints. branch_protection_rule
+  # event still fires when repo policy changes.
   branch_protection_rule:
   schedule:
     - cron: '0 0 * * 1'  # Weekly on Monday at midnight UTC
   push:
-    branches: [main]
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
   workflow_dispatch:
 
 permissions: read-all

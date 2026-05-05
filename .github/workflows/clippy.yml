@@ -1,13 +1,19 @@
 name: Rust-Clippy-Analyzer
 
 on:
-  push:
-    branches: [ "main" ]
+  # PRs gate clippy pre-merge; release tags re-validate at integration
+  # time. push-to-main was removed because the merge commit already
+  # matches a validated PR head. Weekly schedule catches new clippy
+  # lints introduced by Rust toolchain updates.
   pull_request:
-    # The branches below must be a subset of the branches above
     branches: [ "main" ]
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
   schedule:
     - cron: '17 20 * * 0'
+  workflow_dispatch:
 
 jobs:
   rust-clippy-analyze:

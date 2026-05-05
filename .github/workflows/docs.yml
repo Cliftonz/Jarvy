@@ -1,12 +1,17 @@
 name: Deploy Docs
 
 on:
+  # Deploy on release tags so the published site always reflects a
+  # tagged version. push-to-main with path-filter was removed because
+  # docs landing on main between releases now wait until the next
+  # release to publish — acceptable since docs are versioned with the
+  # binary anyway. workflow_dispatch covers ad-hoc deploys (e.g. for
+  # an out-of-band typo fix).
   push:
-    branches: [main]
-    paths:
-      - "docs/**"
-      - "mkdocs.yml"
-      - "CHANGELOG.md"
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+  workflow_dispatch:
 
 permissions:
   contents: read
