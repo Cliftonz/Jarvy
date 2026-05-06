@@ -7,9 +7,11 @@
     <authors>Jarvy Team</authors>
     <owners>bearbinary</owners>
     <projectUrl>https://github.com/bearbinary/jarvy</projectUrl>
+    <iconUrl>https://cdn.jsdelivr.net/gh/bearbinary/Jarvy@main/assets/CLI_Logo.png</iconUrl>
     <licenseUrl>https://github.com/bearbinary/jarvy/blob/main/LICENSE</licenseUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <projectSourceUrl>https://github.com/bearbinary/jarvy</projectSourceUrl>
+    <packageSourceUrl>https://github.com/bearbinary/jarvy/tree/main/dist/windows/chocolatey</packageSourceUrl>
     <docsUrl>https://github.com/bearbinary/jarvy#readme</docsUrl>
     <bugTrackerUrl>https://github.com/bearbinary/jarvy/issues</bugTrackerUrl>
     <tags>devtools provisioning cli developer-experience setup rust</tags>
