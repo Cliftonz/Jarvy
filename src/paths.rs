@@ -126,10 +126,12 @@ mod tests {
     use super::*;
 
     #[test]
+    #[serial_test::serial(jarvy_home_env)]
     fn jarvy_home_honors_env_override() {
+        // Serialized via #[serial(jarvy_home_env)] so concurrent tests
+        // (e.g., ticket::bundler::tests::test_bundler_new which reads
+        // tickets_dir()) don't observe our temporarily-set JARVY_HOME.
         let prev = std::env::var("JARVY_HOME").ok();
-        // SAFETY: scoped restore via Drop guard pattern is overkill for a
-        // single-threaded test; restore explicitly at the end.
         #[allow(unsafe_code)]
         unsafe {
             std::env::set_var("JARVY_HOME", "/tmp/jarvy-test-override");

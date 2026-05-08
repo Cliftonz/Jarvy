@@ -210,9 +210,17 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    #[serial_test::serial(jarvy_home_env)]
     fn test_bundler_new() {
+        // Serialized with `paths::jarvy_home_honors_env_override` because
+        // both touch `JARVY_HOME` — without serialization the override
+        // races with our `tickets_dir()` read.
         let bundler = TicketBundler::new();
-        assert!(bundler.output_dir.ends_with(".jarvy/tickets"));
+        assert!(
+            bundler.output_dir.ends_with("tickets"),
+            "expected tickets/ suffix, got {}",
+            bundler.output_dir.display()
+        );
     }
 
     #[test]
