@@ -13,26 +13,7 @@ define_tool!(ATUIN, {
     linux: { uniform: "atuin" },
     windows: { winget: "atuinsh.atuin" },
     bsd: { pkg: "atuin" },
-    default_hook: {
-        description: "Add atuin shell initialization to .bashrc and .zshrc",
-        script: r#"
-# Atuin shell integration
-ATUIN_INIT_BASH='eval "$(atuin init bash)"'
-ATUIN_INIT_ZSH='eval "$(atuin init zsh)"'
-
-# Add to .bashrc if not present
-if [ -f "$HOME/.bashrc" ] && ! grep -q 'atuin init bash' "$HOME/.bashrc"; then
-    echo "$ATUIN_INIT_BASH" >> "$HOME/.bashrc"
-    echo "Added atuin init to ~/.bashrc"
-fi
-
-# Add to .zshrc if not present
-if [ -f "$HOME/.zshrc" ] && ! grep -q 'atuin init zsh' "$HOME/.zshrc"; then
-    echo "$ATUIN_INIT_ZSH" >> "$HOME/.zshrc"
-    echo "Added atuin init to ~/.zshrc"
-fi
-"#
-    },
+    default_hook_shell_init: ("atuin", "init"),
 });
 
 #[cfg(test)]

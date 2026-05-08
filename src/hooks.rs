@@ -112,6 +112,17 @@ pub(crate) fn is_allowed_shell(shell: &str) -> bool {
 /// Result type for hook operations
 pub type HookResult<T> = Result<T, HookError>;
 
+/// Outcome of `Hook::run_with_policy`.
+#[derive(Debug, PartialEq, Eq)]
+pub enum HookOutcome {
+    /// Hook ran successfully (or was skipped in dry-run mode).
+    Ok,
+    /// Hook failed but `continue_on_error = true`; caller should log and proceed.
+    Continue,
+    /// Hook failed and `continue_on_error = false`; caller must abort.
+    Fail,
+}
+
 /// Configuration for a single hook execution
 #[derive(Debug, Clone)]
 pub struct HookConfig {
@@ -367,6 +378,39 @@ impl Hook {
             "default_hook".to_string()
         } else {
             "custom".to_string()
+        }
+    }
+
+    /// Run this hook respecting the policy in `self.config` and an optional
+    /// dry-run flag. Returns:
+    /// - `HookOutcome::Ok` on success or skipped dry-run
+    /// - `HookOutcome::Continue` when the hook failed but
+    ///   `continue_on_error = true` — caller logs a warning and proceeds
+    /// - `HookOutcome::Fail` when the hook failed and the caller must abort
+    ///
+    /// Replaces the repeated `match hook.execute() { Err(e) if
+    /// !continue_on_error => return HOOK_FAILED } eprintln!(...)` block
+    /// that appeared 4× in `setup_cmd::run_setup` (maintainability
+    /// review #11).
+    pub fn run_with_policy(&self, dry_run: bool) -> HookOutcome {
+        if dry_run {
+            self.dry_run();
+            return HookOutcome::Ok;
+        }
+        match self.execute() {
+            Ok(_) => HookOutcome::Ok,
+            Err(e) => {
+                if self.config.continue_on_error {
+                    eprintln!(
+                        "Warning: hook `{}` failed but continuing: {e}",
+                        self.description
+                    );
+                    HookOutcome::Continue
+                } else {
+                    eprintln!("Hook `{}` failed: {e}", self.description);
+                    HookOutcome::Fail
+                }
+            }
         }
     }
 

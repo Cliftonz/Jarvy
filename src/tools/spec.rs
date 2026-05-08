@@ -509,6 +509,7 @@ macro_rules! define_tool {
         $(bsd: { $($bsd_key:ident: $bsd_val:expr),* $(,)? },)?
         $(custom_install: $custom:expr,)?
         $(default_hook: { description: $hook_desc:expr, script: $hook_script:expr $(, platform: $hook_platform:expr)? },)?
+        $(default_hook_shell_init: ($shell_tool:literal, $shell_verb:literal),)?
         $(depends_on: $deps:expr,)?
         $(depends_on_one_of: $flex_deps:expr,)?
         $(category: $category:expr,)?
@@ -521,7 +522,12 @@ macro_rules! define_tool {
             windows: define_tool!(@windows $($($windows_key: $windows_val),*)?),
             bsd: define_tool!(@bsd $($($bsd_key: $bsd_val),*)?),
             custom_install: define_tool!(@custom $($custom)?),
-            default_hook: define_tool!(@default_hook $($hook_desc, $hook_script $(, $hook_platform)?)?),
+            default_hook: define_tool!(
+                @resolve_default_hook
+                $($hook_desc, $hook_script $(, $hook_platform)?)?
+                ;
+                $(($shell_tool, $shell_verb))?
+            ),
             depends_on: define_tool!(@depends_on $($deps)?),
             depends_on_one_of: define_tool!(@depends_on_one_of $($flex_deps)?),
             category: define_tool!(@category $($category)?),
@@ -544,6 +550,19 @@ macro_rules! define_tool {
                 handler: add_handler,
             }
         }
+    };
+
+    // Resolve default_hook from EITHER the explicit { description, script }
+    // form OR the shell_init shorthand. Exactly one (or neither) must be set.
+    (@resolve_default_hook ;) => { None };
+    (@resolve_default_hook $desc:expr, $script:expr ;) => {
+        Some($crate::tools::spec::DefaultHook::new($desc, $script))
+    };
+    (@resolve_default_hook $desc:expr, $script:expr, $platform:expr ;) => {
+        Some($crate::tools::spec::DefaultHook::for_platform($desc, $script, $platform))
+    };
+    (@resolve_default_hook ; ($tool:literal, $verb:literal)) => {
+        define_tool!(@shell_init_hook $tool, $verb)
     };
 
     // macOS helpers
@@ -631,6 +650,35 @@ macro_rules! define_tool {
     };
     (@default_hook $desc:expr, $script:expr, $platform:expr) => {
         Some($crate::tools::spec::DefaultHook::for_platform($desc, $script, $platform))
+    };
+
+    // Shell-init shorthand: `default_hook_shell_init: ("starship", "init"),`
+    // expands to the canonical "append eval $(<tool> <verb> <shell>) to
+    // .bashrc / .zshrc if not present" body. Replaces the 33 byte-identical
+    // hand-rolled scripts that previously lived in tool definitions
+    // (maintainability review F-5).
+    //
+    // Both args MUST be string literals so `concat!` can evaluate at compile
+    // time — DefaultHook::script demands `&'static str`.
+    (@shell_init_hook $tool:literal, $verb:literal) => {
+        Some($crate::tools::spec::DefaultHook::new(
+            concat!("Add ", $tool, " shell initialization to .bashrc and .zshrc"),
+            concat!(
+                "\n# ", $tool, " shell integration\n",
+                "INIT_BASH='eval \"$(", $tool, " ", $verb, " bash)\"'\n",
+                "INIT_ZSH='eval \"$(", $tool, " ", $verb, " zsh)\"'\n",
+                "\n",
+                "if [ -f \"$HOME/.bashrc\" ] && ! grep -q '", $tool, " ", $verb, " bash' \"$HOME/.bashrc\"; then\n",
+                "    echo \"$INIT_BASH\" >> \"$HOME/.bashrc\"\n",
+                "    echo \"Added ", $tool, " init to ~/.bashrc\"\n",
+                "fi\n",
+                "\n",
+                "if [ -f \"$HOME/.zshrc\" ] && ! grep -q '", $tool, " ", $verb, " zsh' \"$HOME/.zshrc\"; then\n",
+                "    echo \"$INIT_ZSH\" >> \"$HOME/.zshrc\"\n",
+                "    echo \"Added ", $tool, " init to ~/.zshrc\"\n",
+                "fi\n"
+            ),
+        ))
     };
 
     // Strict dependency helpers

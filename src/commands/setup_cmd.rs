@@ -18,7 +18,7 @@ use crate::env::{
     generate_dotenv, preview_dotenv, preview_shell_rc, update_shell_rc,
 };
 use crate::error_codes;
-use crate::hooks::{Hook, HookConfig, HookEnv};
+use crate::hooks::{Hook, HookConfig, HookEnv, HookOutcome};
 use crate::onboarding::mark_initialized;
 use crate::packages;
 use crate::remote::fetch_remote_config;
@@ -124,24 +124,16 @@ pub fn run_setup(
     // Set the global default for sudo usage based on config
     tools::set_default_use_sudo(config.use_sudo());
 
-    // Execute pre_setup hook if configured
+    // Execute pre_setup hook if configured. Routed through the shared
+    // Hook::run_with_policy helper so the four-line "fail-or-continue"
+    // refrain isn't repeated 4× in this function (maintainability
+    // review #11).
     if !no_hooks {
         if let Some(ref script) = hooks_config.pre_setup {
             let hook = Hook::with_config(script, "pre_setup", hook_settings.clone())
                 .with_env(HookEnv::global());
-            if dry_run {
-                hook.dry_run();
-            } else {
-                match hook.execute() {
-                    Ok(_) => {}
-                    Err(e) => {
-                        if !hook_settings.continue_on_error {
-                            eprintln!("Pre-setup hook failed: {}", e);
-                            return error_codes::HOOK_FAILED;
-                        }
-                        eprintln!("Warning: Pre-setup hook failed: {}", e);
-                    }
-                }
+            if hook.run_with_policy(dry_run) == HookOutcome::Fail {
+                return error_codes::HOOK_FAILED;
             }
         }
     }
@@ -445,36 +437,28 @@ pub fn run_setup(
                         hook_settings.clone(),
                     )
                     .with_env(env);
-                    match hook.execute() {
-                        Ok(_) => {}
-                        Err(e) => {
-                            if !hook_settings.continue_on_error {
-                                eprintln!("Post-install hook for {} failed: {}", tool_name, e);
-                                return error_codes::HOOK_FAILED;
-                            }
-                            eprintln!("Warning: Post-install hook for {} failed: {}", tool_name, e);
-                        }
+                    if hook.run_with_policy(false) == HookOutcome::Fail {
+                        return error_codes::HOOK_FAILED;
                     }
                 } else if let Some(default_hook) = tools::spec::get_tool_default_hook(tool_name) {
-                    // Fall back to tool's built-in default hook
+                    // Fall back to tool's built-in default hook. Default
+                    // hooks are advisory: failures are warnings, not blockers.
                     println!(
                         "Running default hook for {}: {}",
                         tool_name, default_hook.description
                     );
                     let env = HookEnv::for_tool(tool_name, version);
+                    let advisory_settings = HookConfig {
+                        continue_on_error: true,
+                        ..hook_settings.clone()
+                    };
                     let hook = Hook::with_config(
                         default_hook.script,
                         &format!("{} default_hook", tool_name),
-                        hook_settings.clone(),
+                        advisory_settings,
                     )
                     .with_env(env);
-                    match hook.execute() {
-                        Ok(_) => {}
-                        Err(e) => {
-                            // Default hooks are advisory; always continue on error
-                            eprintln!("Warning: Default hook for {} failed: {}", tool_name, e);
-                        }
-                    }
+                    let _ = hook.run_with_policy(false);
                 }
             }
         }
@@ -672,19 +656,8 @@ pub fn run_setup(
         if let Some(ref script) = hooks_config.post_setup {
             let hook = Hook::with_config(script, "post_setup", hook_settings.clone())
                 .with_env(HookEnv::global());
-            if dry_run {
-                hook.dry_run();
-            } else {
-                match hook.execute() {
-                    Ok(_) => {}
-                    Err(e) => {
-                        if !hook_settings.continue_on_error {
-                            eprintln!("Post-setup hook failed: {}", e);
-                            return error_codes::HOOK_FAILED;
-                        }
-                        eprintln!("Warning: Post-setup hook failed: {}", e);
-                    }
-                }
+            if hook.run_with_policy(dry_run) == HookOutcome::Fail {
+                return error_codes::HOOK_FAILED;
             }
         }
     }

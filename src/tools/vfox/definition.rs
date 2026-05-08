@@ -13,26 +13,7 @@ define_tool!(VFOX, {
     linux: { brew: "vfox" },
     windows: { winget: "vfox" },
     bsd: { pkg: "vfox" },
-    default_hook: {
-        description: "Add vfox shell activation to .bashrc and .zshrc",
-        script: r#"
-# vfox shell integration
-VFOX_ACTIVATE_BASH='eval "$(vfox activate bash)"'
-VFOX_ACTIVATE_ZSH='eval "$(vfox activate zsh)"'
-
-# Add to .bashrc if not present
-if [ -f "$HOME/.bashrc" ] && ! grep -q 'vfox activate bash' "$HOME/.bashrc"; then
-    echo "$VFOX_ACTIVATE_BASH" >> "$HOME/.bashrc"
-    echo "Added vfox activation to ~/.bashrc"
-fi
-
-# Add to .zshrc if not present
-if [ -f "$HOME/.zshrc" ] && ! grep -q 'vfox activate zsh' "$HOME/.zshrc"; then
-    echo "$VFOX_ACTIVATE_ZSH" >> "$HOME/.zshrc"
-    echo "Added vfox activation to ~/.zshrc"
-fi
-"#
-    },
+    default_hook_shell_init: ("vfox", "activate"),
 });
 
 #[cfg(test)]

@@ -1036,4 +1036,191 @@ start_in_ci = false
         assert!(auto_with_ci.should_auto_start(false));
         assert!(auto_with_ci.should_auto_start(true));
     }
+
+    // ====================================================================
+    // Deserialization regression tests (parallel-code-review item 8).
+    //
+    // Pin every documented `jarvy.toml` value-shape so a `#[serde(...)]`
+    // annotation rename or a removed default surfaces here, not as a
+    // user reporting "my config stopped parsing." Previously config.rs
+    // had zero unit-level coverage of these shapes.
+    // ====================================================================
+
+    #[derive(Deserialize)]
+    struct EnvWrap {
+        value: EnvValue,
+    }
+
+    fn parse_env(toml_text: &str) -> EnvValue {
+        let w: EnvWrap = toml::from_str(toml_text).expect("parse EnvValue");
+        w.value
+    }
+
+    #[test]
+    fn env_value_simple_string_form() {
+        let v = parse_env(r#"value = "hello""#);
+        assert_eq!(v.value(), "hello");
+        assert!(!v.should_append());
+    }
+
+    #[test]
+    fn env_value_complex_form_append_and_per_tool() {
+        let v = parse_env(
+            r#"
+            [value]
+            value = "/usr/local/bin"
+            description = "extra path"
+            append = true
+            per_tool = false
+            "#,
+        );
+        assert_eq!(v.value(), "/usr/local/bin");
+        assert!(v.should_append());
+        match v {
+            EnvValue::Complex {
+                description,
+                append,
+                per_tool,
+                ..
+            } => {
+                assert_eq!(description.as_deref(), Some("extra path"));
+                assert!(append);
+                assert!(!per_tool);
+            }
+            EnvValue::Simple(_) => panic!("expected Complex variant"),
+        }
+    }
+
+    #[derive(Deserialize)]
+    struct SecretWrap {
+        value: SecretValue,
+    }
+
+    fn parse_secret(toml_text: &str) -> SecretValue {
+        let w: SecretWrap = toml::from_str(toml_text).expect("parse SecretValue");
+        w.value
+    }
+
+    #[test]
+    fn secret_value_simple_string_form() {
+        let v = parse_secret(r#"value = "MY_VAR""#);
+        assert!(matches!(v, SecretValue::Simple(ref s) if s == "MY_VAR"));
+    }
+
+    #[test]
+    fn secret_value_from_file_form() {
+        let v = parse_secret(
+            r#"
+            [value]
+            from_file = "~/.secrets/db.txt"
+            "#,
+        );
+        match v {
+            SecretValue::FromFile { from_file } => {
+                assert_eq!(from_file, "~/.secrets/db.txt");
+            }
+            _ => panic!("expected FromFile variant"),
+        }
+    }
+
+    #[test]
+    fn secret_value_prompt_with_env_default_required_true() {
+        let v = parse_secret(
+            r#"
+            [value]
+            env = "GITHUB_TOKEN"
+            description = "token for private deps"
+            "#,
+        );
+        match v {
+            SecretValue::Prompt {
+                env,
+                required,
+                description,
+            } => {
+                assert_eq!(env.as_deref(), Some("GITHUB_TOKEN"));
+                // `required` defaults to true when omitted (default_true fn).
+                assert!(required);
+                assert_eq!(description.as_deref(), Some("token for private deps"));
+            }
+            _ => panic!("expected Prompt variant"),
+        }
+    }
+
+    #[test]
+    fn secret_value_prompt_explicit_required_false() {
+        let v = parse_secret(
+            r#"
+            [value]
+            env = "OPTIONAL_TOKEN"
+            required = false
+            "#,
+        );
+        match v {
+            SecretValue::Prompt { required, .. } => assert!(!required),
+            _ => panic!("expected Prompt variant"),
+        }
+    }
+
+    #[derive(Deserialize)]
+    struct ToolWrap {
+        tool: ToolConfig,
+    }
+
+    fn parse_tool(toml_text: &str) -> ToolConfig {
+        let w: ToolWrap = toml::from_str(toml_text).expect("parse ToolConfig");
+        w.tool
+    }
+
+    #[test]
+    fn tool_config_simple_string_form_defaults_to_version_manager_on() {
+        let cfg = parse_tool(r#"tool = "20.10.0""#);
+        let (key, tool) = build_tool_entry("node", &cfg);
+        assert_eq!(key, "node");
+        assert_eq!(tool.version, "20.10.0");
+        // Simple form implies version_manager: true (CLAUDE.md contract).
+        assert!(tool.version_manager);
+        assert_eq!(tool.use_sudo, None);
+    }
+
+    #[test]
+    fn tool_config_detailed_form_honors_version_manager_false() {
+        let cfg = parse_tool(
+            r#"
+            [tool]
+            version = "2.40"
+            version_manager = false
+            "#,
+        );
+        let (_key, tool) = build_tool_entry("git", &cfg);
+        assert_eq!(tool.version, "2.40");
+        assert!(!tool.version_manager);
+    }
+
+    #[test]
+    fn tool_config_detailed_form_carries_use_sudo() {
+        let cfg = parse_tool(
+            r#"
+            [tool]
+            version = "1.0"
+            use_sudo = true
+            "#,
+        );
+        let (_, tool) = build_tool_entry("foo", &cfg);
+        assert_eq!(tool.use_sudo, Some(true));
+    }
+
+    #[test]
+    fn tool_config_detailed_omitting_version_manager_defaults_true() {
+        let cfg = parse_tool(
+            r#"
+            [tool]
+            version = "1.0"
+            "#,
+        );
+        let (_, tool) = build_tool_entry("foo", &cfg);
+        // Per build_tool_entry: Detailed form's version_manager
+        // unwraps_or(true).
+        assert!(tool.version_manager);
+    }
 }
