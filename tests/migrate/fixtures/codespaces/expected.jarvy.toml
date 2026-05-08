@@ -1,0 +1,13 @@
+[provisioner]
+node = "20"
+python = "3.12"
+awscli = "latest"
+
+[hooks]
+post_setup = "npm ci"
+
+[env.vars]
+NODE_ENV = "development"
+
+[commands]
+dev = "npm run dev"

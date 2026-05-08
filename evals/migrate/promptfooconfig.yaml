@@ -1,0 +1,290 @@
+description: |
+  Jarvy migration prompts → jarvy.toml correctness eval.
+
+  For each migration source, runs the per-system prompt against a fixture and
+  asserts the output is a valid jarvy.toml that captures the source's intent.
+
+# ---------------------------------------------------------------------------
+# Providers
+# ---------------------------------------------------------------------------
+# Add more providers (gpt-4, gemini-pro, opus) here to compare LLMs side-by-side.
+providers:
+  - id: anthropic:messages:claude-sonnet-4-6
+    label: Claude Sonnet 4.6
+    config:
+      temperature: 0.0
+      max_tokens: 4096
+
+# Top-level prompts list — promptfoo expects this even though every test
+# overrides it with a per-source `prompt:` field below.
+prompts:
+  - file://prompts/codespaces.txt
+  - file://prompts/devpod.txt
+  - file://prompts/gitpod.txt
+  - file://prompts/dev-containers.txt
+  - file://prompts/vagrant.txt
+  - file://prompts/homebrew-bundle.txt
+  - file://prompts/mise.txt
+  - file://prompts/asdf.txt
+  - file://prompts/nix.txt
+
+# ---------------------------------------------------------------------------
+# Default assertions — applied to every test row.
+# ---------------------------------------------------------------------------
+defaultTest:
+  assert:
+    # Output must NOT be wrapped in a markdown code fence; raw TOML only.
+    - type: not-contains
+      value: "```"
+    # Every output must declare a [provisioner] section.
+    - type: contains
+      value: "[provisioner]"
+    # Shell out to `jarvy validate` and require zero errors.
+    - type: python
+      value: file://assertions/validate_jarvy_toml.py
+
+# ---------------------------------------------------------------------------
+# Tests — one per migration source.
+# Each test pairs a prompt with a fixture, then layers source-specific
+# assertions on top of the defaults.
+# ---------------------------------------------------------------------------
+tests:
+  # -------------------------------------------------------------------------
+  - description: "Codespaces — devcontainer.json with features + postCreate"
+    prompt: file://prompts/codespaces.txt
+    vars:
+      input: file://../../tests/migrate/fixtures/codespaces/input.devcontainer.json
+    assert:
+      - type: contains
+        value: 'node = "20"'
+      - type: contains
+        value: 'python = "3.12"'
+      - type: contains
+        value: "awscli"
+      - type: contains
+        value: "post_setup"
+      - type: not-contains
+        value: '"image"'
+      - type: not-contains
+        value: "forwardPorts"
+      - type: not-contains
+        value: "customizations"
+      - type: llm-rubric
+        value: |
+          The output is a valid jarvy.toml that captures the intent of the
+          source GitHub Codespaces devcontainer.json.
+
+          PASS criteria:
+          - All ghcr.io features are translated to [provisioner] entries
+            (node, python, awscli at minimum).
+          - postCreateCommand becomes [hooks] post_setup.
+          - containerEnv becomes [env.vars].
+          - No image, build, forwardPorts, mounts, or customizations.vscode
+            field appears in the output.
+          - The output is raw TOML with no surrounding prose.
+
+  # -------------------------------------------------------------------------
+  - description: "DevPod — devcontainer.json with docker-in-docker"
+    prompt: file://prompts/devpod.txt
+    vars:
+      input: file://../../tests/migrate/fixtures/devpod/input.devcontainer.json
+    assert:
+      - type: contains
+        value: 'node = "20"'
+      - type: contains
+        value: 'python = "3.12"'
+      - type: contains
+        value: "docker"
+      - type: contains
+        value: "PYTHONUNBUFFERED"
+      - type: not-contains
+        value: "docker-in-docker"
+      - type: not-contains
+        value: '"image"'
+      - type: llm-rubric
+        value: |
+          PASS if the output:
+          - Replaces docker-in-docker with docker = "latest" (host docker).
+          - Translates features → [provisioner].
+          - Captures both NODE_ENV and PYTHONUNBUFFERED in [env.vars].
+          - postCreateCommand becomes [hooks] post_setup.
+
+  # -------------------------------------------------------------------------
+  - description: "Gitpod — .gitpod.yml with tasks + ports"
+    prompt: file://prompts/gitpod.txt
+    vars:
+      input: file://../../tests/migrate/fixtures/gitpod/input.gitpod.yml
+    assert:
+      - type: contains
+        value: "post_setup"
+      - type: not-contains
+        value: "ports"
+      - type: not-contains
+        value: "onOpen"
+      - type: not-contains
+        value: "vscode.extensions"
+      - type: llm-rubric
+        value: |
+          PASS if the output:
+          - tasks[].init becomes [hooks] post_setup.
+          - tasks[].command becomes [commands] entries.
+          - No ports, vscode.extensions, or workspace-class fields appear.
+          - Tools mentioned in init/before/Dockerfile are in [provisioner].
+
+  # -------------------------------------------------------------------------
+  - description: "Dev Containers — devcontainer.json with go + node"
+    prompt: file://prompts/dev-containers.txt
+    vars:
+      input: file://../../tests/migrate/fixtures/dev-containers/input.devcontainer.json
+    assert:
+      - type: contains
+        value: 'go = "1.22"'
+      - type: contains
+        value: 'node = "20"'
+      - type: contains
+        value: "GOFLAGS"
+      - type: not-contains
+        value: "docker-outside-of-docker"
+      - type: llm-rubric
+        value: |
+          PASS if the output:
+          - features go + node + docker translate to [provisioner] (with
+            docker-outside-of-docker becoming docker = "latest").
+          - postCreateCommand becomes [hooks] post_setup.
+          - GOFLAGS env appears in [env.vars].
+          - If [drift] is present, it tracks .vscode/* files.
+
+  # -------------------------------------------------------------------------
+  - description: "Vagrant — Vagrantfile with shell provisioner + ports"
+    prompt: file://prompts/vagrant.txt
+    vars:
+      input: file://../../tests/migrate/fixtures/vagrant/input.Vagrantfile
+    assert:
+      - type: contains
+        value: "node"
+      - type: contains
+        value: "post_setup"
+      - type: not-contains
+        value: "vm.box"
+      - type: not-contains
+        value: "synced_folder"
+      - type: not-contains
+        value: "forwarded_port"
+      - type: llm-rubric
+        value: |
+          PASS if the output:
+          - apt-get install <tool> lines become [provisioner] entries.
+          - npm ci / pip install / cargo install lines become language package
+            blocks or [hooks] post_setup commands.
+          - No vm.box, synced_folder, or forwarded_port references.
+          - Postgres reference uses psql, not postgresql.
+
+  # -------------------------------------------------------------------------
+  - description: "Homebrew Bundle — Brewfile with formulae + casks"
+    prompt: file://prompts/homebrew-bundle.txt
+    vars:
+      input: file://../../tests/migrate/fixtures/homebrew-bundle/input.Brewfile
+    assert:
+      - type: contains
+        value: 'git ='
+      - type: contains
+        value: 'node = "20"'
+      - type: contains
+        value: 'python = "3.12"'
+      - type: contains
+        value: "vscode"
+      - type: contains
+        value: "iterm2"
+      - type: not-contains
+        value: "tap "
+      - type: not-contains
+        value: "visual-studio-code"
+      - type: llm-rubric
+        value: |
+          PASS if the output:
+          - Every brew "X@Y" or brew "X" becomes X = "Y" or X = "latest".
+          - cask "visual-studio-code" becomes vscode = "latest".
+          - No tap or mas references appear.
+          - All canonical name corrections are applied (no aws-cli, postgresql, etc.).
+
+  # -------------------------------------------------------------------------
+  - description: "mise — mise.toml with [tools] and [env]"
+    prompt: file://prompts/mise.txt
+    vars:
+      input: file://../../tests/migrate/fixtures/mise/input.mise.toml
+    assert:
+      - type: contains
+        value: '"=20.11.0"'
+      - type: contains
+        value: 'python = "3.12"'
+      - type: contains
+        value: "DATABASE_URL"
+      - type: not-contains
+        value: "[tools]"
+      - type: llm-rubric
+        value: |
+          PASS if the output:
+          - mise's exact-version pins ("20.11.0") are translated as exact
+            ("=20.11.0") in jarvy.
+          - [tools] becomes [provisioner].
+          - [env] becomes [env.vars].
+          - mise tasks (if any) become [commands].
+
+  # -------------------------------------------------------------------------
+  - description: "asdf — .tool-versions with multiple runtimes"
+    prompt: file://prompts/asdf.txt
+    vars:
+      input: file://../../tests/migrate/fixtures/asdf/input.tool-versions
+    assert:
+      - type: contains
+        value: 'node = "=20.11.0"'
+      - type: contains
+        value: 'python = "=3.12.1"'
+      - type: contains
+        value: 'ruby = "=3.3.0"'
+      - type: not-contains
+        value: "nodejs"
+      - type: llm-rubric
+        value: |
+          PASS if the output:
+          - Every line in .tool-versions becomes a [provisioner] entry with
+            an exact version pin (=X.Y.Z).
+          - "nodejs" is renamed to "node".
+          - No plugin install instructions appear.
+
+  # -------------------------------------------------------------------------
+  - description: "Nix — flake.nix dev shell"
+    prompt: file://prompts/nix.txt
+    vars:
+      input: file://../../tests/migrate/fixtures/nix/input.flake.nix
+    assert:
+      - type: contains
+        value: 'node = "20"'
+      - type: contains
+        value: 'python = "3.12"'
+      - type: contains
+        value: "terraform"
+      - type: contains
+        value: "kubectl"
+      - type: contains
+        value: "NODE_ENV"
+      - type: not-contains
+        value: "buildInputs"
+      - type: not-contains
+        value: "pkgs."
+      - type: not-contains
+        value: "nixpkgs"
+      - type: llm-rubric
+        value: |
+          PASS if the output:
+          - nodejs_20 → node = "20", python312 → python = "3.12".
+          - docker-client → docker.
+          - shellHook's "export NODE_ENV=development" becomes [env.vars] entry,
+            not just shell text in [hooks].
+          - No flake/inputs/pkgs/system references appear.
+
+# ---------------------------------------------------------------------------
+# Output configuration
+# ---------------------------------------------------------------------------
+# Run `promptfoo view` after `promptfoo eval` to inspect results.
+outputPath: ./results.json

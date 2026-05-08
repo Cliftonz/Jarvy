@@ -1,0 +1,142 @@
+/* Jarvy docs — custom theme polish */
+
+:root {
+  --md-primary-fg-color: #4f46e5;
+  --md-primary-fg-color--light: #6366f1;
+  --md-primary-fg-color--dark: #3730a3;
+  --md-accent-fg-color: #6366f1;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #818cf8;
+  --md-accent-fg-color: #a5b4fc;
+}
+
+/* Tighter, more confident headings */
+.md-typeset h1 {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.5em;
+}
+
+.md-typeset h1:first-of-type {
+  font-size: 2.6rem;
+  line-height: 1.15;
+}
+
+.md-typeset h2 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-top: 2.2em;
+  border-top: 1px solid var(--md-default-fg-color--lightest);
+  padding-top: 1.4em;
+}
+
+.md-typeset h2:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 1em;
+}
+
+.md-typeset h3 {
+  font-weight: 600;
+  margin-top: 1.8em;
+}
+
+/* Card grids — used heavily on the landing */
+.md-typeset .grid.cards > :is(ul, ol) > li,
+.md-typeset .grid.cards > .card,
+.md-typeset .grid > .card {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.5rem;
+  padding: 1.1rem 1.3rem;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  background: var(--md-default-bg-color);
+}
+
+.md-typeset .grid.cards > :is(ul, ol) > li:hover,
+.md-typeset .grid.cards > .card:hover,
+.md-typeset .grid > .card:hover {
+  border-color: var(--md-accent-fg-color);
+  box-shadow: 0 4px 16px rgba(79, 70, 229, 0.12);
+  transform: translateY(-2px);
+}
+
+.md-typeset .grid.cards > :is(ul, ol) > li > hr {
+  display: none;
+}
+
+.md-typeset .grid.cards > :is(ul, ol) > li > p:first-child {
+  font-weight: 600;
+  margin-bottom: 0.6em;
+}
+
+/* Tables — readable, less Material default chrome */
+.md-typeset table:not([class]) {
+  font-size: 0.78rem;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.4rem;
+  overflow: hidden;
+}
+
+.md-typeset table:not([class]) th {
+  font-weight: 600;
+  background: var(--md-default-fg-color--lightest);
+}
+
+/* Code — slightly punchier for hero code blocks */
+.md-typeset pre > code {
+  font-size: 0.82em;
+  line-height: 1.55;
+}
+
+/* Admonitions — flatter, less rounded */
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 0.4rem;
+  border-left-width: 3px;
+}
+
+/* Hero spacing on home page */
+.md-typeset h1#dev-environments-as-code {
+  font-size: 3.2rem;
+  line-height: 1.05;
+  margin-bottom: 0.4em;
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+@media (max-width: 56rem) {
+  .md-typeset h1#dev-environments-as-code {
+    font-size: 2.2rem;
+  }
+}
+
+/* Quieter footer */
+.md-footer-meta__inner {
+  font-size: 0.74rem;
+}
+
+/* Search — chunkier focus state */
+.md-search__input:focus,
+.md-search__input:hover {
+  background-color: var(--md-default-bg-color);
+}
+
+/* Link styles — readable hover */
+.md-typeset a:not(.md-button) {
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.md-typeset a:not(.md-button):hover {
+  border-bottom-color: currentColor;
+}
+
+/* Mermaid — match dark mode */
+[data-md-color-scheme="slate"] .mermaid {
+  background: transparent;
+}

@@ -1,0 +1,13 @@
+[provisioner]
+node = "20"
+python = "3.12"
+psql = "latest"
+
+[hooks]
+post_setup = """
+npm ci
+pip install -r requirements.txt
+"""
+
+[commands]
+dev = "npm run dev"

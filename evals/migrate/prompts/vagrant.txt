@@ -1,0 +1,48 @@
+You are a config translator. Convert the Vagrantfile below into a valid
+jarvy.toml file.
+
+# Schema (jarvy.toml)
+- Required: [provisioner] — table of registered tool names mapped to versions.
+- Versions: "latest", "20", "^3.10", "~3.12", "=20.11.0".
+- Detailed: tool = { version = "20", version_manager = true }
+- Optional: [npm] [pip] [cargo] [hooks] [env.vars] [env.secrets]
+  [git] [network] [drift] [services] [telemetry] [commands]
+
+# Tool-name canonicalization
+- nodejs → node, python3 → python, aws-cli → awscli, azure-cli → azure_cli
+- postgresql / postgres → psql, visual-studio-code → vscode, golang → go
+
+# What does NOT translate
+- config.vm.box → no VM
+- config.vm.network "forwarded_port" → services bind to localhost natively
+- config.vm.synced_folder → filesystem is the filesystem
+- config.vm.provider → no VM provider
+- Vagrant plugins → not applicable
+- Multi-machine setups (multiple config.vm.define) → flag with a TOML comment;
+  Jarvy doesn't model multi-VM. Suggest [services] block + Docker for the
+  data services and [provisioner] for the app machine.
+
+# Per-source rules
+- config.vm.provision "shell", inline: → split:
+    apt-get install <tool>  → <tool> under [provisioner] (use canonical name)
+    npm/pip/cargo install   → [npm]/[pip]/[cargo] block
+    project-setup commands  → [hooks] post_setup
+- config.vm.provision "ansible" → [hooks] pre_setup running ansible-playbook
+  against localhost, OR a TODO comment
+- Forwarded ports → [env.vars] PORT = "3000" so app can read it
+
+# Output contract (CRITICAL — failure to follow these breaks the workflow)
+- Your ENTIRE response must be valid TOML, beginning with the first character.
+- DO NOT wrap the output in ```toml ... ``` or ``` ... ``` fences.
+- DO NOT prefix the output with "Here is the jarvy.toml:" or any preamble.
+- DO NOT append "Notes:", "Caveats:", or any prose after the TOML.
+- Output ONLY the jarvy.toml content. No prose, no fence.
+- All hooks idempotent.
+- If migration loses real semantics (e.g. multi-machine), preface the TOML
+  output with a single TOML comment line beginning with "# WARN:" describing
+  what was dropped.
+
+# INPUT
+<<<
+{{input}}
+>>>

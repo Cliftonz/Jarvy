@@ -1,0 +1,22 @@
+{
+  "name": "myapp",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": {
+    "ghcr.io/devcontainers/features/go:1": { "version": "1.22" },
+    "ghcr.io/devcontainers/features/node:1": { "version": "20" },
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
+  "postCreateCommand": "go mod download && npm ci",
+  "postAttachCommand": "echo 'ready'",
+  "remoteEnv": {
+    "GOFLAGS": "-mod=readonly"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["golang.go", "dbaeumer.vscode-eslint"],
+      "settings": {
+        "go.useLanguageServer": true
+      }
+    }
+  }
+}

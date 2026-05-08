@@ -1,0 +1,9 @@
+[provisioner]
+node = "20"
+psql = "latest"
+
+[hooks]
+post_setup = "npm ci"
+
+[env.vars]
+DATABASE_URL = "postgres://localhost:5432/myapp"

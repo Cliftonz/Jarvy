@@ -1,18 +1,20 @@
 ---
-title: "Quickstart - Jarvy"
-description: "Get started with Jarvy in under 5 minutes. Install, configure, and provision your development environment."
+title: "Quickstart — Jarvy"
+description: "Install Jarvy and provision your first environment in under 60 seconds. The TL;DR for impatient developers."
 ---
 
 # Quickstart
 
-Get your development environment standardized in under 5 minutes.
+The TL;DR. Want a guided walkthrough instead? See the [tutorial: your first jarvy.toml](tutorials/first-config.md).
 
-## 1. Install Jarvy
+---
 
-=== "Cargo"
+## Install
+
+=== "macOS / Linux"
 
     ```bash
-    cargo install jarvy
+    curl -fsSL https://raw.githubusercontent.com/bearbinary/jarvy/main/dist/scripts/install.sh | bash
     ```
 
 === "Homebrew"
@@ -21,132 +23,93 @@ Get your development environment standardized in under 5 minutes.
     brew install jarvy
     ```
 
+=== "Cargo"
+
+    ```bash
+    cargo install jarvy
+    ```
+
+=== "Windows (PowerShell)"
+
+    ```powershell
+    irm https://raw.githubusercontent.com/bearbinary/jarvy/main/dist/scripts/install.ps1 | iex
+    ```
+
 === "Binary"
 
-    Download from [GitHub Releases](https://github.com/bearbinary/jarvy/releases) and add to your PATH.
+    Download from [GitHub Releases](https://github.com/bearbinary/jarvy/releases) and add to `PATH`.
 
-## 2. Create a Config
+Verify: `jarvy --version`
 
-=== "Interactive"
+---
 
-    ```bash
-    jarvy init
-    ```
+## Configure
 
-    Follow the prompts to select your tools.
+Drop a `jarvy.toml` in your repo root:
 
-=== "From Template"
+```toml title="jarvy.toml"
+[provisioner]
+git    = "latest"
+node   = "20"
+python = "3.12"
+docker = "latest"
 
-    ```bash
-    jarvy init --template react
-    ```
+[hooks.node]
+post_install = "npm install -g typescript"
 
-    Available templates: `react`, `vue`, `go-api`, `rust-cli`, `python-ml`, `devops`, and more.
+[env.vars]
+NODE_ENV = "development"
+```
 
-=== "Manual"
+Or start from a [template](templates-index.md): `jarvy init --template node-pnpm`
 
-    Create `jarvy.toml` in your project root:
+---
 
-    ```toml
-    [provisioner]
-    git = "latest"
-    node = "20"
-    docker = "latest"
-    python = "3.12"
-
-    [env.vars]
-    NODE_ENV = "development"
-
-    [hooks.node]
-    post_install = "npm install -g typescript eslint"
-    ```
-
-## 3. Run Setup
+## Provision
 
 ```bash
 jarvy setup
 ```
 
-Jarvy installs all tools, runs hooks, and configures your environment.
+That's it. Jarvy installs missing tools, runs hooks, writes `.env`, and snapshots the result for [drift detection](drift.md).
 
-## 4. Verify
+---
+
+## Verify
 
 ```bash
 jarvy doctor
 ```
 
-Check that all tools are installed and at the correct versions.
+Walks every tool, confirms version satisfies the config.
 
-## Configuration Reference
+---
 
-### Tool Versions
+## Useful commands
 
-```toml
-[provisioner]
-# Simple version
-node = "20"
+| Command | What it does |
+|---|---|
+| `jarvy diff` | What would change on this machine |
+| `jarvy setup --dry-run` | Full plan, no execution |
+| `jarvy validate` | Schema check on `jarvy.toml` |
+| `jarvy doctor` | Verify everything is installed correctly |
+| `jarvy drift check` | Compare current machine to the committed baseline |
+| `jarvy drift accept` | Update the baseline to current state |
+| `jarvy tools` | List all 200+ supported tools |
+| `jarvy search <name>` | Find a tool in the registry |
+| `jarvy explain <name>` | Detailed metadata for one tool |
+| `jarvy templates list` | Browse starter `jarvy.toml` files |
+| `jarvy update` | Self-update Jarvy |
+| `jarvy mcp` | Start the MCP server for AI agents |
 
-# Latest available
-docker = "latest"
+[Full CLI reference →](cli.md)
 
-# Detailed config
-python = { version = "3.12", version_manager = true }
-```
+---
 
-### Environment Variables
+## Next
 
-```toml
-[env.vars]
-NODE_ENV = "development"
-API_URL = "http://localhost:3000"
-
-[env.secrets]
-API_KEY = { env = "MY_API_KEY", required = true }
-```
-
-### Hooks
-
-```toml
-[hooks]
-pre_setup = "echo 'Starting setup...'"
-post_setup = "echo 'Setup complete!'"
-
-[hooks.node]
-post_install = "npm install -g typescript"
-```
-
-### Roles
-
-```toml
-role = "frontend"
-
-[roles.base]
-tools = ["git", "docker"]
-
-[roles.frontend]
-extends = "base"
-tools = ["node", "bun"]
-```
-
-### Services
-
-```toml
-[services]
-enabled = true
-auto_start = true
-```
-
-### Drift Detection
-
-```toml
-[drift]
-enabled = true
-version_policy = "minor"
-```
-
-## Next Steps
-
-- Run `jarvy search --all` to browse 174+ available tools
-- Run `jarvy explain <tool>` for detailed tool information
-- Run `jarvy templates list` to browse configuration templates
-- Read the [FAQ](faq.md) for common questions
+- **5-minute tutorial:** [Your first jarvy.toml](tutorials/first-config.md)
+- **Onboarding a team:** [Tutorial — onboard a team in 10 minutes](tutorials/team-onboarding.md)
+- **Mental model:** [Concepts overview](concepts/overview.md)
+- **All options:** [Configuration reference](configuration.md)
+- **Migrating from another tool:** [Migration guides](migrate/index.md)

@@ -1,0 +1,55 @@
+You are a config translator. Convert the GitHub Codespaces devcontainer.json
+below into a valid jarvy.toml file.
+
+# Schema (jarvy.toml)
+- Required: [provisioner] — table of registered tool names mapped to versions.
+- Versions accept: "latest", bare major like "20", caret "^3.10", tilde "~3.12",
+  or exact "=20.11.0".
+- Detailed form: tool = { version = "20", version_manager = true }
+- Optional sections:
+    [npm], [pip], [cargo]                  # language packages
+    [hooks] pre_setup, post_setup          # global, run once
+    [hooks.<tool>] post_install            # per-tool
+    [env.vars] KEY = "value"               # written to .env + shell rc
+    [env.secrets] KEY = { env = "VAR", required = true }
+    [git], [network], [drift], [services], [telemetry], [commands]
+    role = "name" + [roles.<name>]         # role-based bundles
+
+# Tool-name canonicalization (use exact names)
+- nodejs → node
+- python3 → python
+- aws-cli → awscli
+- azure-cli → azure_cli
+- postgresql / postgres → psql
+- visual-studio-code → vscode
+- golang → go
+
+# What does NOT translate (omit it; don't fake it)
+- image / build.dockerfile  → tools install on the host, no container
+- forwardPorts / portsAttributes  → services bind to localhost natively
+- mounts / workspaceFolder  → filesystem is the filesystem
+- customizations.vscode.extensions  → user must commit .vscode/extensions.json
+- prebuildConfiguration  → not needed; jarvy setup is fast enough
+- machine type / hardware specs  → laptop has what it has
+
+# Per-source rules
+- features.<feature> → tool entry under [provisioner]
+- ghcr.io/devcontainers/features/docker-in-docker → docker = "latest"
+- postCreateCommand / onCreateCommand → [hooks] post_setup
+- postAttachCommand / postStartCommand → [commands] entry (e.g. dev = "...")
+- containerEnv / remoteEnv → [env.vars]
+- Codespaces user/org secrets → [env.secrets] with required = true
+
+# Output contract (CRITICAL — failure to follow these breaks the workflow)
+- Your ENTIRE response must be valid TOML, beginning with the first character.
+- DO NOT wrap the output in ```toml ... ``` or ``` ... ``` fences.
+- DO NOT prefix the output with "Here is the jarvy.toml:" or any preamble.
+- DO NOT append "Notes:", "Caveats:", or any prose after the TOML.
+- Output ONLY the jarvy.toml content. No prose, no markdown fence, no commentary.
+- All hooks must be idempotent.
+- If unsure whether a tool is registered, prefer the closest canonical name.
+
+# INPUT
+<<<
+{{input}}
+>>>

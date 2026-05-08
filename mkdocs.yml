@@ -1,8 +1,9 @@
 site_name: Jarvy
 site_url: https://docs.jarvy.dev
 site_description: >-
-  Jarvy is a fast, cross-platform CLI that standardizes and automates
-  local development environment setup from a declarative jarvy.toml config file.
+  Jarvy is a fast, cross-platform CLI that provisions a complete local
+  development environment from a single declarative jarvy.toml file —
+  native package managers, no cloud, MIT-licensed.
 site_author: Zac Clifton
 repo_url: https://github.com/bearbinary/jarvy
 repo_name: bearbinary/jarvy
@@ -12,7 +13,13 @@ copyright: Copyright &copy; 2025-2026 Zac Clifton
 
 theme:
   name: material
+  custom_dir: docs/overrides
+  language: en
   palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
       primary: indigo
@@ -26,29 +33,65 @@ theme:
       accent: indigo
       toggle:
         icon: material/brightness-4
-        name: Switch to light mode
+        name: Switch to system preference
+  font:
+    text: Inter
+    code: JetBrains Mono
   features:
-    - navigation.tabs
-    - navigation.sections
-    - navigation.expand
-    - navigation.top
-    - search.suggest
-    - search.highlight
-    - content.tabs.link
-    - content.code.copy
+    - announce.dismiss
     - content.action.edit
+    - content.action.view
+    - content.code.annotate
+    - content.code.copy
+    - content.tabs.link
+    - content.tooltips
+    - navigation.footer
+    - navigation.indexes
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.instant.progress
+    - navigation.path
+    - navigation.sections
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.top
+    - navigation.tracking
+    - search.highlight
+    - search.share
+    - search.suggest
+    - toc.follow
   icon:
     repo: fontawesome/brands/github
+    edit: material/pencil
+    view: material/eye
 
 plugins:
-  - search
-  - social
+  - search:
+      separator: '[\s\u200b\-_,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+  - social:
+      cards_layout_options:
+        background_color: "#1a1f3a"
+        color: "#FFFFFF"
+  - tags
 
 extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/bearbinary/jarvy
+      name: Jarvy on GitHub
+    - icon: fontawesome/brands/x-twitter
+      link: https://twitter.com/intent/tweet?text=Check%20out%20Jarvy%20%E2%80%94%20dev%20environments%20as%20code&url=https://docs.jarvy.dev
+      name: Share on X
   generator: false
+  status:
+    new: Recently added
+    deprecated: Deprecated
+  version:
+    provider: mike
+    default: latest
+
+extra_css:
+  - assets/extra.css
 
 markdown_extensions:
   - abbr
@@ -60,53 +103,109 @@ markdown_extensions:
   - tables
   - toc:
       permalink: true
+      permalink_title: Anchor link to this section
+  - pymdownx.betterem
+  - pymdownx.caret
+  - pymdownx.critic
   - pymdownx.details
   - pymdownx.highlight:
       anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
-  - pymdownx.superfences
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets:
+      base_path:
+        - .
+        - docs
+      check_paths: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
   - pymdownx.emoji:
       emoji_index: !!python/name:material.extensions.emoji.twemoji
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
 
 nav:
   - Home: index.md
-  - Getting Started:
+
+  - Get Started:
     - Quickstart: quickstart.md
-    - Configuration Reference: configuration.md
-    - Roles Guide: roles.md
-  - Features:
-    - Hooks: hooks.md
-    - Tool Dependencies: tool-dependencies.md
-    - Language Packages: packages.md
-    - Git Configuration: git-config.md
-    - Network & Proxy: network.md
-    - Drift Detection: drift.md
-    - Logging & Tickets: logging.md
-    - Telemetry: telemetry.md
-    - Self-Updating: self-update.md
+    - Tutorial — your first jarvy.toml: tutorials/first-config.md
+    - Tutorial — onboard a team: tutorials/team-onboarding.md
+    - Examples gallery: examples.md
+    - Templates: templates-index.md
+
+  - Concepts:
+    - Overview: concepts/overview.md
+    - Tools: concepts/tools.md
+    - Lifecycle: concepts/lifecycle.md
+    - Roles & inheritance: concepts/roles-and-inheritance.md
+    - Hook execution: concepts/hooks-execution.md
+    - Drift baseline: concepts/drift-baseline.md
+
   - Guides:
-    - CI/CD Integration: ci-cd.md
-    - Error Codes: error-codes.md
-  - For AI Agents:
-    - Overview: for-ai-agents.md
-    - MCP Server: mcp-server.md
-    - Architecture: architecture.md
-    - llms.txt (concise): https://github.com/bearbinary/jarvy/blob/main/llms.txt
-    - llms-full.txt (full): https://github.com/bearbinary/jarvy/blob/main/llms-full.txt
+    - Roles guide: roles.md
+    - Hooks guide: hooks.md
+    - Tool dependencies: tool-dependencies.md
+    - Language packages: packages.md
+    - Git configuration: git-config.md
+    - Network & proxy: network.md
+    - Drift detection: drift.md
+    - Logging & tickets: logging.md
+    - Telemetry: telemetry.md
+    - Self-updating: self-update.md
+    - CI/CD integration: ci-cd.md
+    - Adding tools: adding-tools.md
+
+  - Migrate:
+    - Overview: migrate/index.md
+    - Migrate with AI: migrate/migrate-with-ai.md
+    - From Codespaces: migrate/from-codespaces.md
+    - From DevPod: migrate/from-devpod.md
+    - From Gitpod: migrate/from-gitpod.md
+    - From Dev Containers: migrate/from-dev-containers.md
+    - From Vagrant: migrate/from-vagrant.md
+    - From Homebrew Bundle: migrate/from-homebrew-bundle.md
+    - From mise: migrate/from-mise.md
+    - From asdf: migrate/from-asdf.md
+    - From Nix: migrate/from-nix.md
+
   - Reference:
-    - CLI Reference: cli.md
+    - Configuration (jarvy.toml): configuration.md
+    - CLI reference: cli.md
+    - Error codes: error-codes.md
     - FAQ: faq.md
     - Changelog: changelog.md
+
+  - For AI Agents:
+    - Overview: for-ai-agents.md
+    - MCP server: mcp-server.md
+    - Architecture: architecture.md
+    - llms.txt (concise): https://docs.jarvy.dev/llms.txt
+    - llms-full.txt (full): https://docs.jarvy.dev/llms-full.txt
+
   - Comparisons:
-    - vs Codespaces: competitors/vs-codespaces.md
-    - vs DevPod: competitors/vs-devpod.md
-    - vs Nix: competitors/vs-nix.md
-    - vs mise: competitors/vs-mise.md
-    - vs Docker: competitors/vs-docker.md
+    - Overview: competitors/competitive-analysis.md
     - vs Homebrew Bundle: competitors/vs-homebrew-bundle.md
+    - vs mise: competitors/vs-mise.md
+    - vs asdf: competitors/vs-asdf.md
+    - vs Nix: competitors/vs-nix.md
+    - vs Codespaces: competitors/vs-codespaces.md
+    - vs Gitpod: competitors/vs-gitpod.md
+    - vs DevPod: competitors/vs-devpod.md
+    - vs Docker: competitors/vs-docker.md
+    - vs Vagrant: competitors/vs-vagrant.md
+    - vs Chainguard: competitors/vs-chainguard.md
+
   - Community:
     - Contributing: contributing.md

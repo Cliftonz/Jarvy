@@ -1,99 +1,197 @@
 ---
-title: "Jarvy - Dev Environment CLI"
-description: "Jarvy is a fast, cross-platform CLI that standardizes and automates local development environment setup from a declarative jarvy.toml config file."
+title: "Jarvy — Dev environments as code"
+description: "Jarvy is a fast, cross-platform CLI that provisions a complete local development environment from a single jarvy.toml file. Native package managers, no cloud, MIT-licensed."
+hide:
+  - navigation
 ---
 
-# What is Jarvy?
+# Dev environments as code.
 
-**Jarvy** is a fast, Rust-based CLI tool that standardizes and automates local development environment setup across macOS, Linux, and Windows.
+Stop writing onboarding wikis. Stop paying for cloud dev pods. Stop debugging "works on my machine."
 
-It reads a declarative `jarvy.toml` config file in your repository and provisions all required tools using native package managers — Homebrew on macOS, apt/dnf on Linux, winget/Chocolatey on Windows.
+**Jarvy reads one file, `jarvy.toml`, and gets every developer on your team to the same set of tools, the same versions, in seconds — on macOS, Linux, and Windows.**
 
-**Stop paying for dev pods and codespaces.** Jarvy runs on your local machine with zero cloud costs, full offline support, and native performance.
+<div class="grid cards" markdown>
 
-## Install
+-   :material-rocket-launch:{ .lg .middle } **Install in 30 seconds**
 
-=== "Cargo"
-
-    ```bash
-    cargo install jarvy
-    ```
-
-=== "Homebrew"
+    ---
 
     ```bash
-    brew install jarvy
+    curl -fsSL https://raw.githubusercontent.com/bearbinary/jarvy/main/dist/scripts/install.sh | bash
     ```
 
-=== "Binary"
+    Or `brew install jarvy` · `cargo install jarvy` · [binary](https://github.com/bearbinary/jarvy/releases)
 
-    Download a pre-built binary from the
-    [GitHub Releases](https://github.com/bearbinary/jarvy/releases) page.
+-   :material-clock-fast:{ .lg .middle } **Provision in seconds**
 
-## Quick Example
+    ---
 
-Create a `jarvy.toml` in your repository:
+    ```bash
+    cd your-repo && jarvy setup
+    ```
 
-```toml
+    Idempotent. Re-runnable. Detects what's already installed.
+
+</div>
+
+---
+
+## See it in 30 seconds
+
+```toml title="jarvy.toml"
 [provisioner]
-git = "latest"
-node = "20"
-docker = "latest"
+git    = "latest"
+node   = "20"
 python = "3.12"
-```
+docker = "latest"
 
-Then run:
+[hooks.node]
+post_install = "npm install -g typescript"
+
+[env.vars]
+NODE_ENV = "development"
+```
 
 ```bash
-jarvy setup
+$ jarvy setup
+✓ git 2.45.0 already installed
+✓ node 20.11.0 installed via brew
+✓ python 3.12.1 installed via pyenv
+✓ docker 25.0 installed via brew cask
+✓ ran hook for node: npm install -g typescript
+✓ wrote .env
+Setup complete in 14.3s
 ```
 
-Every developer on the team gets the same tools, same versions, same environment.
+That's the entire onboarding flow. Add it to `README.md`, push to `main`, every new hire is productive in one command.
 
-## Why Jarvy?
+---
 
-| Problem | Jarvy's Solution |
-|---------|-----------------|
-| "Works on my machine" | Declarative config ensures identical environments |
-| Days-long onboarding | New developers run `jarvy setup` and are done in seconds |
-| Cloud dev environment costs | Provisions locally — no VM, no container, no recurring cost |
-| Cross-platform drift | One config file works on macOS, Linux, and Windows |
-| Manual setup guides | Environment as code, version-controlled in your repo |
+## Why teams switch to Jarvy
 
-## Key Features
+<div class="grid cards" markdown>
 
-- **[200+ tools](cli.md#jarvy-tools)** supported out of the box
-- **[Role-based configurations](roles.md)** for team-specific tool sets
-- **[MCP server](mcp-server.md)** for AI agent integration (Claude, GPT, Cursor)
-- **[Drift detection](drift.md)** to catch environment changes
-- **[Post-install hooks](hooks.md)** for automated configuration
-- **[Tool dependencies](tool-dependencies.md)** with topological install ordering
-- **[Language packages](packages.md)** — npm, pip, cargo
-- **[Git configuration](git-config.md)** automated across the team
-- **[Network & proxy](network.md)** support for corporate environments
-- **[Self-updating](self-update.md)** with channels and rollback
-- **[Telemetry](telemetry.md)** via OpenTelemetry (opt-in)
-- **[Logging & debug tickets](logging.md)** for support workflows
-- **[CI/CD integration](ci-cd.md)** with 11 providers auto-detected
+-   :material-flash:{ .lg .middle } **Native, not virtual**
 
-## For AI Agents
+    ---
 
-If you're an AI assistant reading this, start at **[For AI Agents](for-ai-agents.md)** for a guided tour. Or grab the single-file references:
+    Tools install directly on the laptop. No Docker daemon, no VM, no remote SSH. Your editor, debugger, and shell just work.
 
-- [`llms.txt`](https://github.com/bearbinary/jarvy/blob/main/llms.txt) — concise Q&A
-- [`llms-full.txt`](https://github.com/bearbinary/jarvy/blob/main/llms-full.txt) — full reference
+-   :material-cloud-off-outline:{ .lg .middle } **Zero cloud cost**
+
+    ---
+
+    No Codespaces tab. No Gitpod usage tier. No idle compute charges. Your laptop is the dev environment.
+
+-   :material-source-branch-check:{ .lg .middle } **Git is the source of truth**
+
+    ---
+
+    `jarvy.toml` lives in your repo, reviewed in PRs, versioned with the code it supports. No drift between docs and reality.
+
+-   :material-arrow-decision:{ .lg .middle } **Drift detection**
+
+    ---
+
+    Jarvy snapshots the environment after setup and tells you when a teammate's machine has wandered off the baseline.
+
+-   :material-account-group:{ .lg .middle } **Roles for real teams**
+
+    ---
+
+    Frontend, backend, DevOps, data — each gets the tools they need, with inheritance and per-role overrides.
+
+-   :material-robot-outline:{ .lg .middle } **Agent-native**
+
+    ---
+
+    Built-in MCP server lets Claude, Cursor, and ChatGPT discover, install, and configure tools the same way you do.
+
+</div>
+
+---
+
+## Pick a starting point
+
+<div class="grid cards" markdown>
+
+-   :material-school-outline:{ .lg .middle } **New to Jarvy?**
+
+    ---
+
+    Walk through your first config in 5 minutes — install, configure, provision, verify.
+
+    [:octicons-arrow-right-24: Tutorial: your first jarvy.toml](tutorials/first-config.md)
+
+-   :material-account-multiple-plus:{ .lg .middle } **Onboarding a team?**
+
+    ---
+
+    Write a `jarvy.toml` for your repo and ship it to every contributor.
+
+    [:octicons-arrow-right-24: Tutorial: onboard a team](tutorials/team-onboarding.md)
+
+-   :material-book-open-page-variant:{ .lg .middle } **Learning the model?**
+
+    ---
+
+    Concepts, lifecycle, and how the pieces fit together.
+
+    [:octicons-arrow-right-24: Concepts overview](concepts/overview.md)
+
+-   :material-file-document-outline:{ .lg .middle } **Looking up syntax?**
+
+    ---
+
+    Every option in `jarvy.toml`, every CLI subcommand, every error code.
+
+    [:octicons-arrow-right-24: Reference](configuration.md)
+
+</div>
+
+---
+
+## What's in the box
+
+| | |
+|---|---|
+| **200+ tools** | git, node, python, go, rust, docker, kubectl, terraform, awscli, gcloud, azure_cli, psql, redis-cli, … |
+| **Native package managers** | Homebrew (macOS), apt/dnf/pacman/apk (Linux), winget/Chocolatey/Scoop (Windows) |
+| **Language packages** | npm/pnpm/yarn, pip + venv, cargo, with lockfile-aware installs |
+| **Hooks** | `pre_setup`, `post_setup`, per-tool `post_install` — shell scripts with sandboxed env vars |
+| **Roles** | Inheritable tool sets with per-role version overrides, max 5 levels deep |
+| **Templates** | 14 ready-to-use `jarvy.toml` files for Node, Python, Go, Rust, Ruby, Java, fullstack, K8s |
+| **Drift detection** | SHA-256 file hashes + version policy (major/minor/patch/exact) |
+| **CI/CD** | 11 providers auto-detected: GitHub Actions, GitLab, CircleCI, Buildkite, Jenkins, … |
+| **Telemetry** | OpenTelemetry (logs/metrics/traces), opt-in, OTLP HTTP or gRPC |
+| **MCP server** | JSON-RPC over stdio for AI agents, with read/write tool support |
+| **Self-update** | `jarvy update` with channels (stable/beta/nightly), pinning, and rollback |
+
+---
+
+## Used by teams that
+
+- ship products on every laptop their employees own
+- onboard contractors and forget about it
+- run security audits and need every tool's version pinned in git
+- can't or won't ship code through a cloud IDE
+- have a CI pipeline that needs the same tools as the laptops
+
+---
+
+## For AI agents
+
+If you're an AI assistant reading this, start at **[For AI Agents](for-ai-agents.md)**, or grab the single-file references:
+
+- [`llms.txt`](https://docs.jarvy.dev/llms.txt) — concise Q&A
+- [`llms-full.txt`](https://docs.jarvy.dev/llms-full.txt) — full reference
 - [Architecture](architecture.md) — module map for code-modifying agents
 
-## FAQ
+---
 
-**How many tools does Jarvy support?**
+## Open source, MIT-licensed
 
-Jarvy supports 174+ tools including Node.js, Python, Go, Rust, Docker, Kubernetes, Terraform, AWS CLI, and many more. Run `jarvy search --all` to see the full list.
+[github.com/bearbinary/jarvy](https://github.com/bearbinary/jarvy) · [Releases](https://github.com/bearbinary/jarvy/releases) · [Discussions](https://github.com/bearbinary/jarvy/discussions) · [Contributing](contributing.md)
 
-**Can AI agents use Jarvy?**
-
-Yes. Jarvy includes a built-in MCP (Model Context Protocol) server. Run `jarvy mcp` to let AI agents discover and install tools via JSON-RPC.
-
-**Is Jarvy free?**
-
-Yes. Jarvy is open-source and MIT-licensed.
+Jarvy is built in Rust, signed with cosign, and published to Cargo, Homebrew, winget, and Chocolatey on every release.

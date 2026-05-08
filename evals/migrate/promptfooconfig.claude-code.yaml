@@ -1,0 +1,203 @@
+description: |
+  Migration eval using the local Claude Code CLI as the LLM provider.
+
+  Uses `claude -p` so no ANTHROPIC_API_KEY is required — authentication
+  comes from your existing Claude Code session (OAuth or apiKeyHelper).
+
+  Run from the repo root:
+    cargo build --bin jarvy
+    promptfoo eval --config evals/migrate/promptfooconfig.claude-code.yaml
+    promptfoo view
+
+providers:
+  - id: "exec:bash providers/claude-code.sh"
+    label: Claude Code CLI (sonnet)
+
+# Each prompt file is registered with an explicit label. Tests reference
+# the label via `prompt:` to select exactly one prompt — not the full N×M matrix.
+prompts:
+  - id: codespaces
+    raw: file://prompts/codespaces.txt
+    label: codespaces
+  - id: devpod
+    raw: file://prompts/devpod.txt
+    label: devpod
+  - id: gitpod
+    raw: file://prompts/gitpod.txt
+    label: gitpod
+  - id: dev-containers
+    raw: file://prompts/dev-containers.txt
+    label: dev-containers
+  - id: vagrant
+    raw: file://prompts/vagrant.txt
+    label: vagrant
+  - id: homebrew-bundle
+    raw: file://prompts/homebrew-bundle.txt
+    label: homebrew-bundle
+  - id: mise
+    raw: file://prompts/mise.txt
+    label: mise
+  - id: asdf
+    raw: file://prompts/asdf.txt
+    label: asdf
+  - id: nix
+    raw: file://prompts/nix.txt
+    label: nix
+
+defaultTest:
+  assert:
+    - type: not-contains
+      value: "```"
+    - type: contains
+      value: "[provisioner]"
+    - type: python
+      value: file://assertions/validate_jarvy_toml.py
+
+tests:
+  - description: "Codespaces — devcontainer.json with features + postCreate"
+    prompts:
+      - codespaces
+    vars:
+      input: file://../../tests/migrate/fixtures/codespaces/input.devcontainer.json
+    assert:
+      - type: contains
+        value: 'node = "20"'
+      - type: contains
+        value: 'python = "3.12"'
+      - type: contains
+        value: "awscli"
+      # postCreateCommand "npm ci" can become [hooks] post_setup OR [npm]
+      # from_lockfile — both are valid migrations.
+      - type: javascript
+        value: "output.includes('post_setup') || output.includes('from_lockfile = true')"
+      - type: not-contains
+        value: '"image"'
+      - type: not-contains
+        value: "forwardPorts"
+      - type: not-contains
+        value: "customizations"
+
+  - description: "DevPod — devcontainer.json with docker-in-docker"
+    prompts:
+      - devpod
+    vars:
+      input: file://../../tests/migrate/fixtures/devpod/input.devcontainer.json
+    assert:
+      - type: contains
+        value: 'node = "20"'
+      - type: contains
+        value: 'python = "3.12"'
+      - type: contains
+        value: "docker"
+      - type: contains
+        value: "PYTHONUNBUFFERED"
+      - type: not-contains
+        value: "docker-in-docker"
+
+  - description: "Gitpod — .gitpod.yml with tasks + ports"
+    prompts:
+      - gitpod
+    vars:
+      input: file://../../tests/migrate/fixtures/gitpod/input.gitpod.yml
+    assert:
+      # tasks.init "npm ci / pip install" can be hooks OR lockfile installs.
+      - type: javascript
+        value: "output.includes('post_setup') || output.includes('from_lockfile = true')"
+      - type: not-contains
+        value: "ports:"
+      - type: not-contains
+        value: "onOpen"
+
+  - description: "Dev Containers — devcontainer.json with go + node"
+    prompts:
+      - dev-containers
+    vars:
+      input: file://../../tests/migrate/fixtures/dev-containers/input.devcontainer.json
+    assert:
+      - type: contains
+        value: 'go = "1.22"'
+      - type: contains
+        value: 'node = "20"'
+      - type: contains
+        value: "GOFLAGS"
+
+  - description: "Vagrant — Vagrantfile with shell provisioner + ports"
+    prompts:
+      - vagrant
+    vars:
+      input: file://../../tests/migrate/fixtures/vagrant/input.Vagrantfile
+    assert:
+      - type: contains
+        value: "node"
+      - type: contains
+        value: "post_setup"
+      - type: not-contains
+        value: "vm.box"
+      - type: not-contains
+        value: "synced_folder"
+
+  - description: "Homebrew Bundle — Brewfile with formulae + casks"
+    prompts:
+      - homebrew-bundle
+    vars:
+      input: file://../../tests/migrate/fixtures/homebrew-bundle/input.Brewfile
+    assert:
+      - type: contains
+        value: 'git ='
+      - type: contains
+        value: 'node = "20"'
+      - type: contains
+        value: 'python = "3.12"'
+      - type: contains
+        value: "vscode"
+      - type: contains
+        value: "iterm2"
+
+  - description: "mise — mise.toml with [tools] and [env]"
+    prompts:
+      - mise
+    vars:
+      input: file://../../tests/migrate/fixtures/mise/input.mise.toml
+    assert:
+      - type: contains
+        value: '"=20.11.0"'
+      - type: contains
+        value: 'python = "3.12"'
+      - type: contains
+        value: "DATABASE_URL"
+      - type: not-contains
+        value: "[tools]"
+
+  - description: "asdf — .tool-versions with multiple runtimes"
+    prompts:
+      - asdf
+    vars:
+      input: file://../../tests/migrate/fixtures/asdf/input.tool-versions
+    assert:
+      - type: contains
+        value: 'node = "=20.11.0"'
+      - type: contains
+        value: 'python = "=3.12.1"'
+      - type: contains
+        value: 'ruby = "=3.3.0"'
+
+  - description: "Nix — flake.nix dev shell"
+    prompts:
+      - nix
+    vars:
+      input: file://../../tests/migrate/fixtures/nix/input.flake.nix
+    assert:
+      - type: contains
+        value: 'node = "20"'
+      - type: contains
+        value: 'python = "3.12"'
+      - type: contains
+        value: "kubectl"
+      - type: contains
+        value: "NODE_ENV"
+      - type: not-contains
+        value: "buildInputs"
+      - type: not-contains
+        value: "pkgs."
+
+outputPath: ./claude-code-results.json

@@ -1,0 +1,99 @@
+description: |
+  Offline smoke-test for the migration eval harness.
+
+  Uses a gold-standard provider that returns the hand-curated
+  expected.jarvy.toml for each fixture instead of calling an LLM. This
+  validates that fixtures, assertions, and the python validator are wired
+  together correctly — without needing an API key.
+
+  Run from the repo root:
+    cargo build --bin jarvy
+    promptfoo eval --config evals/migrate/promptfooconfig.smoke.yaml
+
+  The full eval (with real LLM calls and per-source prompts) lives in
+  promptfooconfig.yaml and requires ANTHROPIC_API_KEY.
+
+providers:
+  - id: file://providers/gold_standard.py
+    label: gold-standard fixture replay
+
+# Trivial prompt — every smoke test replaces it with a static gold-standard
+# fixture, so the prompt content itself doesn't matter. We only care that
+# fixture loading + assertions execute end-to-end.
+prompts:
+  - "source={{source}}"
+
+defaultTest:
+  assert:
+    - type: not-contains
+      value: "```"
+    - type: contains
+      value: "[provisioner]"
+    - type: python
+      value: file://assertions/validate_jarvy_toml.py
+
+tests:
+  - description: "Smoke: codespaces"
+    vars:
+      source: codespaces
+    assert:
+      - type: contains
+        value: 'node = "20"'
+
+  - description: "Smoke: devpod"
+    vars:
+      source: devpod
+    assert:
+      - type: contains
+        value: "PYTHONUNBUFFERED"
+
+  - description: "Smoke: gitpod"
+    vars:
+      source: gitpod
+    assert:
+      - type: contains
+        value: "post_setup"
+
+  - description: "Smoke: dev-containers"
+    vars:
+      source: dev-containers
+    assert:
+      - type: contains
+        value: 'go = "1.22"'
+
+  - description: "Smoke: vagrant"
+    vars:
+      source: vagrant
+    assert:
+      - type: contains
+        value: "psql"
+
+  - description: "Smoke: homebrew-bundle"
+    vars:
+      source: homebrew-bundle
+    assert:
+      - type: contains
+        value: "vscode"
+
+  - description: "Smoke: mise"
+    vars:
+      source: mise
+    assert:
+      - type: contains
+        value: '"=20.11.0"'
+
+  - description: "Smoke: asdf"
+    vars:
+      source: asdf
+    assert:
+      - type: contains
+        value: 'node = "=20.11.0"'
+
+  - description: "Smoke: nix"
+    vars:
+      source: nix
+    assert:
+      - type: contains
+        value: "kubectl"
+
+outputPath: ./smoke-results.json

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="md-content" data-md-component="content">
+  <article class="md-content__inner md-typeset">
+    <h1 style="font-size: 4rem; margin-top: 1.5em;">404</h1>
+    <h2 style="border-top: 0; padding-top: 0;">This page is not in the registry.</h2>
+    <p>The page you're looking for has been moved, renamed, or hasn't been written yet.</p>
+    <ul>
+      <li><a href="{{ base_url }}/">Back to the home page</a></li>
+      <li><a href="{{ base_url }}/quickstart/">Quickstart</a></li>
+      <li><a href="{{ base_url }}/concepts/overview/">Concepts overview</a></li>
+      <li><a href="{{ base_url }}/configuration/">Configuration reference</a></li>
+      <li><a href="{{ base_url }}/cli/">CLI reference</a></li>
+      <li><a href="{{ base_url }}/faq/">FAQ</a></li>
+    </ul>
+    <p>If you think this is a broken link in the docs, please <a href="https://github.com/bearbinary/jarvy/issues/new">open an issue</a>.</p>
+  </article>
+</div>
+{% endblock %}

@@ -1,0 +1,7 @@
+[provisioner]
+git = "latest"
+node = "20"
+python = "3.12"
+docker = "latest"
+vscode = "latest"
+iterm2 = "latest"

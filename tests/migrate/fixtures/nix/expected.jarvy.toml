@@ -1,0 +1,12 @@
+[provisioner]
+node = "20"
+python = "3.12"
+docker = "latest"
+terraform = "latest"
+kubectl = "latest"
+
+[env.vars]
+NODE_ENV = "development"
+
+[hooks]
+post_setup = "echo 'shell ready'"

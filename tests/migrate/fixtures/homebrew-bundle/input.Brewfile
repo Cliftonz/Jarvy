@@ -1,0 +1,6 @@
+brew "git"
+brew "node@20"
+brew "python@3.12"
+brew "docker"
+cask "visual-studio-code"
+cask "iterm2"

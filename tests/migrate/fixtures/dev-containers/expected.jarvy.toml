@@ -1,0 +1,17 @@
+[provisioner]
+go = "1.22"
+node = "20"
+docker = "latest"
+
+[hooks]
+post_setup = "go mod download && npm ci"
+
+[env.vars]
+GOFLAGS = "-mod=readonly"
+
+[commands]
+ready = "echo ready"
+
+[drift]
+enabled = true
+track_files = [".vscode/settings.json", ".vscode/extensions.json"]

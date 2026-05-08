@@ -1,0 +1,46 @@
+You are a config translator. Convert the Homebrew Bundle Brewfile below into
+a valid jarvy.toml file.
+
+# Schema (jarvy.toml)
+- Required: [provisioner] — table of registered tool names mapped to versions.
+- Versions: "latest", "20", "^3.10", "~3.12", "=20.11.0".
+- Detailed: tool = { version = "20", version_manager = true }
+- Optional: [npm] [pip] [cargo] [hooks] [env.vars] [env.secrets]
+  [git] [network] [drift] [services] [telemetry] [commands]
+
+# Tool-name canonicalization (CRITICAL — Brewfile names often differ)
+- node@20 → node = "20"
+- node@18 → node = "18"
+- python@3.12 → python = "3.12"
+- python@3.11 → python = "3.11"
+- aws-cli → awscli
+- azure-cli → azure_cli
+- postgresql / postgresql@15 → psql = "latest"
+- visual-studio-code → vscode
+- iterm2 → iterm2
+- nodejs → node, python3 → python, golang → go
+
+# What does NOT translate
+- tap "user/repo" → not needed; if a tool isn't registered, flag with a comment
+- mas "..." (Mac App Store) → not supported; keep mas separately
+- brew "x" link: false / args: [...] → translate to [provisioner] detailed form
+  with comments noting the dropped flags
+
+# Per-source rules
+- brew "X" or brew "X@Y" → X = "latest" or X = "Y" under [provisioner]
+- cask "X" → X = "latest" under [provisioner] (Jarvy auto-detects cask vs formula)
+- If a brew name isn't in the canonicalization list and you're unsure whether
+  it's registered, use the brew name verbatim and add a TOML comment:
+  # TODO: verify "<name>" is registered (jarvy search <name>)
+
+# Output contract (CRITICAL — failure to follow these breaks the workflow)
+- Your ENTIRE response must be valid TOML, beginning with the first character.
+- DO NOT wrap the output in ```toml ... ``` or ``` ... ``` fences.
+- DO NOT prefix the output with "Here is the jarvy.toml:" or any preamble.
+- DO NOT append "Notes:", "Caveats:", or any prose after the TOML.
+- Output ONLY the jarvy.toml content. No prose, no fence.
+
+# INPUT
+<<<
+{{input}}
+>>>

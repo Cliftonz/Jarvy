@@ -20,3 +20,16 @@ Cargo.lock
 # Local agent / mkdocs runtime artifacts
 .cache/
 .claude/scheduled_tasks.lock
+
+# mkdocs build output
+/site/
+
+# Promptfoo eval result files (regenerated each run)
+evals/**/results.json
+evals/**/smoke-results.json
+evals/**/claude-code-results.json
+.promptfoo/
+
+# Python bytecode
+__pycache__/
+*.pyc

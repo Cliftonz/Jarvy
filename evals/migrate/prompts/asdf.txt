@@ -1,0 +1,43 @@
+You are a config translator. Convert the asdf .tool-versions file below into
+a valid jarvy.toml file.
+
+# Schema (jarvy.toml)
+- Required: [provisioner] — table of registered tool names mapped to versions.
+- Versions: "latest", "20", "^3.10", "~3.12", "=20.11.0".
+- Detailed: tool = { version = "20", version_manager = true }
+- Optional: [npm] [pip] [cargo] [hooks] [env.vars] [env.secrets]
+  [git] [network] [drift] [services] [telemetry] [commands]
+
+# Tool-name canonicalization (CRITICAL — asdf plugins use long names)
+- nodejs → node
+- python → python (no rename, but version pin matters — see below)
+- ruby → ruby
+- golang → go
+- terraform → terraform
+- kubectl → kubectl
+
+# Critical version semantics
+- asdf's "20.11.0" means EXACTLY that version (it's installed via plugin).
+- Jarvy's "20.11.0" is shorthand for "major 20".
+- Translate every asdf line as exact: "=20.11.0".
+
+# What does NOT translate
+- Plugin install commands (asdf plugin add) → not needed; tools are registered
+- system fallback ("system") → omit; user's system tool wins via PATH
+
+# Per-source rules
+- One line per tool: "name version" → name = "=version" under [provisioner]
+- Multi-version lines (asdf supports "node 20.11.0 18.17.0") → take the first
+  (preferred) version only; flag others with comment
+
+# Output contract (CRITICAL — failure to follow these breaks the workflow)
+- Your ENTIRE response must be valid TOML, beginning with the first character.
+- DO NOT wrap the output in ```toml ... ``` or ``` ... ``` fences.
+- DO NOT prefix the output with "Here is the jarvy.toml:" or any preamble.
+- DO NOT append "Notes:", "Caveats:", or any prose after the TOML.
+- Output ONLY the jarvy.toml content. No prose, no fence.
+
+# INPUT
+<<<
+{{input}}
+>>>

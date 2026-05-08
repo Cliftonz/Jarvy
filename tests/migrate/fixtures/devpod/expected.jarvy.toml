@@ -1,0 +1,11 @@
+[provisioner]
+node = "20"
+python = "3.12"
+docker = "latest"
+
+[hooks]
+post_setup = "npm ci && npm run prepare"
+
+[env.vars]
+NODE_ENV = "development"
+PYTHONUNBUFFERED = "1"
