@@ -73,6 +73,36 @@ pub fn plugins_dir() -> Result<PathBuf, NoHomeDir> {
     Ok(jarvy_home()?.join("tools.d"))
 }
 
+/// `~/.jarvy/team-sources.toml` — team config source registry.
+pub fn team_sources_toml() -> Result<PathBuf, NoHomeDir> {
+    Ok(jarvy_home()?.join("team-sources.toml"))
+}
+
+/// `~/.jarvy/mcp-config.toml` — MCP allow/deny lists.
+pub fn mcp_config_toml() -> Result<PathBuf, NoHomeDir> {
+    Ok(jarvy_home()?.join("mcp-config.toml"))
+}
+
+/// `~/.jarvy/update-state.json` — last update-check timestamp.
+pub fn update_state_json() -> Result<PathBuf, NoHomeDir> {
+    Ok(jarvy_home()?.join("update-state.json"))
+}
+
+/// `~/.jarvy/install-method.json` — cached self-install-method detection.
+pub fn install_method_json() -> Result<PathBuf, NoHomeDir> {
+    Ok(jarvy_home()?.join("install-method.json"))
+}
+
+/// `~/.jarvy/rollback-info.json` — most-recent self-update rollback record.
+pub fn rollback_info_json() -> Result<PathBuf, NoHomeDir> {
+    Ok(jarvy_home()?.join("rollback-info.json"))
+}
+
+/// `~/.jarvy/ensure.stamp` — shell-init idempotency stamp.
+pub fn ensure_stamp() -> Result<PathBuf, NoHomeDir> {
+    Ok(jarvy_home()?.join("ensure.stamp"))
+}
+
 /// Project-local drift baseline state file: `<project>/.jarvy/state.json`.
 pub fn state_json(project: &std::path::Path) -> PathBuf {
     project.join(JARVY_DIR).join("state.json")

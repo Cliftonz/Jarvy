@@ -117,9 +117,7 @@ impl McpConfig {
 
     /// Get the default configuration file path
     pub fn default_config_path() -> McpResult<PathBuf> {
-        let home = dirs::home_dir()
-            .ok_or_else(|| McpError::config_error("Could not determine home directory"))?;
-        Ok(home.join(".jarvy").join("mcp-config.toml"))
+        crate::paths::mcp_config_toml().map_err(|e| McpError::config_error(format!("{e}")))
     }
 
     /// Get the expanded audit log path

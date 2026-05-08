@@ -122,9 +122,9 @@ pub struct EnsureStamp {
 }
 
 impl EnsureStamp {
-    /// Path to the stamp file
+    /// Path to the stamp file (canonical resolver in `crate::paths`).
     fn path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".jarvy").join("ensure.stamp"))
+        crate::paths::ensure_stamp().ok()
     }
 
     /// Load the stamp from disk

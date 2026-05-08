@@ -276,9 +276,9 @@ impl InstallMethod {
         std::fs::write(cache_path, content)
     }
 
-    /// Get cache file path
+    /// Get cache file path (canonical resolver in `crate::paths`).
     fn cache_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".jarvy").join("install-method.json"))
+        crate::paths::install_method_json().ok()
     }
 
     /// Parse installation method from string

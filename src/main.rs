@@ -15,6 +15,7 @@ mod config;
 mod drift;
 mod env;
 mod error_codes;
+mod exec;
 mod git;
 mod hooks;
 mod init;

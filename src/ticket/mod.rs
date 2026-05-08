@@ -147,12 +147,10 @@ impl Default for TicketData {
     }
 }
 
-/// Get the default tickets directory (~/.jarvy/tickets/)
+/// Get the default tickets directory (~/.jarvy/tickets/) via the canonical
+/// resolver so a `JARVY_HOME` override is honored.
 pub fn default_tickets_directory() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".jarvy")
-        .join("tickets")
+    crate::paths::tickets_dir().unwrap_or_else(|_| PathBuf::from(".jarvy/tickets"))
 }
 
 /// List existing tickets

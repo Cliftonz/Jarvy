@@ -274,8 +274,8 @@ pub fn handle_check_self() -> McpResult<serde_json::Value> {
         .map(|p| p.to_string_lossy().to_string());
 
     // Get config directory
-    let config_dir = dirs::home_dir()
-        .map(|h| h.join(".jarvy"))
+    let config_dir = crate::paths::jarvy_home()
+        .ok()
         .map(|p| p.to_string_lossy().to_string());
 
     let config_exists = config_dir

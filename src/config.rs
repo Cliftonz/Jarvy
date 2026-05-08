@@ -399,6 +399,15 @@ fn build_tool_entry(name: &str, config: &ToolConfig) -> (String, Tool) {
 }
 
 impl Config {
+    /// Construct a Config from raw TOML text. Public for tests so that
+    /// callers don't have to write to disk to construct a fixture.
+    /// Production code should go through `Config::new(path)`.
+    #[doc(hidden)]
+    #[allow(dead_code)] // Test-only seam
+    pub fn from_toml_str(toml_text: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str::<Config>(toml_text)
+    }
+
     pub fn new(config_path: &str) -> Self {
         let config_content = match fs::read_to_string(config_path) {
             Ok(content) => content,

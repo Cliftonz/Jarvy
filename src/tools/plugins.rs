@@ -70,9 +70,10 @@ fn registry() -> &'static RwLock<HashMap<String, PluginTool>> {
     PLUGIN_REGISTRY.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-/// Get the plugin directory path
+/// Get the plugin directory path. Routed through `crate::paths` so a
+/// `JARVY_HOME` override / future XDG migration is honored.
 fn plugin_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".jarvy").join("tools.d"))
+    crate::paths::plugins_dir().ok()
 }
 
 /// Returns true when the path's permissions are safe to load from on Unix:

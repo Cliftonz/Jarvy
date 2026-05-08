@@ -499,71 +499,10 @@ pub fn run_setup(
     }
 
     // Install language-specific packages (npm, pip, cargo)
-    if config.has_packages() {
-        let packages_config = config.get_packages_config();
-        let project_dir = std::path::Path::new(file)
-            .parent()
-            .unwrap_or(std::path::Path::new("."));
-
-        if dry_run {
-            println!("\n=== Package Dependencies (dry-run) ===");
-            if packages_config.npm.is_some() {
-                println!("[DRY-RUN] Would install npm packages");
-            }
-            if packages_config.pip.is_some() {
-                println!("[DRY-RUN] Would install pip packages");
-            }
-            if packages_config.cargo.is_some() {
-                println!("[DRY-RUN] Would install cargo binaries");
-            }
-        } else {
-            println!("\n=== Installing Package Dependencies ===");
-            if let Err(e) = packages::install_packages(&packages_config, project_dir) {
-                eprintln!("Warning: Package installation failed: {}", e);
-            }
-        }
-    }
+    run_packages_phase(&config, file, dry_run);
 
     // Git configuration
-    if config.has_git() {
-        if let Some(git_config) = config.get_git() {
-            if dry_run {
-                println!("\n=== Git Configuration (dry-run) ===");
-                if let Some(ref name) = git_config.user_name {
-                    if let Some(resolved) = name.resolve() {
-                        println!("[DRY-RUN] Would set git config user.name: {}", resolved);
-                    }
-                }
-                if let Some(ref email) = git_config.user_email {
-                    if let Some(resolved) = email.resolve() {
-                        println!("[DRY-RUN] Would set git config user.email: {}", resolved);
-                    }
-                }
-                if git_config.signing {
-                    println!("[DRY-RUN] Would enable commit signing");
-                    if let Some(ref key) = git_config.signing_key {
-                        println!("[DRY-RUN] Would set signing key: {}", key);
-                    }
-                }
-                if let Some(ref branch) = git_config.default_branch {
-                    println!("[DRY-RUN] Would set init.defaultBranch: {}", branch);
-                }
-                if !git_config.aliases.is_empty() {
-                    println!(
-                        "[DRY-RUN] Would configure {} git aliases",
-                        git_config.aliases.len()
-                    );
-                }
-            } else {
-                println!("\n=== Git Configuration ===");
-                let setup = crate::git::GitSetup::new(git_config.clone());
-                match setup.configure() {
-                    Ok(()) => println!("Git configuration applied successfully"),
-                    Err(e) => eprintln!("Warning: Git configuration failed: {}", e),
-                }
-            }
-        }
-    }
+    run_git_phase(&config, dry_run);
 
     // Environment variable setup
     let env_config = config.get_env();
@@ -663,46 +602,7 @@ pub fn run_setup(
     }
 
     // Auto-start services if configured
-    let services_config = &config.services;
-    let is_ci = ci_env.is_some();
-    if services_config.should_auto_start(is_ci) {
-        let working_dir = std::path::Path::new(file)
-            .parent()
-            .unwrap_or(std::path::Path::new("."));
-
-        // Detect service backend
-        let backend_result = services::detect_backend_with_config(
-            working_dir,
-            services_config.compose_file.as_deref(),
-            services_config.tilt_file.as_deref(),
-        );
-
-        if let Some((backend, config_path)) = backend_result {
-            let backend_impl = services::get_backend(backend);
-
-            if backend_impl.is_installed() {
-                if dry_run {
-                    println!("\n[DRY-RUN] Would auto-start {} services", backend);
-                } else {
-                    println!("\nAuto-starting {} services...", backend);
-                    match backend_impl.start(&config_path, true) {
-                        Ok(result) => {
-                            println!("{}", result.message);
-                        }
-                        Err(e) => {
-                            // Services auto-start is advisory - don't fail the setup
-                            eprintln!("Warning: Failed to auto-start services: {}", e);
-                        }
-                    }
-                }
-            } else {
-                eprintln!(
-                    "Note: {} config found but {} is not installed. Skipping services auto-start.",
-                    backend, backend
-                );
-            }
-        }
-    }
+    run_services_phase(&config, file, ci_env.is_some(), dry_run);
 
     if config.has_hooks() && !no_hooks {
         println!("\nHooks execution summary:");
@@ -782,6 +682,128 @@ pub fn run_setup(
     0
 }
 
+/// Install language-specific packages (npm, pip, cargo) configured under
+/// the `[npm]` / `[pip]` / `[cargo]` sections of `jarvy.toml`. Extracted
+/// from `run_setup` (review item 21) — runs after tool install and before
+/// git/env configuration.
+fn run_packages_phase(config: &Config, file: &str, dry_run: bool) {
+    if !config.has_packages() {
+        return;
+    }
+    let packages_config = config.get_packages_config();
+    let project_dir = std::path::Path::new(file)
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+
+    if dry_run {
+        println!("\n=== Package Dependencies (dry-run) ===");
+        if packages_config.npm.is_some() {
+            println!("[DRY-RUN] Would install npm packages");
+        }
+        if packages_config.pip.is_some() {
+            println!("[DRY-RUN] Would install pip packages");
+        }
+        if packages_config.cargo.is_some() {
+            println!("[DRY-RUN] Would install cargo binaries");
+        }
+    } else {
+        println!("\n=== Installing Package Dependencies ===");
+        if let Err(e) = packages::install_packages(&packages_config, project_dir) {
+            eprintln!("Warning: Package installation failed: {}", e);
+        }
+    }
+}
+
+/// Apply `[git]` configuration (user identity, signing, aliases, line
+/// endings) via `crate::git::GitSetup`. Refusal of `!`-prefixed values is
+/// applied inside `GitSetup::set_config`.
+fn run_git_phase(config: &Config, dry_run: bool) {
+    if !config.has_git() {
+        return;
+    }
+    let Some(git_config) = config.get_git() else {
+        return;
+    };
+    if dry_run {
+        println!("\n=== Git Configuration (dry-run) ===");
+        if let Some(ref name) = git_config.user_name {
+            if let Some(resolved) = name.resolve() {
+                println!("[DRY-RUN] Would set git config user.name: {resolved}");
+            }
+        }
+        if let Some(ref email) = git_config.user_email {
+            if let Some(resolved) = email.resolve() {
+                println!("[DRY-RUN] Would set git config user.email: {resolved}");
+            }
+        }
+        if git_config.signing {
+            println!("[DRY-RUN] Would enable commit signing");
+            if let Some(ref key) = git_config.signing_key {
+                println!("[DRY-RUN] Would set signing key: {key}");
+            }
+        }
+        if let Some(ref branch) = git_config.default_branch {
+            println!("[DRY-RUN] Would set init.defaultBranch: {branch}");
+        }
+        if !git_config.aliases.is_empty() {
+            println!(
+                "[DRY-RUN] Would configure {} git aliases",
+                git_config.aliases.len()
+            );
+        }
+    } else {
+        println!("\n=== Git Configuration ===");
+        let setup = crate::git::GitSetup::new(git_config.clone());
+        match setup.configure() {
+            Ok(()) => println!("Git configuration applied successfully"),
+            Err(e) => eprintln!("Warning: Git configuration failed: {e}"),
+        }
+    }
+}
+
+/// Auto-start services (`docker compose` / `tilt`) if `[services]` is
+/// configured to do so for this environment. Containment-checked path
+/// resolution lives in `services::detect_backend_with_config`.
+fn run_services_phase(config: &Config, file: &str, is_ci: bool, dry_run: bool) {
+    let services_config = &config.services;
+    if !services_config.should_auto_start(is_ci) {
+        return;
+    }
+    let working_dir = std::path::Path::new(file)
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+
+    let Some((backend, config_path)) = services::detect_backend_with_config(
+        working_dir,
+        services_config.compose_file.as_deref(),
+        services_config.tilt_file.as_deref(),
+    ) else {
+        return;
+    };
+
+    let backend_impl = services::get_backend(backend);
+    if !backend_impl.is_installed() {
+        eprintln!(
+            "Note: {backend} config found but {backend} is not installed. \
+             Skipping services auto-start."
+        );
+        return;
+    }
+
+    if dry_run {
+        println!("\n[DRY-RUN] Would auto-start {backend} services");
+    } else {
+        println!("\nAuto-starting {backend} services...");
+        match backend_impl.start(&config_path, true) {
+            Ok(result) => println!("{}", result.message),
+            Err(e) => {
+                // Services auto-start is advisory — don't fail the setup.
+                eprintln!("Warning: Failed to auto-start services: {e}");
+            }
+        }
+    }
+}
+
 /// Detect install method for a tool based on its path
 fn detect_install_method(tool: &str) -> String {
     if let Ok(path) = which::which(tool) {
@@ -808,4 +830,103 @@ fn detect_install_method(tool: &str) -> String {
     }
 
     "unknown".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    //! Smoke tests for the extracted phase helpers (review item 21 / item 8
+    //! follow-up). These run the dry-run path of each phase so we catch
+    //! signature drift and panics — not the full install behavior.
+
+    use super::*;
+
+    fn config_from(toml: &str) -> Config {
+        Config::from_toml_str(toml).expect("test toml must parse")
+    }
+
+    #[test]
+    fn run_packages_phase_no_packages_section_is_noop() {
+        let cfg = config_from(
+            r#"
+            [provisioner]
+            git = "latest"
+            "#,
+        );
+        // No assertion needed — just verify no panic on the no-op path.
+        run_packages_phase(&cfg, "jarvy.toml", true);
+    }
+
+    #[test]
+    fn run_packages_phase_dry_run_does_not_invoke_pm() {
+        // [npm] / [pip] / [cargo] sections present; dry_run=true must NOT
+        // shell out to npm/pip/cargo.
+        let cfg = config_from(
+            r#"
+            [provisioner]
+            git = "latest"
+
+            [npm]
+            typescript = "^5.0"
+            "#,
+        );
+        run_packages_phase(&cfg, "jarvy.toml", true);
+    }
+
+    #[test]
+    fn run_git_phase_no_git_section_is_noop() {
+        let cfg = config_from(
+            r#"
+            [provisioner]
+            git = "latest"
+            "#,
+        );
+        run_git_phase(&cfg, true);
+    }
+
+    #[test]
+    fn run_git_phase_dry_run_does_not_invoke_git() {
+        let cfg = config_from(
+            r#"
+            [provisioner]
+            git = "latest"
+
+            [git]
+            user_name = "Test User"
+            user_email = "test@example.com"
+            default_branch = "main"
+
+            [git.aliases]
+            co = "checkout"
+            "#,
+        );
+        run_git_phase(&cfg, true);
+    }
+
+    #[test]
+    fn run_services_phase_disabled_is_noop() {
+        let cfg = config_from(
+            r#"
+            [provisioner]
+            git = "latest"
+            "#,
+        );
+        run_services_phase(&cfg, "jarvy.toml", false, true);
+    }
+
+    #[test]
+    fn run_services_phase_dry_run_with_compose_file_does_not_invoke_docker() {
+        // Even though the path won't exist, detect_backend_with_config
+        // returns None and the phase exits cleanly.
+        let cfg = config_from(
+            r#"
+            [provisioner]
+            git = "latest"
+
+            [services]
+            enabled = true
+            auto_start = true
+            "#,
+        );
+        run_services_phase(&cfg, "jarvy.toml", false, true);
+    }
 }

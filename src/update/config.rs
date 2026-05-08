@@ -174,7 +174,7 @@ impl UpdateConfig {
 
     /// Load configuration from ~/.jarvy/config.toml
     fn load_from_file() -> Option<Self> {
-        let config_path = dirs::home_dir()?.join(".jarvy").join("config.toml");
+        let config_path = crate::paths::config_toml().ok()?;
 
         if !config_path.exists() {
             return None;
@@ -243,12 +243,8 @@ impl UpdateConfig {
 
     /// Save configuration to ~/.jarvy/config.toml
     pub fn save(&self) -> std::io::Result<()> {
-        let config_dir = dirs::home_dir()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "No home directory"))?
-            .join(".jarvy");
-
+        let config_dir = crate::paths::jarvy_home().map_err(std::io::Error::other)?;
         std::fs::create_dir_all(&config_dir)?;
-
         let config_path = config_dir.join("config.toml");
 
         // Read existing config to preserve other sections

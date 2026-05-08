@@ -99,9 +99,8 @@ impl Registry {
 
     /// Get the default registry path
     fn registry_path() -> PathBuf {
-        dirs::home_dir()
-            .map(|h| h.join(".jarvy").join("team-sources.toml"))
-            .unwrap_or_else(|| PathBuf::from(".jarvy/team-sources.toml"))
+        crate::paths::team_sources_toml()
+            .unwrap_or_else(|_| PathBuf::from(".jarvy/team-sources.toml"))
     }
 
     /// Add a new source

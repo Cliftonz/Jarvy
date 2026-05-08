@@ -71,8 +71,7 @@ fn ca_bundle_path_is_trusted(path: &str) -> bool {
     {
         return true;
     }
-    if let Some(home) = dirs::home_dir() {
-        let jarvy_dir = home.join(".jarvy");
+    if let Ok(jarvy_dir) = crate::paths::jarvy_home() {
         if let Some(jarvy_str) = jarvy_dir.to_str() {
             if canon.starts_with(jarvy_str) {
                 return true;

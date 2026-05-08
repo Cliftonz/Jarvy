@@ -172,13 +172,10 @@ impl TicketCollector {
 
     /// Collect configuration (sanitized)
     fn collect_config(&self) -> Result<Option<serde_json::Value>, TicketError> {
-        // Try to read jarvy.toml
+        // Try to read jarvy.toml (project) and ~/.jarvy/config.toml (global).
         let config_paths = [
             PathBuf::from("jarvy.toml"),
-            dirs::home_dir()
-                .unwrap_or_default()
-                .join(".jarvy")
-                .join("config.toml"),
+            crate::paths::config_toml().unwrap_or_else(|_| PathBuf::new()),
         ];
 
         for path in &config_paths {

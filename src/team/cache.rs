@@ -21,9 +21,8 @@ pub struct ConfigCache {
 impl ConfigCache {
     /// Create a new config cache with default settings
     pub fn new() -> Self {
-        let cache_dir = dirs::home_dir()
-            .map(|h| h.join(".jarvy").join("cache").join("configs"))
-            .unwrap_or_else(|| PathBuf::from(".jarvy/cache/configs"));
+        let cache_dir = crate::paths::remote_config_cache_dir()
+            .unwrap_or_else(|_| PathBuf::from(".jarvy/cache/configs"));
 
         Self {
             cache_dir,

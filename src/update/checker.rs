@@ -67,9 +67,9 @@ impl UpdateState {
         std::fs::write(path, content)
     }
 
-    /// Get state file path
+    /// Get state file path (canonical resolver in `crate::paths`).
     fn state_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".jarvy").join("update-state.json"))
+        crate::paths::update_state_json().ok()
     }
 
     /// Get current Unix timestamp

@@ -28,12 +28,10 @@ pub enum LogError {
     ReadFailed(String),
 }
 
-/// Get the default log directory path (~/.jarvy/logs/)
+/// Get the default log directory path (~/.jarvy/logs/) via the canonical
+/// resolver so a `JARVY_HOME` override is honored.
 pub fn default_log_directory() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".jarvy")
-        .join("logs")
+    crate::paths::logs_dir().unwrap_or_else(|_| PathBuf::from(".jarvy/logs"))
 }
 
 /// Get the current log file path

@@ -54,7 +54,9 @@ pub fn mark_initialized() -> Result<(), std::io::Error> {
 
 /// Get the path to the first-run marker file
 fn get_marker_path() -> Option<std::path::PathBuf> {
-    dirs::home_dir().map(|home| home.join(".jarvy").join(FIRST_RUN_MARKER))
+    crate::paths::jarvy_home()
+        .ok()
+        .map(|h| h.join(FIRST_RUN_MARKER))
 }
 
 /// Check if we're running in a CI environment. Delegates to the canonical

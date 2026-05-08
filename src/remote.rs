@@ -146,12 +146,9 @@ pub fn fetch_remote_config(url: &str, headers: &[String]) -> Result<String, Stri
         ));
     }
 
-    // Get cache directory
-    let cache_dir = dirs::home_dir()
-        .ok_or("Could not determine home directory")?
-        .join(".jarvy")
-        .join("cache")
-        .join("configs");
+    // Get cache directory (canonical resolver: honors JARVY_HOME override).
+    let cache_dir = crate::paths::remote_config_cache_dir()
+        .map_err(|e| format!("Could not determine home directory: {e}"))?;
 
     // Create cache directory if it doesn't exist
     if !cache_dir.exists() {

@@ -94,16 +94,15 @@ fn initialize_from_disk() -> CliConfig {
         return CliConfig::default();
     }
 
-    // check jarvy config for the usr
-    let Some(home_dir) = dirs::home_dir() else {
-        eprintln!("Failed to get home directory");
-        return CliConfig::default();
+    // Resolve `~/.jarvy/` and `~/.jarvy/config.toml` through the canonical
+    // resolver so a future XDG migration / `JARVY_HOME` override is honored.
+    let jarvy_dir = match crate::paths::jarvy_home() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Failed to get home directory: {e}");
+            return CliConfig::default();
+        }
     };
-
-    // Create the .jarvy directory path
-    let jarvy_dir = home_dir.join(".jarvy");
-
-    // Define the path to the config.toml file
     let config_file_path = jarvy_dir.join("config.toml");
 
     // Create the .jarvy directory if it doesn't exist
@@ -173,18 +172,25 @@ pub fn save_global_config(config: &CliConfig) -> Result<(), String> {
 
 /// Single source of truth for the global config path: `~/.jarvy/config.toml`.
 ///
-/// Honors the `JARVY_TEST_HOME` env var as a deliberate override so tests
-/// can isolate config writes to a temp directory. `dirs::home_dir()` on
-/// Windows uses `SHGetKnownFolderPath` and ignores HOME/USERPROFILE, so
-/// env-var-based isolation does not work there without an explicit hook.
-/// JARVY_TEST_HOME is opt-in and Jarvy-namespaced; production environments
-/// will never set it.
+/// Honors `JARVY_TEST_HOME` as a deliberate test override (overrides the
+/// home directory; the `.jarvy` segment is appended). `dirs::home_dir()`
+/// on Windows uses `SHGetKnownFolderPath` and ignores HOME/USERPROFILE,
+/// so env-var-based isolation does not work there without an explicit
+/// hook. `JARVY_TEST_HOME` is opt-in and Jarvy-namespaced; production
+/// environments will never set it.
+///
+/// `JARVY_HOME` (handled inside `crate::paths::jarvy_home`) overrides
+/// the entire `~/.jarvy/` location and is honored ahead of the
+/// test-only override.
 pub fn global_config_path() -> Option<std::path::PathBuf> {
-    let home = std::env::var("JARVY_TEST_HOME")
-        .ok()
-        .map(std::path::PathBuf::from)
-        .or_else(dirs::home_dir)?;
-    Some(home.join(".jarvy").join("config.toml"))
+    if let Ok(custom_home) = std::env::var("JARVY_TEST_HOME") {
+        return Some(
+            std::path::PathBuf::from(custom_home)
+                .join(".jarvy")
+                .join("config.toml"),
+        );
+    }
+    crate::paths::config_toml().ok()
 }
 
 /// Load the current global config (returning `Default` if missing/unreadable),

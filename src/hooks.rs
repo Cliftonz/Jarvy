@@ -179,7 +179,9 @@ impl HookEnv {
             version: Some(version.to_string()),
             os: Some(crate::tools::current_os()),
             arch: Some(std::env::consts::ARCH.to_string()),
-            jarvy_home: dirs::home_dir().map(|p| p.join(".jarvy").to_string_lossy().to_string()),
+            jarvy_home: crate::paths::jarvy_home()
+                .ok()
+                .map(|p| p.to_string_lossy().to_string()),
             custom: HashMap::new(),
         }
     }
@@ -191,7 +193,9 @@ impl HookEnv {
             version: None,
             os: Some(crate::tools::current_os()),
             arch: Some(std::env::consts::ARCH.to_string()),
-            jarvy_home: dirs::home_dir().map(|p| p.join(".jarvy").to_string_lossy().to_string()),
+            jarvy_home: crate::paths::jarvy_home()
+                .ok()
+                .map(|p| p.to_string_lossy().to_string()),
             custom: HashMap::new(),
         }
     }

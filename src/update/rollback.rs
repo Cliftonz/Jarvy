@@ -23,9 +23,9 @@ pub struct RollbackInfo {
 }
 
 impl RollbackInfo {
-    /// Get rollback info file path
+    /// Get rollback info file path (canonical resolver in `crate::paths`).
     fn path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".jarvy").join("rollback-info.json"))
+        crate::paths::rollback_info_json().ok()
     }
 
     /// Load rollback info from disk
