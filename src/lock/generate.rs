@@ -81,26 +81,12 @@ fn try_get_version(cmd: &str, arg: &str) -> Option<String> {
     extract_version(&stdout)
 }
 
-/// Extract version string from command output
+/// Extract version string from command output. Delegates to the
+/// canonical extractor in `tools::version` so lock-file output and
+/// drift reports normalize identical `--version` output to identical
+/// strings (round-2 maint F14).
 fn extract_version(output: &str) -> Option<String> {
-    // Match common version patterns
-    let patterns = [
-        r"(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)", // 1.2.3 or 1.2.3-beta
-        r"(\d+\.\d+)",                         // 1.2
-        r"v(\d+\.\d+\.\d+)",                   // v1.2.3
-    ];
-
-    for pattern in patterns {
-        if let Ok(re) = regex::Regex::new(pattern) {
-            if let Some(caps) = re.captures(output) {
-                if let Some(m) = caps.get(1) {
-                    return Some(m.as_str().to_string());
-                }
-            }
-        }
-    }
-
-    None
+    crate::tools::version::extract_version(output).map(|v| v.to_string())
 }
 
 /// Detect how a tool was installed
@@ -321,7 +307,10 @@ mod tests {
 
     #[test]
     fn test_extract_version_two_parts() {
-        assert_eq!(extract_version("python 3.12"), Some("3.12".to_string()));
+        // Canonical normalizer (tools::version) zero-fills the patch
+        // component so "3.12" → "3.12.0". Wire format is now consistent
+        // across drift / lock / doctor (round-2 maint F14).
+        assert_eq!(extract_version("python 3.12"), Some("3.12.0".to_string()));
     }
 
     #[test]

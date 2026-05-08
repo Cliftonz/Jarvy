@@ -166,7 +166,7 @@ impl BinaryInstaller {
 
         let response = crate::net::agent()
             .get(&asset.browser_download_url)
-            .header("User-Agent", &crate::net::user_agent())
+            .header("User-Agent", crate::net::USER_AGENT)
             .call()
             .map_err(|e| UpdateError::DownloadFailed(e.to_string()))?;
 
@@ -191,7 +191,7 @@ impl BinaryInstaller {
     fn download_checksums(&self, asset: &ReleaseAsset) -> Result<String, UpdateError> {
         let response = crate::net::agent()
             .get(&asset.browser_download_url)
-            .header("User-Agent", &crate::net::user_agent())
+            .header("User-Agent", crate::net::USER_AGENT)
             .call()
             .map_err(|e| UpdateError::DownloadFailed(e.to_string()))?;
 

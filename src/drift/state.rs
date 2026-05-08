@@ -63,9 +63,12 @@ impl EnvironmentState {
         Self::default()
     }
 
-    /// Load state from the project's .jarvy/state.json file
+    /// Load state from the project's .jarvy/state.json file. Path
+    /// resolved through `crate::paths::state_json` so the canonical
+    /// project-local resolver is the only site that knows the
+    /// `.jarvy/state.json` literal (round-2 maint F3).
     pub fn load(project_dir: &Path) -> Result<Option<Self>, DriftError> {
-        let state_path = project_dir.join(".jarvy/state.json");
+        let state_path = crate::paths::state_json(project_dir);
 
         if !state_path.exists() {
             return Ok(None);
@@ -76,12 +79,13 @@ impl EnvironmentState {
         Ok(Some(state))
     }
 
-    /// Save state to the project's .jarvy/state.json file
+    /// Save state to the project's .jarvy/state.json file (canonical
+    /// resolver in `crate::paths`).
     pub fn save(&self, project_dir: &Path) -> Result<(), DriftError> {
-        let jarvy_dir = project_dir.join(".jarvy");
-        fs::create_dir_all(&jarvy_dir)?;
-
-        let state_path = jarvy_dir.join("state.json");
+        let state_path = crate::paths::state_json(project_dir);
+        if let Some(parent) = state_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
         let content = serde_json::to_string_pretty(self)?;
         fs::write(&state_path, content)?;
         Ok(())
@@ -235,8 +239,8 @@ mod tests {
         // Save
         state.save(project_dir).unwrap();
 
-        // Verify file exists
-        let state_path = project_dir.join(".jarvy/state.json");
+        // Verify file exists (using the canonical resolver path).
+        let state_path = crate::paths::state_json(project_dir);
         assert!(state_path.exists());
 
         // Load

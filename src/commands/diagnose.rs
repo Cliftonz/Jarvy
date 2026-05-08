@@ -342,30 +342,21 @@ fn get_tool_version(command: &str, version_arg: &str) -> Option<String> {
     }
 }
 
-/// Detect how a tool was installed
+/// Detect how a tool was installed. Delegates to the canonical
+/// classifier in `tools::install_method` (round-2 maint F1).
+///
+/// Two label remappings preserve diagnose's user-facing wire format:
+/// `Brew` → `"homebrew"` (diagnose has historically used the longer
+/// name) and `Unknown` → `"manual"`.
 fn detect_install_method(location: Option<&str>) -> Option<String> {
+    use crate::tools::install_method::{InstallMethod, detect_install_method_from_path};
     let loc = location?;
-
-    if loc.contains("/homebrew/")
-        || loc.contains("/opt/homebrew/")
-        || loc.contains("/usr/local/Cellar/")
-    {
-        Some("homebrew".to_string())
-    } else if loc.contains("/.cargo/") {
-        Some("cargo".to_string())
-    } else if loc.contains("/.nvm/") {
-        Some("nvm".to_string())
-    } else if loc.contains("/.pyenv/") {
-        Some("pyenv".to_string())
-    } else if loc.contains("/.rustup/") {
-        Some("rustup".to_string())
-    } else if loc.contains("/snap/") {
-        Some("snap".to_string())
-    } else if loc.starts_with("/usr/bin/") || loc.starts_with("/bin/") {
-        Some("system".to_string())
-    } else {
-        Some("manual".to_string())
-    }
+    let method = detect_install_method_from_path(std::path::Path::new(loc));
+    Some(match method {
+        InstallMethod::Brew => "homebrew".to_string(),
+        InstallMethod::Unknown => "manual".to_string(),
+        other => other.to_string(),
+    })
 }
 
 /// Analyze a binary file (Unix). Reads POSIX mode/uid/gid from filesystem

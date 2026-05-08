@@ -247,7 +247,11 @@ fn build_telemetry_state(config: TelemetryConfig) -> TelemetryState {
     // pointing at `http://attacker.tld` cannot silently leak the payloads
     // (full tool inventory, fingerprint, error stderr) onto the wire.
     if let Err(why) = config.validate_endpoint() {
-        tracing::warn!(
+        // Promoted to error! (round-2 obs F20): endpoint refusal is a
+        // security event (operator pointed telemetry at plain HTTP /
+        // unknown scheme), and the only reachable sink is the local
+        // console — OTLP itself is what got refused.
+        tracing::error!(
             event = "telemetry.endpoint.refused",
             reason = %why,
             "disabling telemetry: configured endpoint rejected"
@@ -446,7 +450,11 @@ pub fn tool_failed(tool: &str, version: &str, error: &str) {
     // Redact potentially sensitive info from error
     let redacted_error = redact_sensitive(error);
 
-    tracing::warn!(
+    // Promoted to error! (round-2 obs P1): the analytics console-split
+    // layer routes `level < ERROR` to stdout. CI scrapers using `2>`
+    // miss install failures unless they land on stderr. Also surfaces
+    // under quiet mode and OTLP-error-only filters.
+    tracing::error!(
         event = "tool.failed",
         tool = %tool,
         version = %version,
@@ -657,7 +665,7 @@ pub fn hook_failed(hook_name: &str, hook_type: &str, error: &str, error_type: &s
     }
 
     let redacted_error = redact_sensitive(error);
-    tracing::warn!(
+    tracing::error!(
         event = "hook.failed",
         hook_name = %hook_name,
         hook_type = %hook_type,
@@ -687,7 +695,7 @@ pub fn hook_timeout(hook_name: &str, hook_type: &str, timeout_secs: u64) {
         return;
     }
 
-    tracing::warn!(
+    tracing::error!(
         event = "hook.timeout",
         hook_name = %hook_name,
         hook_type = %hook_type,
@@ -872,7 +880,7 @@ pub fn config_parse_error(file: &str, error: &str) {
     let redacted_file = redact_path(file);
     let redacted_error = redact_sensitive(error);
 
-    tracing::warn!(
+    tracing::error!(
         event = "config.parse_error",
         file = %redacted_file,
         error = %redacted_error,
@@ -1052,16 +1060,25 @@ static HOME_DIR_STRING: std::sync::LazyLock<Option<String>> =
 ///
 /// Returns a `Cow::Borrowed` when no replacement happened so the common
 /// case (no match) avoids allocation entirely.
+///
+/// Round-2 perf F8: the previous impl forced an extra `.into_owned()`
+/// clone on the home-only-match path. Now we match on the second
+/// `replace_all` and hand the existing Cow back when the second pass
+/// was a no-op — saving one heap copy per `tool_failed`/`hook_failed`
+/// log line that contains a path.
 fn redact_sensitive(s: &str) -> std::borrow::Cow<'_, str> {
     let after_home = REDACT_HOME_PATH_RE.replace_all(s, "[HOME]");
-    let home_changed = matches!(after_home, std::borrow::Cow::Owned(_));
-    let after_env = REDACT_ENV_VALUE_RE.replace_all(&after_home, "$1=[REDACTED]");
-    let env_changed = matches!(after_env, std::borrow::Cow::Owned(_));
-
-    if !home_changed && !env_changed {
-        std::borrow::Cow::Borrowed(s)
-    } else {
-        std::borrow::Cow::Owned(after_env.into_owned())
+    match REDACT_ENV_VALUE_RE.replace_all(&after_home, "$1=[REDACTED]") {
+        // Env pass changed something — its owned String already
+        // includes the home redaction, so return it directly.
+        std::borrow::Cow::Owned(owned) => std::borrow::Cow::Owned(owned),
+        // Env pass was a no-op. Return whichever Cow `after_home`
+        // already is — Borrowed if neither pass matched, Owned if
+        // only the home pass did. No extra clone either way.
+        std::borrow::Cow::Borrowed(_) => match after_home {
+            std::borrow::Cow::Borrowed(_) => std::borrow::Cow::Borrowed(s),
+            std::borrow::Cow::Owned(owned) => std::borrow::Cow::Owned(owned),
+        },
     }
 }
 

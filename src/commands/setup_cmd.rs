@@ -357,6 +357,7 @@ pub fn run_setup(
                                 version = %version,
                             );
                             let _is = install_span.enter();
+                            let install_start = std::time::Instant::now();
                             println!(
                                 "Installing {} version {} using custom installer",
                                 name, version
@@ -365,6 +366,19 @@ pub fn run_setup(
                             match tools::add(name, version) {
                                 Ok(()) => {
                                     println!("Successfully installed {} ({})", name, version);
+                                    // Round-2 obs F13: emit tool.installed
+                                    // for the custom-install path. The
+                                    // batch-install path already does
+                                    // this; without the matching call here
+                                    // the `jarvy.tool.installs` counter
+                                    // under-counts every nvm/rustup/brew-
+                                    // bootstrap install.
+                                    telemetry::tool_installed(
+                                        name,
+                                        version,
+                                        "custom",
+                                        install_start.elapsed(),
+                                    );
                                     if let Ok(mut guard) = success_collector.lock() {
                                         guard.push((name.clone(), version.clone()));
                                     }
@@ -401,6 +415,7 @@ pub fn run_setup(
             } else {
                 // Sequential installation (--sequential or --jobs 1)
                 for (name, version) in &tool_groups.custom_install {
+                    let install_start = std::time::Instant::now();
                     println!(
                         "Installing {} version {} using custom installer",
                         name, version
@@ -409,6 +424,13 @@ pub fn run_setup(
                     match tools::add(name, version) {
                         Ok(()) => {
                             println!("Successfully installed {} ({})", name, version);
+                            // Round-2 obs F13: same fix as the parallel path.
+                            telemetry::tool_installed(
+                                name,
+                                version,
+                                "custom",
+                                install_start.elapsed(),
+                            );
                             successfully_installed.push((name.clone(), version.clone()));
                         }
                         Err(e) => {
@@ -804,32 +826,12 @@ fn run_services_phase(config: &Config, file: &str, is_ci: bool, dry_run: bool) {
     }
 }
 
-/// Detect install method for a tool based on its path
+/// Detect install method for a tool based on its path. Delegates to
+/// the canonical classifier in `tools::install_method`. Three other
+/// copies were drifting (round-2 maint F1) — they're being migrated
+/// onto this one source of truth.
 fn detect_install_method(tool: &str) -> String {
-    if let Ok(path) = which::which(tool) {
-        let path_str = path.to_string_lossy();
-
-        if path_str.contains("/homebrew/") || path_str.contains("/opt/homebrew/") {
-            return "brew".to_string();
-        }
-        if path_str.contains("/.cargo/") {
-            return "cargo".to_string();
-        }
-        if path_str.contains("/.nvm/") {
-            return "nvm".to_string();
-        }
-        if path_str.contains("/.pyenv/") {
-            return "pyenv".to_string();
-        }
-        if path_str.contains("/.rustup/") {
-            return "rustup".to_string();
-        }
-        if path_str.contains("/usr/bin/") || path_str.contains("/usr/local/bin/") {
-            return "system".to_string();
-        }
-    }
-
-    "unknown".to_string()
+    crate::tools::install_method::detect_install_method_for_tool(tool).to_string()
 }
 
 #[cfg(test)]

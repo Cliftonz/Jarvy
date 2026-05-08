@@ -241,17 +241,12 @@ fn get_tool_version(tool: &str) -> Option<String> {
     extract_version(&output_str)
 }
 
-/// Extract version from command output
+/// Extract version from command output. Delegates to the canonical
+/// extractor in `tools::version` so drift reports and lock-file
+/// output normalize identical `--version` output to identical strings
+/// (round-2 maint F14).
 fn extract_version(output: &str) -> Option<String> {
-    // Match common version patterns
-    let version_regex =
-        regex::Regex::new(r"(?i)v?(\d+\.\d+(?:\.\d+)?(?:-[a-zA-Z0-9.]+)?(?:\+[a-zA-Z0-9.]+)?)")
-            .ok()?;
-
-    version_regex
-        .captures(output)
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().to_string())
+    crate::tools::version::extract_version(output).map(|v| v.to_string())
 }
 
 /// Check if new version is an upgrade from old version

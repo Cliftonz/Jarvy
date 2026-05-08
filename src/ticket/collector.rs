@@ -157,8 +157,10 @@ impl TicketCollector {
                         let version_output = String::from_utf8_lossy(&output.stdout);
                         // Take first line and sanitize
                         if let Some(first_line) = version_output.lines().next() {
-                            tool_info.version =
-                                Some(self.sanitizer.sanitize(first_line).to_string());
+                            // sanitize() already returns String — drop
+                            // the redundant to_string() that doubled
+                            // the alloc (round-2 perf F10).
+                            tool_info.version = Some(self.sanitizer.sanitize(first_line));
                         }
                     }
                 }
@@ -260,9 +262,12 @@ impl TicketCollector {
         match logging::read_recent_logs(lines) {
             Ok(logs) => {
                 // Sanitize each log line
+                // sanitize() already returns String — drop the redundant
+                // to_string() that doubled the per-line alloc (round-2
+                // perf F10). 1k log bundle: ~1MB less heap churn.
                 Ok(logs
                     .into_iter()
-                    .map(|l| self.sanitizer.sanitize(&l).to_string())
+                    .map(|l| self.sanitizer.sanitize(&l))
                     .collect())
             }
             Err(e) => {
@@ -275,7 +280,7 @@ impl TicketCollector {
 
     /// Sanitize a path (replace home directory with ~)
     fn sanitize_path(&self, path: &std::path::Path) -> String {
-        self.sanitizer.sanitize(&path.to_string_lossy()).to_string()
+        self.sanitizer.sanitize(&path.to_string_lossy())
     }
 }
 

@@ -358,7 +358,7 @@ pub fn validated_get(url: &str) -> Result<String, String> {
 
     let response = crate::net::agent()
         .get(url)
-        .header("User-Agent", &crate::net::user_agent())
+        .header("User-Agent", crate::net::USER_AGENT)
         .header("Accept", "text/plain, application/toml, */*")
         .call()
         .map_err(|e| format!("Failed to fetch URL: {}", e))?;

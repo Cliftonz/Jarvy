@@ -4,4 +4,6 @@
 
 pub mod agent;
 
-pub use agent::{agent, user_agent};
+#[allow(unused_imports)]
+pub use agent::user_agent;
+pub use agent::{USER_AGENT, agent};

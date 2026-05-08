@@ -82,6 +82,7 @@ pub mod httpie;
 pub mod hugo;
 pub mod hyperfine;
 pub mod infracost;
+pub mod install_method;
 pub mod iterm2;
 pub mod java;
 pub mod jetbrains_toolbox;

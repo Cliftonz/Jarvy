@@ -452,18 +452,19 @@ fn get_tool_version(tool: &str) -> Option<String> {
     }
 }
 
-/// Detect install method from path
+/// Detect install method from path. Delegates to the canonical
+/// classifier in `tools::install_method` (round-2 maint F1).
+///
+/// Bundle preserves its `Brew → "homebrew"` long-form label and
+/// returns `None` for `Unknown` since the bundle JSON omits the
+/// field when no method is detectable.
 fn detect_install_method(path: &str) -> Option<String> {
-    if path.contains("/homebrew/") || path.contains("/opt/homebrew/") {
-        Some("homebrew".to_string())
-    } else if path.contains("/.cargo/") {
-        Some("cargo".to_string())
-    } else if path.contains("/.nvm/") {
-        Some("nvm".to_string())
-    } else if path.starts_with("/usr/bin/") || path.starts_with("/bin/") {
-        Some("system".to_string())
-    } else {
-        None
+    use crate::tools::install_method::{InstallMethod, detect_install_method_from_path};
+    let method = detect_install_method_from_path(std::path::Path::new(path));
+    match method {
+        InstallMethod::Unknown | InstallMethod::NotFound => None,
+        InstallMethod::Brew => Some("homebrew".to_string()),
+        other => Some(other.to_string()),
     }
 }
 

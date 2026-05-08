@@ -302,31 +302,10 @@ fn extract_version(output: &str) -> Option<String> {
         .map(|m| m.as_str().to_string())
 }
 
-/// Detect install method for a tool
+/// Detect install method for a tool. Delegates to the canonical
+/// classifier in `tools::install_method`. drift writes this string
+/// into `state.json`, so the canonical labels are wire-format here
+/// (round-2 maint F1).
 fn detect_install_method(tool: &str) -> String {
-    // Check common locations
-    if let Ok(path) = which::which(tool) {
-        let path_str = path.to_string_lossy();
-
-        if path_str.contains("/homebrew/") || path_str.contains("/opt/homebrew/") {
-            return "brew".to_string();
-        }
-        if path_str.contains("/.cargo/") {
-            return "cargo".to_string();
-        }
-        if path_str.contains("/.nvm/") {
-            return "nvm".to_string();
-        }
-        if path_str.contains("/.pyenv/") {
-            return "pyenv".to_string();
-        }
-        if path_str.contains("/.rustup/") {
-            return "rustup".to_string();
-        }
-        if path_str.contains("/usr/bin/") || path_str.contains("/usr/local/bin/") {
-            return "system".to_string();
-        }
-    }
-
-    "unknown".to_string()
+    crate::tools::install_method::detect_install_method_for_tool(tool).to_string()
 }

@@ -158,7 +158,7 @@ impl ReleaseClient {
 
         let response = crate::net::agent()
             .get(&url)
-            .header("User-Agent", &crate::net::user_agent())
+            .header("User-Agent", crate::net::USER_AGENT)
             .header("Accept", "application/vnd.github.v3+json")
             .call()
             .map_err(|e| ReleaseError::NetworkError(e.to_string()))?;
@@ -199,7 +199,7 @@ impl ReleaseClient {
 
         let response = crate::net::agent()
             .get(&url)
-            .header("User-Agent", &crate::net::user_agent())
+            .header("User-Agent", crate::net::USER_AGENT)
             .header("Accept", "application/vnd.github.v3+json")
             .call()
             .map_err(|e| ReleaseError::NetworkError(e.to_string()))?;

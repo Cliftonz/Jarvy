@@ -16,15 +16,20 @@ pub mod sanitizer;
 
 // Public API exports - some may not be used internally but are part of the module's interface
 #[allow(unused_imports)]
-pub use bundle::{BundleScope, DiagnosticBundle, SystemInfo as BundleSystemInfo};
+// Bundle / Profiler / NetworkTracer have NO callers outside this module
+// today (round-2 maint F15: ~1700 LOC of unused public surface). Demote
+// to `pub(crate)` so we don't lock the API in at v0.1.0; promote back
+// to `pub` when a caller actually wires them up (e.g. `jarvy diagnose
+// --bundle` → DiagnosticBundle).
+pub(crate) use bundle::{BundleScope, DiagnosticBundle, SystemInfo as BundleSystemInfo};
 #[allow(unused_imports)]
 pub use error::ObservabilityError;
 #[allow(unused_imports)]
-pub use logging::{LogConfig, LogFormat, LogLevel, init_debug_logging};
+pub use logging::{LogConfig, LogFormat, LogLevel};
 #[allow(unused_imports)]
-pub use network_trace::{DomainStats, NetworkSummary, NetworkTiming, NetworkTracer};
+pub(crate) use network_trace::{DomainStats, NetworkSummary, NetworkTiming, NetworkTracer};
 #[allow(unused_imports)]
-pub use profiler::{PhaseTiming, ProfileReport, Profiler};
+pub(crate) use profiler::{PhaseTiming, ProfileReport, Profiler};
 pub use sanitizer::Sanitizer;
 
 /// Global observability configuration

@@ -10,6 +10,7 @@ use std::env;
 use std::io::Write;
 use tracing::Level;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
 use tracing_subscriber::filter::{FilterFn, LevelFilter};
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -39,6 +40,14 @@ static BOOTSTRAP_STATE: std::sync::OnceLock<std::sync::RwLock<TelemetryBootstrap
 static LOGGER_PROVIDER: std::sync::OnceLock<opentelemetry_sdk::logs::SdkLoggerProvider> =
     std::sync::OnceLock::new();
 
+/// `WorkerGuard` returned by `tracing_appender::non_blocking`. Holding
+/// this for the lifetime of the process keeps the background-thread
+/// writer alive; dropping it flushes pending lines. We stash it in a
+/// `Mutex<Option>` so `shutdown_logging()` can drop it deterministically
+/// before `std::process::exit`.
+static FILE_LOGGER_GUARD: std::sync::Mutex<Option<tracing_appender::non_blocking::WorkerGuard>> =
+    std::sync::Mutex::new(None);
+
 fn bootstrap_state_cell() -> &'static std::sync::RwLock<TelemetryBootstrapState> {
     BOOTSTRAP_STATE.get_or_init(|| std::sync::RwLock::new(TelemetryBootstrapState::Disabled))
 }
@@ -57,6 +66,14 @@ fn set_bootstrap_state(state: TelemetryBootstrapState) {
 }
 
 pub fn init_logging(enable_analytics: bool) {
+    // Registry-level EnvFilter so dependency-crate `info!`/`debug!`
+    // events from `dirs`, `ureq`, `opentelemetry_sdk`, `rustls`, etc.
+    // don't flood `~/.jarvy/logs/jarvy.log` and OTLP exports
+    // (round-2 obs P1). Operators get a `RUST_LOG` escape hatch; the
+    // default is "warn at the global floor, info inside our own crate."
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn,jarvy=info"));
+
     // Always log to console: stdout for non-errors, stderr for errors
     let stdout_non_error = tracing_subscriber::fmt::layer()
         .with_filter(FilterFn::new(|meta| meta.level() < &Level::ERROR));
@@ -76,9 +93,19 @@ pub fn init_logging(enable_analytics: bool) {
     let file_layer = match ensure_log_dir() {
         Ok(dir) => {
             let appender = RollingFileAppender::new(Rotation::DAILY, dir, "jarvy.log");
+            // Wrap in non_blocking so per-event tracing writes are
+            // coalesced through an mpsc + dedicated worker thread —
+            // upstream tracing-appender's recommended pattern. The
+            // returned WorkerGuard is stashed in FILE_LOGGER_GUARD;
+            // dropping it (in shutdown_logging) flushes pending lines
+            // before process exit.
+            let (non_blocking, guard) = tracing_appender::non_blocking(appender);
+            if let Ok(mut slot) = FILE_LOGGER_GUARD.lock() {
+                *slot = Some(guard);
+            }
             let layer = tracing_subscriber::fmt::layer()
                 .json()
-                .with_writer(appender)
+                .with_writer(non_blocking)
                 .with_span_events(FmtSpan::CLOSE)
                 .with_current_span(true)
                 .with_target(true)
@@ -133,6 +160,7 @@ pub fn init_logging(enable_analytics: bool) {
     };
 
     let subscriber = Registry::default()
+        .with(env_filter)
         .with(stdout_non_error)
         .with(stderr_errors)
         .with(file_layer)
@@ -174,6 +202,12 @@ pub fn shutdown_logging() {
         // useful to report it — we're on the way out.
         let _ = provider.force_flush();
         let _ = provider.shutdown();
+    }
+    // Drop the file-logger WorkerGuard so the background-thread writer
+    // flushes pending lines to ~/.jarvy/logs/jarvy.log before
+    // `std::process::exit` kills it.
+    if let Ok(mut slot) = FILE_LOGGER_GUARD.lock() {
+        slot.take();
     }
 }
 
