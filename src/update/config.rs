@@ -271,20 +271,16 @@ impl UpdateConfig {
     }
 }
 
-/// Detect if running in a CI environment
+/// Detect if running in a CI environment.
+///
+/// Delegates to the canonical detector in `crate::ci`. The local copy
+/// previously drifted from the canonical detector (different provider
+/// list), making "are we in CI" semantics inconsistent across `update`,
+/// `telemetry`, `secrets`, and `setup`. Keeping it here as a thin
+/// re-export preserves the public function name for callers but routes
+/// detection through one source of truth.
 pub fn is_ci_environment() -> bool {
-    // Common CI environment variables
-    env::var("CI").is_ok()
-        || env::var("GITHUB_ACTIONS").is_ok()
-        || env::var("GITLAB_CI").is_ok()
-        || env::var("JENKINS_URL").is_ok()
-        || env::var("CIRCLECI").is_ok()
-        || env::var("TRAVIS").is_ok()
-        || env::var("BUILDKITE").is_ok()
-        || env::var("BITBUCKET_BUILD_NUMBER").is_ok()
-        || env::var("AZURE_PIPELINES").is_ok()
-        || env::var("TF_BUILD").is_ok()
-        || env::var("TEAMCITY_VERSION").is_ok()
+    crate::ci::is_ci()
 }
 
 /// Check if running in interactive mode (TTY available)

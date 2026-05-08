@@ -57,15 +57,11 @@ fn get_marker_path() -> Option<std::path::PathBuf> {
     dirs::home_dir().map(|home| home.join(".jarvy").join(FIRST_RUN_MARKER))
 }
 
-/// Check if we're running in a CI environment
+/// Check if we're running in a CI environment. Delegates to the canonical
+/// detector in `crate::ci` so onboarding's first-run logic stays in sync
+/// with `update`, `telemetry`, and `setup` heuristics.
 fn is_ci_environment() -> bool {
-    std::env::var("CI").is_ok()
-        || std::env::var("GITHUB_ACTIONS").is_ok()
-        || std::env::var("GITLAB_CI").is_ok()
-        || std::env::var("CIRCLECI").is_ok()
-        || std::env::var("TRAVIS").is_ok()
-        || std::env::var("JENKINS_URL").is_ok()
-        || std::env::var("BUILDKITE").is_ok()
+    crate::ci::is_ci()
 }
 
 /// Type of project detected in the current directory

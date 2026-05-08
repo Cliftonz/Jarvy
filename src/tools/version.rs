@@ -40,6 +40,16 @@ impl ExtractedVersion {
     }
 }
 
+impl std::fmt::Display for ExtractedVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(ref pre) = self.prerelease {
+            write!(f, "{}.{}.{}-{}", self.major, self.minor, self.patch, pre)
+        } else {
+            write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
+        }
+    }
+}
+
 /// Extract a version from tool output string.
 ///
 /// # Examples

@@ -168,13 +168,15 @@ pub fn run_package_command(
     Ok(())
 }
 
-/// Check if a command is available in PATH
+/// Check if a command is available in PATH.
+///
+/// Thin wrapper over `crate::tools::common::has` — both functions test
+/// `<cmd> --version` exit success. Previously the two existed
+/// independently (Maint review F-10) so package handlers reached for
+/// `command_exists` while tool handlers reached for `has`. Keeping the
+/// name here for backwards compatibility while collapsing the body.
 pub fn command_exists(cmd: &str) -> bool {
-    Command::new(cmd)
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    crate::tools::common::has(cmd)
 }
 
 #[cfg(test)]

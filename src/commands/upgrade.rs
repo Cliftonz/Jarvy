@@ -309,17 +309,33 @@ fn get_installed_version(command: &str) -> Option<String> {
 }
 
 fn extract_version(text: &str) -> Option<String> {
-    let re = regex::Regex::new(r"v?(\d+\.\d+(?:\.\d+)?)").ok()?;
-    re.captures(text).map(|c| c[1].to_string())
+    // Delegate to the canonical extractor in `tools::version`. Sharing one
+    // regex / test surface with the rest of the codebase.
+    crate::tools::version::extract_version(text).map(|v| v.to_string())
 }
 
+/// Upgrade-context "is current version sufficient" check.
+///
+/// Note: this is intentionally **not** a thin wrapper around
+/// `tools::version::version_satisfies`. The semantics differ:
+///
+/// - `tools::version::version_satisfies`  answers "does this install
+///   match the user's pin?" — `"2.40"` is a prefix pin matching `2.40.x`,
+///   so `2.43` does **not** satisfy `2.40`.
+/// - `upgrade::version_satisfies`         answers "do we still need to
+///   upgrade?" — `"2.40"` is read as a minimum, so `2.43` is fine and
+///   the upgrade is skipped.
+///
+/// The maintainability review explicitly flagged collapsing these as a
+/// premature abstraction (different rules) — keep separate, share only
+/// the version extractor.
 fn version_satisfies(current: &str, required: &str) -> bool {
     if required == "latest" {
         return false; // Always try to upgrade for "latest"
     }
 
-    // Simple version comparison
-    // Parse versions and compare
+    // Simple version comparison: parse both sides as numeric components and
+    // return true iff current >= required component-wise.
     let current_parts: Vec<u32> = current.split('.').filter_map(|p| p.parse().ok()).collect();
     let required_parts: Vec<u32> = required
         .trim_start_matches(|c: char| !c.is_ascii_digit())
@@ -331,7 +347,6 @@ fn version_satisfies(current: &str, required: &str) -> bool {
         return false;
     }
 
-    // Compare each component
     for (c, r) in current_parts.iter().zip(required_parts.iter()) {
         if c > r {
             return true;
@@ -341,8 +356,6 @@ fn version_satisfies(current: &str, required: &str) -> bool {
         }
     }
 
-    // If we get here, all compared parts are equal
-    // Current satisfies if it has same or more parts
     current_parts.len() >= required_parts.len()
 }
 
