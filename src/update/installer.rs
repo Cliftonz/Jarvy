@@ -24,15 +24,17 @@ pub struct BinaryInstaller {
 impl BinaryInstaller {
     /// Create a new binary installer
     pub fn new() -> io::Result<Self> {
-        let jarvy_dir = dirs::home_dir()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "No home directory"))?
-            .join(".jarvy");
+        let backup_dir = crate::paths::backup_dir().map_err(io::Error::other)?;
+        let staging_dir = crate::paths::staging_dir().map_err(io::Error::other)?;
 
-        let backup_dir = jarvy_dir.join("backup");
-        let staging_dir = jarvy_dir.join("staging");
-
-        fs::create_dir_all(&backup_dir)?;
-        fs::create_dir_all(&staging_dir)?;
+        // Tighten permissions on the staging + backup dirs.
+        // Staging holds the candidate binary post-download but pre-verify
+        // — between `download_asset` and `verify_sigstore_signature` there
+        // is a TOCTOU window where another local user could swap the file
+        // if the dir is world-readable. Backup holds the pre-update binary
+        // (smaller risk but same class).
+        crate::paths::ensure_dir_0700(&staging_dir)?;
+        crate::paths::ensure_dir_0700(&backup_dir)?;
 
         Ok(Self {
             backup_dir,
@@ -82,9 +84,31 @@ impl BinaryInstaller {
             self.verify_archive_checksum(&archive_path, &asset.name, &checksums)?;
         }
 
-        // Verify Sigstore signature — fail closed unless the operator has
-        // explicitly opted into unsigned updates.
+        // Download Sigstore signature companions before verification.
+        //
+        // `verify_sigstore_signature` looks for `<archive>.sig` and
+        // `<archive>.pem` next to the archive on disk. They are NOT in the
+        // archive — they're separate GitHub release assets. Previously the
+        // installer never fetched them, so verification always returned
+        // `SignatureFilesMissing` and `--allow-unsigned` rubber-stamped the
+        // install (security review F-4). Now we fetch both before calling
+        // `verify_sigstore_signature`, and missing companion assets are a
+        // hard error rather than silent fallthrough.
         let allow_unsigned = allow_unsigned || super::signature::unsigned_override_from_env();
+        if !allow_unsigned {
+            for ext in ["sig", "pem"] {
+                let companion = release.cosign_companion(&asset.name, ext).ok_or_else(|| {
+                    UpdateError::InstallationFailed(format!(
+                        "Sigstore companion `{}.{ext}` not found in release assets; \
+                         refuse to install. Set JARVY_ALLOW_UNSIGNED_UPDATE=1 only if \
+                         you have audited this release out-of-band.",
+                        asset.name,
+                    ))
+                })?;
+                self.download_asset(companion)?;
+            }
+        }
+
         let outcome = super::signature::verify_sigstore_signature(&archive_path)
             .map_err(|e| UpdateError::InstallationFailed(format!("signature error: {e}")))?;
         if let Err(reason) =
@@ -286,7 +310,14 @@ impl BinaryInstaller {
         Ok(())
     }
 
-    /// Extract zip archive
+    /// Extract zip archive.
+    ///
+    /// Mirrors the post-extract canonicalize-and-contain check the tar path
+    /// performs (security review F-14): the `zip` crate filters basic `..`
+    /// segments but does not consistently catch symlink targets that
+    /// resolve outside the destination. On Windows where Jarvy ships a
+    /// `.zip` instead of `.tar.gz`, this is the only extraction path and
+    /// must enforce the same containment.
     fn extract_zip(&self, archive: &Path, dest: &Path) -> Result<(), UpdateError> {
         let file =
             File::open(archive).map_err(|e| UpdateError::InstallationFailed(e.to_string()))?;
@@ -296,6 +327,17 @@ impl BinaryInstaller {
         archive
             .extract(dest)
             .map_err(|e| UpdateError::InstallationFailed(e.to_string()))?;
+
+        let dest_canon = fs::canonicalize(dest).map_err(|e| {
+            UpdateError::InstallationFailed(format!("could not canonicalize zip extract dir: {e}"))
+        })?;
+        if let Err(e) = verify_no_tar_escape(&dest_canon) {
+            return Err(UpdateError::InstallationFailed(format!(
+                "zip archive contained a path that escaped {}: {}",
+                dest_canon.display(),
+                e
+            )));
+        }
 
         Ok(())
     }

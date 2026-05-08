@@ -180,15 +180,17 @@ pub fn signature_outcome_is_acceptable(
             }
         }
         SignatureOutcome::SignatureFilesMissing => {
-            if allow_unsigned {
-                Ok(())
-            } else {
-                Err(
-                    "release does not include .sig/.pem files; refusing to install \
-                     unsigned binary. Re-run with --allow-unsigned to override."
-                        .to_string(),
-                )
-            }
+            // Tightened by security review F-4. `--allow-unsigned` should
+            // ONLY rubber-stamp `CosignMissing` (an environment problem on
+            // the user's machine). `SignatureFilesMissing` means the
+            // *release* didn't include signatures — accepting that is
+            // accepting an attacker-tampered release. Always fail.
+            Err(
+                "release does not include .sig/.pem files; refusing to install \
+                 unsigned binary. This is a release-side problem, not a local one — \
+                 contact the release authors rather than overriding."
+                    .to_string(),
+            )
         }
         SignatureOutcome::Rejected(stderr) => Err(format!(
             "Sigstore verification rejected the artifact: {stderr}"

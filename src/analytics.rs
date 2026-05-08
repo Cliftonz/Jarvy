@@ -165,12 +165,11 @@ fn otlp_level_filter() -> LevelFilter {
     }
 }
 
-/// Returns `~/.jarvy/logs`, creating it if necessary.
+/// Returns `~/.jarvy/logs`, creating it if necessary. Path resolution
+/// goes through `crate::paths::logs_dir` so a future XDG migration or
+/// `JARVY_HOME` override is honored without touching this site.
 fn ensure_log_dir() -> std::io::Result<std::path::PathBuf> {
-    let dir = dirs::home_dir()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no home directory"))?
-        .join(".jarvy")
-        .join("logs");
+    let dir = crate::paths::logs_dir().map_err(|e| std::io::Error::other(e.to_string()))?;
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }

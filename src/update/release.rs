@@ -77,6 +77,15 @@ impl GitHubRelease {
             name.contains("sha256") || name.ends_with(".sha256")
         })
     }
+
+    /// Cosign companion asset matching `<archive>.<ext>`. Used to fetch the
+    /// `.sig` and `.pem` files Sigstore verification expects on disk.
+    /// Without these the signature step always returns `SignatureFilesMissing`
+    /// and `--allow-unsigned` rubber-stamps the install (security review F-4).
+    pub fn cosign_companion(&self, archive_name: &str, ext: &str) -> Option<&ReleaseAsset> {
+        let want = format!("{}.{}", archive_name, ext);
+        self.assets.iter().find(|a| a.name == want)
+    }
 }
 
 /// Release asset (binary, checksum file, etc.)

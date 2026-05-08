@@ -30,6 +30,7 @@ mod os_setup;
 mod output;
 mod outputs;
 mod packages;
+mod paths;
 mod provisioner;
 pub mod remote;
 mod report;

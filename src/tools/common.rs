@@ -245,12 +245,38 @@ pub fn run_maybe_sudo_with_network(
     }
 }
 
-pub fn has(cmd: &str) -> bool {
+/// Process-wide cache of `has()` results.
+///
+/// Without this, `setup` forks `apt --version`, `sudo --version`,
+/// `brew --version` etc. for every package install — for a 30-tool batch
+/// that's 100+ extra forks before the actual installs even start (perf
+/// review F-2). Cache key is the bare command name; we assume PATH and
+/// binary presence are stable for the lifetime of one `jarvy setup`.
+fn has_cache() -> &'static std::sync::RwLock<std::collections::HashMap<String, bool>> {
+    static CACHE: std::sync::OnceLock<std::sync::RwLock<std::collections::HashMap<String, bool>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()))
+}
+
+fn has_uncached(cmd: &str) -> bool {
     Command::new(cmd)
         .arg("--version")
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
+}
+
+pub fn has(cmd: &str) -> bool {
+    if let Ok(read) = has_cache().read() {
+        if let Some(&hit) = read.get(cmd) {
+            return hit;
+        }
+    }
+    let result = has_uncached(cmd);
+    if let Ok(mut write) = has_cache().write() {
+        write.insert(cmd.to_string(), result);
+    }
+    result
 }
 
 // Require a single command to exist on PATH, otherwise return a Prereq error with remediation.
