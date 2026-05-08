@@ -9,8 +9,10 @@
 use std::env;
 use std::io::Write;
 use tracing::Level;
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::Layer;
 use tracing_subscriber::filter::{FilterFn, LevelFilter};
+use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::Registry;
 
@@ -57,7 +59,43 @@ pub fn init_logging(enable_analytics: bool) {
         .with_writer(std::io::stderr)
         .with_filter(LevelFilter::ERROR);
 
-    // Only if analytics enabled, export errors to OTLP logs
+    // File layer at ~/.jarvy/logs/jarvy.log (daily rotation, JSON).
+    //
+    // Previously the file layer existed in `observability::logging::init_*`
+    // but those functions were never called from `main.rs` — so
+    // `~/.jarvy/logs/jarvy.log` was always empty, `jarvy logs view` returned
+    // nothing, and `jarvy ticket create` shipped a hollow log file to support.
+    // Wire it into the same `Registry` as the console + OTLP layers so a
+    // single `set_global_default` covers all sinks (observability review #1).
+    let file_layer = match ensure_log_dir() {
+        Ok(dir) => {
+            let appender = RollingFileAppender::new(Rotation::DAILY, dir, "jarvy.log");
+            let layer = tracing_subscriber::fmt::layer()
+                .json()
+                .with_writer(appender)
+                .with_span_events(FmtSpan::CLOSE)
+                .with_current_span(true)
+                .with_target(true)
+                .with_ansi(false)
+                // Capture every level the user might care about during a
+                // failed `jarvy setup`. Cheaper than rebuilding telemetry
+                // from `eprintln!` after the fact.
+                .with_filter(LevelFilter::INFO);
+            Some(layer)
+        }
+        Err(e) => {
+            eprintln!("Warning: file logging disabled — could not create log dir: {e}");
+            None
+        }
+    };
+
+    // Only if analytics enabled, export to OTLP logs.
+    //
+    // Filter is now driven by `JARVY_OTLP_LEVEL` (default `info`) instead of
+    // the previous hard-coded `LevelFilter::ERROR`. The old filter dropped
+    // every `info!`-level event — `tool.installed`, `setup.inventory`,
+    // `hook.completed` — so `logs = true` in TelemetryConfig was a lie at
+    // export time (observability review #2).
     let mut bootstrap_error: Option<String> = None;
     let otel_layer_opt = if enable_analytics {
         match build_otlp_logger_provider() {
@@ -65,7 +103,7 @@ pub fn init_logging(enable_analytics: bool) {
                 let layer = opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(
                     &logger_provider,
                 )
-                .with_filter(LevelFilter::ERROR); // export only errors to OTEL
+                .with_filter(otlp_level_filter());
                 Some(layer)
             }
             Err(e) => {
@@ -85,6 +123,7 @@ pub fn init_logging(enable_analytics: bool) {
     let subscriber = Registry::default()
         .with(stdout_non_error)
         .with(stderr_errors)
+        .with(file_layer)
         .with(otel_layer_opt);
 
     let install_result = tracing::subscriber::set_global_default(subscriber);
@@ -106,6 +145,34 @@ pub fn init_logging(enable_analytics: bool) {
     } else {
         set_bootstrap_state(TelemetryBootstrapState::Healthy);
     }
+}
+
+/// Resolve the OTLP-bridge level filter. `JARVY_OTLP_LEVEL` (or the legacy
+/// `JARVY_OTLP_LOGS` boolean) overrides the default `info`. Setting it to
+/// `error` recovers the old behavior for users who explicitly want quiet
+/// exports.
+fn otlp_level_filter() -> LevelFilter {
+    match env::var("JARVY_OTLP_LEVEL")
+        .map(|v| v.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Ok("error") => LevelFilter::ERROR,
+        Ok("warn") => LevelFilter::WARN,
+        Ok("info") => LevelFilter::INFO,
+        Ok("debug") => LevelFilter::DEBUG,
+        Ok("trace") => LevelFilter::TRACE,
+        _ => LevelFilter::INFO,
+    }
+}
+
+/// Returns `~/.jarvy/logs`, creating it if necessary.
+fn ensure_log_dir() -> std::io::Result<std::path::PathBuf> {
+    let dir = dirs::home_dir()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no home directory"))?
+        .join(".jarvy")
+        .join("logs");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
 }
 
 fn otlp_logs_endpoint() -> String {

@@ -89,6 +89,34 @@ pub fn run_setup(
         file.to_string()
     };
 
+    // Generate a per-invocation correlation ID. Every event emitted from
+    // this `run_setup` call carries `run_id` so support can stitch parallel
+    // install threads back together when reading `~/.jarvy/logs/jarvy.log`
+    // or an OTLP backend (observability review #6, #7).
+    let run_id = uuid::Uuid::now_v7();
+    // Hold this span open for the entire setup so `tracing::info_span!`
+    // child spans inherit `run_id` automatically.
+    let setup_span = tracing::info_span!("setup", run_id = %run_id);
+    let _setup_span_guard = setup_span.enter();
+
+    // Startup banner — the first five questions support asks ("what
+    // version, what OS, what package manager, what config source, what CI
+    // provider"). Without this the only signal in a ticket bundle is
+    // `eprintln!`s scattered through the install loop (observability
+    // review #11).
+    tracing::info!(
+        event = "setup.start",
+        run_id = %run_id,
+        version = env!("CARGO_PKG_VERSION"),
+        os = std::env::consts::OS,
+        arch = std::env::consts::ARCH,
+        config_source = %if from.is_some() { "remote" } else { "local" },
+        config_path = %config_path,
+        ci_provider = ?ci_env.as_ref().map(|e| e.provider.to_string()),
+        jobs = parallel_jobs,
+        dry_run = dry_run,
+    );
+
     let config = Config::new_with_workspace(&config_path);
     let hooks_config = config.get_hooks();
     let hook_settings = HookConfig::from(&hooks_config.config);
@@ -318,11 +346,25 @@ pub fn run_setup(
                 let error_collector: Arc<Mutex<Vec<(String, String, String)>>> =
                     Arc::new(Mutex::new(Vec::new()));
 
+                // Capture the parent span (which carries `run_id`) so rayon
+                // worker threads — which have their own thread-local span
+                // stack — can re-enter it. Without this, every event emitted
+                // from a parallel-install worker is span-orphaned in
+                // `~/.jarvy/logs/jarvy.log` and OTLP traces (observability
+                // review #7).
+                let parent_span = tracing::Span::current();
                 pool.install(|| {
                     tool_groups
                         .custom_install
                         .par_iter()
                         .for_each(|(name, version)| {
+                            let _g = parent_span.enter();
+                            let install_span = tracing::info_span!(
+                                "install_tool",
+                                tool = %name,
+                                version = %version,
+                            );
+                            let _is = install_span.enter();
                             println!(
                                 "Installing {} version {} using custom installer",
                                 name, version
