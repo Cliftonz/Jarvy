@@ -255,6 +255,20 @@ fn update_rc_content(
         keys.sort();
 
         for key in keys {
+            // Validate the key matches POSIX env-var grammar before
+            // splatting it into a shell rc file. Without this, a hostile
+            // `jarvy.toml` shipping `[env.vars] "FOO=x\nrm -rf $HOME #" =
+            // "ignored"` would land arbitrary commands inside the
+            // `# >>> jarvy managed` block — executed on every shell
+            // startup, persistent across reboots (round-2 security P0).
+            if !is_valid_env_var_name(key) {
+                tracing::warn!(
+                    event = "env.refused_invalid_key",
+                    key = %key,
+                    "refused [env.vars] key that would shell-inject into rc file"
+                );
+                continue;
+            }
             let raw_value = &vars[key];
             let expanded_value = expand_value(raw_value, ctx);
             let quoted_value = shell_quote(&expanded_value, shell);
@@ -268,6 +282,23 @@ fn update_rc_content(
     }
 
     lines.join("\n") + "\n"
+}
+
+/// Validate an env-var name against POSIX-portable grammar:
+/// `[A-Za-z_][A-Za-z0-9_]*`. Refuses anything else — newlines, `;`,
+/// `=`, leading digits, empty — so a hostile `jarvy.toml` can't
+/// shell-inject through the `[env.vars]` key into `~/.bashrc` /
+/// `~/.zshrc` / `.env` (round-2 security P0).
+pub(crate) fn is_valid_env_var_name(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let mut chars = name.chars();
+    let first = chars.next().unwrap();
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Quote a value for shell syntax
@@ -328,6 +359,16 @@ pub fn preview_shell_rc(
     keys.sort();
 
     for key in keys {
+        if !is_valid_env_var_name(key) {
+            // Surface the same refusal in dry-run output so users see what
+            // the real run will skip.
+            lines.push(format!(
+                "{} [refused] invalid env-var name: {}",
+                shell.comment_prefix(),
+                key
+            ));
+            continue;
+        }
         let raw_value = &vars[key];
         let expanded_value = expand_value(raw_value, ctx);
         let quoted_value = shell_quote(&expanded_value, shell);
@@ -356,6 +397,57 @@ mod tests {
     fn test_detect_shell() {
         // Just verify it doesn't panic
         let _shell = detect_shell();
+    }
+
+    #[test]
+    fn env_var_name_accepts_posix() {
+        for ok in ["FOO", "_BAR", "MY_VAR_1", "X", "_"] {
+            assert!(is_valid_env_var_name(ok), "{ok:?} should be valid");
+        }
+    }
+
+    #[test]
+    fn env_var_name_refuses_shell_injection() {
+        // Round-2 security P0: a `\n`-bearing key would land RCE in
+        // ~/.bashrc / ~/.zshrc on the next interactive shell.
+        for hostile in [
+            "",
+            "1FOO",        // leading digit
+            "FOO=BAR",     // embedded `=`
+            "FOO\nrm -rf", // newline injection
+            "FOO;evil",
+            "FOO BAR",  // space
+            "FOO\"BAR", // quote
+            "FOO'BAR",
+            "FOO$VAR",    // expansion
+            "FOO`evil`",  // backticks
+            "FOO\\nbash", // backslash
+            "FOO-BAR",    // hyphen
+            "FOO.BAR",    // dot
+            "ɛ",          // non-ASCII
+        ] {
+            assert!(
+                !is_valid_env_var_name(hostile),
+                "{hostile:?} should be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn update_rc_content_skips_invalid_keys() {
+        let mut vars = HashMap::new();
+        vars.insert("FOO".to_string(), "ok".to_string());
+        vars.insert(
+            "BAR=evil\nrm -rf $HOME #".to_string(),
+            "ignored".to_string(),
+        );
+        let ctx = EnvContext::new();
+        let out = update_rc_content("", ShellType::Bash, &vars, &ctx);
+        assert!(out.contains("export FOO="));
+        assert!(
+            !out.contains("rm -rf"),
+            "hostile key must NOT land in rc content; got:\n{out}"
+        );
     }
 
     #[test]

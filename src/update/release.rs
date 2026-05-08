@@ -236,6 +236,66 @@ pub enum ReleaseError {
 mod tests {
     use super::*;
 
+    fn asset(name: &str) -> ReleaseAsset {
+        ReleaseAsset {
+            name: name.to_string(),
+            browser_download_url: format!("https://example.test/{name}"),
+            size: 0,
+            content_type: "application/octet-stream".to_string(),
+        }
+    }
+
+    fn release_with(assets: Vec<ReleaseAsset>) -> GitHubRelease {
+        GitHubRelease {
+            tag_name: "v1.0.0".to_string(),
+            name: None,
+            body: None,
+            prerelease: false,
+            draft: false,
+            assets,
+            published_at: None,
+            html_url: "https://example.test".to_string(),
+        }
+    }
+
+    #[test]
+    fn cosign_companion_finds_sig_and_pem() {
+        // Round-2 P0 regression guard for the F-4 fix: the installer
+        // depends on this lookup hitting `<archive>.sig` / `<archive>.pem`
+        // exactly. A drift to substring matching would break the whole
+        // companion-download contract.
+        let r = release_with(vec![
+            asset("jarvy-x86_64.tar.gz"),
+            asset("jarvy-x86_64.tar.gz.sig"),
+            asset("jarvy-x86_64.tar.gz.pem"),
+            asset("checksums.txt"),
+        ]);
+        let sig = r.cosign_companion("jarvy-x86_64.tar.gz", "sig");
+        assert!(sig.is_some(), "missing .sig companion");
+        assert_eq!(sig.unwrap().name, "jarvy-x86_64.tar.gz.sig");
+
+        let pem = r.cosign_companion("jarvy-x86_64.tar.gz", "pem");
+        assert!(pem.is_some(), "missing .pem companion");
+        assert_eq!(pem.unwrap().name, "jarvy-x86_64.tar.gz.pem");
+    }
+
+    #[test]
+    fn cosign_companion_missing_returns_none() {
+        let r = release_with(vec![asset("jarvy-x86_64.tar.gz")]);
+        assert!(r.cosign_companion("jarvy-x86_64.tar.gz", "sig").is_none());
+        assert!(r.cosign_companion("jarvy-x86_64.tar.gz", "pem").is_none());
+    }
+
+    #[test]
+    fn cosign_companion_uses_exact_match_not_substring() {
+        // A `.sig` for a *different* archive must not be returned for
+        // the requested archive. Substring drift would let an attacker
+        // who supplied `evil.tar.gz.sig` satisfy the lookup for
+        // `jarvy-x86_64.tar.gz`.
+        let r = release_with(vec![asset("jarvy-x86_64.tar.gz"), asset("evil.tar.gz.sig")]);
+        assert!(r.cosign_companion("jarvy-x86_64.tar.gz", "sig").is_none());
+    }
+
     #[test]
     fn test_release_version() {
         let release = GitHubRelease {

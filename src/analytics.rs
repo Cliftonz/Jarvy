@@ -33,6 +33,12 @@ pub enum TelemetryBootstrapState {
 static BOOTSTRAP_STATE: std::sync::OnceLock<std::sync::RwLock<TelemetryBootstrapState>> =
     std::sync::OnceLock::new();
 
+/// Owning handle to the SDK logger provider. Stashed at init so
+/// `shutdown_logging()` can flush queued log records before
+/// `std::process::exit` kills the worker thread.
+static LOGGER_PROVIDER: std::sync::OnceLock<opentelemetry_sdk::logs::SdkLoggerProvider> =
+    std::sync::OnceLock::new();
+
 fn bootstrap_state_cell() -> &'static std::sync::RwLock<TelemetryBootstrapState> {
     BOOTSTRAP_STATE.get_or_init(|| std::sync::RwLock::new(TelemetryBootstrapState::Disabled))
 }
@@ -104,6 +110,12 @@ pub fn init_logging(enable_analytics: bool) {
                     &logger_provider,
                 )
                 .with_filter(otlp_level_filter());
+                // Stash the provider so `shutdown_logging()` (called from
+                // `main` before `std::process::exit`) can flush queued
+                // batches. Without this, `process::exit` skips Drop and
+                // the batch processor's worker thread is killed mid-flight,
+                // silently truncating OTLP log exports (round-2 obs P0).
+                let _ = LOGGER_PROVIDER.set(logger_provider);
                 Some(layer)
             }
             Err(e) => {
@@ -144,6 +156,24 @@ pub fn init_logging(enable_analytics: bool) {
         );
     } else {
         set_bootstrap_state(TelemetryBootstrapState::Healthy);
+    }
+}
+
+/// Flush any queued OTLP log records and tear down the logger provider.
+/// MUST be called before `std::process::exit` — `process::exit` skips
+/// every `Drop` impl, including the batch processor's worker-thread
+/// shutdown, which means in-flight log batches are silently dropped
+/// (round-2 obs P0).
+///
+/// Safe to call multiple times; safe to call when telemetry was never
+/// initialized.
+pub fn shutdown_logging() {
+    if let Some(provider) = LOGGER_PROVIDER.get() {
+        // `force_flush` waits for queued records to export. We
+        // intentionally ignore `Err` here because there's nowhere
+        // useful to report it — we're on the way out.
+        let _ = provider.force_flush();
+        let _ = provider.shutdown();
     }
 }
 

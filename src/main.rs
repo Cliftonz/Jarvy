@@ -15,7 +15,6 @@ mod config;
 mod drift;
 mod env;
 mod error_codes;
-mod exec;
 mod git;
 mod hooks;
 mod init;
@@ -138,6 +137,12 @@ fn main() {
 
     // Dispatch to command handlers
     let exit_code = dispatch_command(&cli, &global_config);
+
+    // Flush OTLP log batches before `process::exit` kills the worker
+    // thread — `exit` skips every `Drop`, including the batch
+    // processor's shutdown sequence (round-2 obs P0).
+    analytics::shutdown_logging();
+
     std::process::exit(exit_code);
 }
 

@@ -52,9 +52,21 @@ const TRUSTED_CA_BUNDLE_DIRS: &[&str] = &[
 
 /// Returns true if `path` is acceptable as a CA bundle without explicit
 /// opt-in: the file lives under a trusted system root, OR it lives under
-/// `~/.jarvy/` (user-owned global config), OR `JARVY_ALLOW_CUSTOM_CA=1`
-/// has been set. Hostile `/tmp/attacker.crt` paths from a project
-/// `jarvy.toml` fail this check.
+/// `~/.jarvy/ca/` (a Jarvy-curated dir we never auto-write to), OR
+/// `JARVY_ALLOW_CUSTOM_CA=1` has been set. Hostile `/tmp/attacker.crt`
+/// paths from a project `jarvy.toml` fail this check.
+///
+/// **Why `~/.jarvy/ca/` and not `~/.jarvy/` writ large?** Round-2 review
+/// found a chain: a hostile remote `jarvy.toml` is cached at
+/// `~/.jarvy/cache/configs/<sha>.toml` (attacker-controlled bytes). If
+/// the user can then point `[network.tls] ca_bundle` at that cached
+/// file — which the broad `~/.jarvy/` prefix used to allow — OpenSSL,
+/// curl, and rustls happily extract `BEGIN CERTIFICATE` blocks out of
+/// it and trust the embedded root, MitMing every subsequent
+/// `git clone` / `npm install` / `brew install` / `pip install`. The
+/// narrow `~/.jarvy/ca/` dir is one Jarvy never writes to as part of
+/// any auto flow, so attacker-controlled bytes cannot land there
+/// without explicit user action.
 fn ca_bundle_path_is_trusted(path: &str) -> bool {
     if std::env::var("JARVY_ALLOW_CUSTOM_CA")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
@@ -72,8 +84,12 @@ fn ca_bundle_path_is_trusted(path: &str) -> bool {
         return true;
     }
     if let Ok(jarvy_dir) = crate::paths::jarvy_home() {
-        if let Some(jarvy_str) = jarvy_dir.to_str() {
-            if canon.starts_with(jarvy_str) {
+        let curated_ca_dir = jarvy_dir.join("ca");
+        if let Some(curated_str) = curated_ca_dir.to_str() {
+            // Require trailing `/` so `~/.jarvy/ca-attacker/` doesn't slip
+            // past with a `starts_with(~/.jarvy/ca)` check.
+            let prefix = format!("{curated_str}/");
+            if canon.starts_with(&prefix) || canon == curated_str {
                 return true;
             }
         }
@@ -271,6 +287,43 @@ mod tests {
         }
         assert!(!ca_bundle_path_is_trusted("/tmp/attacker.crt"));
         assert!(!ca_bundle_path_is_trusted("/var/tmp/x"));
+    }
+
+    #[test]
+    fn ca_bundle_path_under_jarvy_cache_is_refused() {
+        // Round-2 P0: the cached body of a hostile remote `jarvy.toml`
+        // lives at `~/.jarvy/cache/configs/<sha>.toml`. The broad
+        // `~/.jarvy/` prefix used to make this attacker-controlled file
+        // a valid CA bundle. Tighten verified.
+        if std::env::var("JARVY_ALLOW_CUSTOM_CA").is_ok() {
+            return;
+        }
+        if let Ok(jarvy_dir) = crate::paths::jarvy_home() {
+            let cached = jarvy_dir.join("cache").join("configs").join("abc.toml");
+            assert!(
+                !ca_bundle_path_is_trusted(&cached.to_string_lossy()),
+                "cache file under ~/.jarvy/ must not be a trusted CA bundle"
+            );
+            // Also reject sibling-prefix attacks like `~/.jarvy/ca-attacker/`.
+            let sibling = jarvy_dir.join("ca-attacker").join("evil.crt");
+            assert!(!ca_bundle_path_is_trusted(&sibling.to_string_lossy()));
+        }
+    }
+
+    #[test]
+    fn ca_bundle_path_under_curated_ca_dir_is_trusted() {
+        if std::env::var("JARVY_ALLOW_CUSTOM_CA").is_ok() {
+            return;
+        }
+        if let Ok(jarvy_dir) = crate::paths::jarvy_home() {
+            let curated = jarvy_dir.join("ca").join("corp.crt");
+            // Use a string compare since the file may not exist; the
+            // function falls back to the raw path when canonicalize fails.
+            assert!(
+                ca_bundle_path_is_trusted(&curated.to_string_lossy()),
+                "~/.jarvy/ca/<file> must remain trusted (the dir Jarvy never auto-writes)"
+            );
+        }
     }
 
     #[test]

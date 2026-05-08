@@ -133,6 +133,19 @@ pub fn generate_dotenv_content(vars: &HashMap<String, String>, ctx: &EnvContext)
     keys.sort();
 
     for key in keys {
+        if !super::shell::is_valid_env_var_name(key) {
+            // Same rationale as shell.rs::update_rc_content — refuse keys
+            // that would break out of the `KEY=value` line shape. dotenv
+            // is less attacker-friendly than rc files (most loaders
+            // ignore unmatched lines) but still a vector for confused
+            // tooling.
+            tracing::warn!(
+                event = "dotenv.refused_invalid_key",
+                key = %key,
+                "refused [env.vars] key that would corrupt .env shape"
+            );
+            continue;
+        }
         let raw_value = &vars[key];
         let expanded_value = expand_value(raw_value, ctx);
         let formatted_value = format_value(&expanded_value);

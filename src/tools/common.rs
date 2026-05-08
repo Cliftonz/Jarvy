@@ -86,8 +86,24 @@ pub fn default_use_sudo() -> Option<bool> {
 /// `stage` should be a bounded label (e.g. `"hard_dep_check"`,
 /// `"macos_setup"`) — used as a low-cardinality telemetry attribute.
 pub fn run_capture(cmd: &str, args: &[&str], stage: &str, context: &str) -> Option<Output> {
+    let span = tracing::info_span!(
+        "subprocess.exec",
+        cmd = %cmd,
+        args_count = args.len(),
+        stage = %stage,
+    );
+    let _g = span.enter();
+    let start = std::time::Instant::now();
     match Command::new(cmd).args(args).output() {
-        Ok(out) => Some(out),
+        Ok(out) => {
+            tracing::debug!(
+                event = "subprocess.completed",
+                exit_code = out.status.code().unwrap_or(-1),
+                duration_ms = start.elapsed().as_millis() as u64,
+                "subprocess finished",
+            );
+            Some(out)
+        }
         Err(e) => {
             tracing::warn!(
                 event = "setup.subprocess.failed",
@@ -95,6 +111,7 @@ pub fn run_capture(cmd: &str, args: &[&str], stage: &str, context: &str) -> Opti
                 command = %cmd,
                 context = %context,
                 error = %e,
+                duration_ms = start.elapsed().as_millis() as u64,
             );
             eprintln!("{context}: {e}");
             None

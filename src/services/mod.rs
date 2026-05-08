@@ -268,14 +268,44 @@ fn command_exists(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Run a command and capture output
+/// Run a command and capture output.
+///
+/// Wrapped in a `tracing::info_span!("subprocess.exec", ...)` so support
+/// can see what command the docker-compose / tilt path is running when
+/// `jarvy setup` stalls on the services phase. Without this, a hung
+/// `docker compose up -d` is invisible in `~/.jarvy/logs/jarvy.log`
+/// (round-2 obs F16).
 fn run_command(cmd: &str, args: &[&str], working_dir: &Path) -> Result<Output, std::io::Error> {
-    Command::new(cmd)
+    let span = tracing::info_span!(
+        "subprocess.exec",
+        cmd = %cmd,
+        args_count = args.len(),
+        cwd = %working_dir.display(),
+    );
+    let _g = span.enter();
+    let start = std::time::Instant::now();
+    let result = Command::new(cmd)
         .args(args)
         .current_dir(working_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .output()
+        .output();
+    let duration_ms = start.elapsed().as_millis() as u64;
+    match &result {
+        Ok(out) => tracing::debug!(
+            event = "subprocess.completed",
+            exit_code = out.status.code().unwrap_or(-1),
+            duration_ms,
+            "subprocess finished"
+        ),
+        Err(e) => tracing::warn!(
+            event = "subprocess.failed",
+            error = %e,
+            duration_ms,
+            "subprocess spawn failed"
+        ),
+    }
+    result
 }
 
 #[cfg(test)]

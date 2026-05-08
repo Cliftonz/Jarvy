@@ -443,21 +443,14 @@ fn is_url(s: &str) -> bool {
     s.starts_with("http://") || s.starts_with("https://")
 }
 
-/// Transform GitHub URLs to raw content URLs
+/// Transform GitHub URLs to raw content URLs.
+///
+/// Delegates to `crate::remote::transform_github_url`. The previous local
+/// copy diverged from `remote.rs` on the gist `/raw` guard
+/// (`!url.ends_with("/raw")` here vs `!url.contains("/raw")` in remote)
+/// — confirmed drift bug for `?raw=1` URLs. One canonical impl now.
 fn transform_github_url(url: &str) -> String {
-    // Transform github.com/user/repo/blob/branch/path to raw.githubusercontent.com/user/repo/branch/path
-    if url.contains("github.com") && url.contains("/blob/") {
-        return url
-            .replace("github.com", "raw.githubusercontent.com")
-            .replace("/blob/", "/");
-    }
-
-    // Transform gist.github.com URLs
-    if url.contains("gist.github.com") && !url.ends_with("/raw") {
-        return format!("{}/raw", url.trim_end_matches('/'));
-    }
-
-    url.to_string()
+    crate::remote::transform_github_url(url)
 }
 
 /// Merge two configs (base + overlay, overlay wins)

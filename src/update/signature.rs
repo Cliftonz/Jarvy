@@ -340,6 +340,27 @@ cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc *jarvy-windows-
     }
 
     #[test]
+    fn sig_files_missing_unacceptable_even_with_override() {
+        // Round-2 P0 regression guard: `--allow-unsigned` must NOT
+        // rubber-stamp `SignatureFilesMissing` (a release-side problem
+        // that's indistinguishable from a tampered release).
+        // `CosignMissing` (an environment problem on the user's machine)
+        // IS rubber-stampable; that distinction is the whole point of the
+        // tightened policy. A revert to `if allow_unsigned { Ok(()) }`
+        // here would compile and pass every other test in this module —
+        // this is the test that catches it.
+        let outcome = SignatureOutcome::SignatureFilesMissing;
+        let err = signature_outcome_is_acceptable(&outcome, true)
+            .expect_err("SignatureFilesMissing must always be Err, even with allow_unsigned=true");
+        // Wording check so a relaxation that drops the "release-side"
+        // explanation also surfaces.
+        assert!(
+            err.contains("release-side") || err.contains("refus"),
+            "error message must indicate this is a release-side problem; got {err:?}"
+        );
+    }
+
+    #[test]
     fn rejected_outcome_never_acceptable() {
         let outcome = SignatureOutcome::Rejected("bad cert".into());
         assert!(signature_outcome_is_acceptable(&outcome, true).is_err());
