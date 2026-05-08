@@ -411,27 +411,19 @@ impl InheritanceResolver {
         Ok((content, false))
     }
 
-    /// Fetch content from URL
+    /// Fetch content from URL.
+    ///
+    /// Routed through `crate::remote::validated_get` so an `extends:`
+    /// URL faces the same allowlist + size cap + scheme check as
+    /// `--from`. Without this, a hostile `jarvy.toml` could ship
+    /// `extends = "http://10.0.0.1/admin/internal.toml"` and bypass
+    /// every guardrail in `remote::fetch_remote_config` (security
+    /// review F-3).
     fn fetch_url(&self, url: &str) -> Result<String> {
-        let response = crate::net::agent()
-            .get(url)
-            .header("User-Agent", &crate::net::user_agent())
-            .call()
-            .map_err(|e| InheritanceError::FetchFailed {
-                url: url.to_string(),
-                error: e.to_string(),
-            })?;
-
-        let body =
-            response
-                .into_body()
-                .read_to_string()
-                .map_err(|e| InheritanceError::FetchFailed {
-                    url: url.to_string(),
-                    error: e.to_string(),
-                })?;
-
-        Ok(body)
+        crate::remote::validated_get(url).map_err(|e| InheritanceError::FetchFailed {
+            url: url.to_string(),
+            error: e,
+        })
     }
 
     /// Get the resolution trace

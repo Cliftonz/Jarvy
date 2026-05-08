@@ -196,13 +196,17 @@ pub fn signature_outcome_is_acceptable(
     }
 }
 
-/// Read `JARVY_ALLOW_UNSIGNED_UPDATE` and treat any value that is not "0",
-/// "false", or empty as "permit unsigned updates."
+/// Read `JARVY_ALLOW_UNSIGNED_UPDATE` and treat exactly `1`, `true`, or
+/// `yes` (case-insensitive) as "permit unsigned updates."
+///
+/// Previous logic treated any non-empty / non-`0` / non-`false` / non-`no`
+/// value as truthy, so typos like `disable` or `N` would inadvertently
+/// permit unsigned updates. Strict allowlist closes that.
 pub fn unsigned_override_from_env() -> bool {
     match std::env::var("JARVY_ALLOW_UNSIGNED_UPDATE") {
         Ok(v) => {
             let t = v.trim().to_ascii_lowercase();
-            !t.is_empty() && t != "0" && t != "false" && t != "no"
+            matches!(t.as_str(), "1" | "true" | "yes")
         }
         Err(_) => false,
     }
@@ -361,19 +365,23 @@ cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc *jarvy-windows-
         }
         assert!(!unsigned_override_from_env());
 
-        for truthy in ["1", "true", "yes", "TRUE", "Y"] {
+        for truthy in ["1", "true", "yes", "TRUE", "Yes"] {
             #[allow(unsafe_code)]
             unsafe {
                 std::env::set_var(key, truthy);
             }
-            // Note: "Y" is not in the falsy list, so it's truthy by default.
             assert!(
                 unsigned_override_from_env(),
                 "expected truthy for value {truthy:?}"
             );
         }
 
-        for falsy in ["0", "false", "no", ""] {
+        // Strict allowlist (security review F-22): anything outside the
+        // explicit truthy set — including typos like "Y", "disable",
+        // "n/a" — must NOT permit unsigned updates. Previously these
+        // landed in the truthy branch via a "non-empty / non-0 / non-false"
+        // negative filter, which was too permissive.
+        for falsy in ["0", "false", "no", "", "Y", "disable", "n/a", "off"] {
             #[allow(unsafe_code)]
             unsafe {
                 std::env::set_var(key, falsy);

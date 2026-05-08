@@ -324,6 +324,85 @@ pub fn fetch_remote_config(url: &str, headers: &[String]) -> Result<String, Stri
     Ok(cache_file.to_string_lossy().to_string())
 }
 
+/// Validate a URL against Jarvy's network policy and fetch its body.
+///
+/// This is the entry point for any subsystem that needs to GET a Jarvy-
+/// configurable URL — `team::extends`, `team::registry::index.toml`,
+/// future MCP-config sync, etc. It enforces the same rules that
+/// `fetch_remote_config` enforces (`https://` only outside loopback,
+/// allowlisted host, body size cap, TOML pre-validate is the caller's
+/// job) so a hostile `extends = "http://10.0.0.1/admin/internal.toml"`
+/// is refused at one place rather than slipping through a second-impl
+/// fetch elsewhere in the tree (security review F-3).
+///
+/// Differences vs `fetch_remote_config`:
+/// - No on-disk cache (callers may have their own caching layer).
+/// - No GitHub URL rewrite (callers know what they want).
+/// - No header injection (no `--from` headers in this path).
+pub fn validated_get(url: &str) -> Result<String, String> {
+    let policy = parse_url_policy(url)?;
+    let allow_extra = extra_allowed_hosts_from_env();
+    let scheme_ok = policy.scheme == "https"
+        || (policy.scheme == "http" && (policy.host == "localhost" || policy.host == "127.0.0.1"));
+    if !scheme_ok {
+        return Err(format!(
+            "Refusing to fetch over scheme '{}'. Use https://. (URL: {url})",
+            policy.scheme
+        ));
+    }
+    if !host_in_allowlist(&policy.host, &allow_extra) {
+        return Err(format!(
+            "Refusing to fetch from host '{}'. Allowed hosts: {}. \
+             To permit a custom host, set JARVY_ALLOW_REMOTE_HOST=\"host1,host2\".",
+            policy.host,
+            DEFAULT_ALLOWED_HOSTS.join(", ")
+        ));
+    }
+
+    let response = crate::net::agent()
+        .get(url)
+        .header("User-Agent", &crate::net::user_agent())
+        .header("Accept", "text/plain, application/toml, */*")
+        .call()
+        .map_err(|e| format!("Failed to fetch URL: {}", e))?;
+
+    if response.status() != 200 {
+        return Err(format!("HTTP error {}", response.status()));
+    }
+
+    if let Some(content_length) = response.headers().get("content-length") {
+        if let Some(length) = content_length
+            .to_str()
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+        {
+            if length > MAX_REMOTE_CONFIG_SIZE {
+                return Err(format!(
+                    "Remote response too large: {} bytes (max {} bytes)",
+                    length, MAX_REMOTE_CONFIG_SIZE
+                ));
+            }
+        }
+    }
+
+    let mut content = String::new();
+    let mut body = response.into_body();
+    let reader = body.as_reader();
+    let mut limited = reader.take(MAX_REMOTE_CONFIG_SIZE + 1);
+    limited
+        .read_to_string(&mut content)
+        .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+    if content.len() as u64 > MAX_REMOTE_CONFIG_SIZE {
+        return Err(format!(
+            "Remote response too large: exceeds {} bytes limit",
+            MAX_REMOTE_CONFIG_SIZE
+        ));
+    }
+
+    Ok(content)
+}
+
 /// Transform GitHub URLs to raw content URLs
 pub fn transform_github_url(url: &str) -> String {
     // Transform github.com blob URLs to raw.githubusercontent.com

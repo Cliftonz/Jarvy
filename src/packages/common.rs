@@ -33,10 +33,12 @@ pub enum PackageError {
     /// it would inject CLI flags or a non-package URL into the underlying
     /// package manager's argument list. Examples:
     ///
-    ///     "--registry=http://attacker"
-    ///     "--git"          (cargo flag)
-    ///     "../../etc/passwd"
-    ///     "git+https://attacker/x.git"
+    /// ```text
+    /// "--registry=http://attacker"
+    /// "--git"          (cargo flag)
+    /// "../../etc/passwd"
+    /// "git+https://attacker/x.git"
+    /// ```
     ///
     /// All of these are passed positionally to `npm install` / `cargo install`
     /// / `pip install` and would normally be honored as flags or URL deps.

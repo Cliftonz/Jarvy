@@ -162,26 +162,16 @@ impl Registry {
                 name: name.to_string(),
             })?;
 
-        // Fetch index.toml from source URL
+        // Fetch index.toml from source URL via the hardened pipeline. Same
+        // rationale as team::inheritance::fetch_url — without this a team-
+        // configured registry pointed at `http://internal/x` would bypass
+        // every URL-policy gate in remote.rs.
         let index_url = format!("{}/index.toml", source.url.trim_end_matches('/'));
-
-        let response = crate::net::agent()
-            .get(&index_url)
-            .header("User-Agent", &crate::net::user_agent())
-            .call()
-            .map_err(|e| RegistryError::FetchError {
-                url: index_url.clone(),
-                error: e.to_string(),
-            })?;
-
         let body =
-            response
-                .into_body()
-                .read_to_string()
-                .map_err(|e| RegistryError::FetchError {
-                    url: index_url,
-                    error: e.to_string(),
-                })?;
+            crate::remote::validated_get(&index_url).map_err(|e| RegistryError::FetchError {
+                url: index_url.clone(),
+                error: e,
+            })?;
 
         // Parse index
         let index: IndexFile = toml::from_str(&body).map_err(|e| RegistryError::ParseError {
