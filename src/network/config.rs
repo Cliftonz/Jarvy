@@ -103,22 +103,11 @@ impl PasswordSource {
             }
             PasswordSource::File(path) => {
                 // Warn if password file has overly permissive permissions.
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    if let Ok(metadata) = std::fs::metadata(path) {
-                        let mode = metadata.permissions().mode();
-                        if mode & 0o077 != 0 {
-                            let safe_path = crate::network::redact_home(path);
-                            tracing::warn!(
-                                event = "proxy.password_permissive_perms",
-                                path = %safe_path,
-                                mode = format!("{:o}", mode & 0o777),
-                                "proxy password file has permissive permissions; chmod 600 recommended"
-                            );
-                        }
-                    }
-                }
+                // Shared with `env::secrets` via `crate::security`.
+                crate::security::warn_if_world_readable(
+                    std::path::Path::new(path),
+                    "proxy_password",
+                );
                 std::fs::read_to_string(path)
                     .map(|s| s.trim().to_string())
                     .map_err(|e| format!("Failed to read password file {}: {}", path, e))

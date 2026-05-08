@@ -125,6 +125,46 @@ impl TelemetryConfig {
     pub fn is_enabled(&self) -> bool {
         self.enabled && (self.logs || self.metrics || self.traces)
     }
+
+    /// Returns `Ok(())` if the configured endpoint is acceptable, otherwise
+    /// an explanatory error. Plain `http://` is rejected outside loopback so
+    /// telemetry payloads (tool inventory, fingerprint, error stderr) do not
+    /// leak to a passive listener on the network.
+    pub fn validate_endpoint(&self) -> Result<(), String> {
+        let url = self.endpoint.trim();
+        if url.is_empty() {
+            return Err("telemetry endpoint is empty".to_string());
+        }
+        if url.starts_with("https://") {
+            return Ok(());
+        }
+        if url.starts_with("http://") {
+            // Allow loopback only. Strip scheme + path and any IPv4 port,
+            // and unwrap bracketed IPv6 literals (`http://[::1]:4318`).
+            let host_with_port = url
+                .trim_start_matches("http://")
+                .split('/')
+                .next()
+                .unwrap_or("");
+            let host_only = if let Some(rest) = host_with_port.strip_prefix('[') {
+                // IPv6 literal: take chars up to closing bracket.
+                rest.split(']').next().unwrap_or("")
+            } else {
+                host_with_port.split(':').next().unwrap_or("")
+            };
+            const LOOPBACK: &[&str] = &["localhost", "127.0.0.1", "::1"];
+            if LOOPBACK.contains(&host_only) {
+                return Ok(());
+            }
+            return Err(format!(
+                "telemetry endpoint `{url}` uses plain HTTP to a non-loopback host; \
+                 use https:// or set the endpoint to localhost"
+            ));
+        }
+        Err(format!(
+            "telemetry endpoint `{url}` must use http:// (loopback only) or https://"
+        ))
+    }
 }
 
 // ============================================================================
@@ -197,6 +237,25 @@ fn build_telemetry_state(config: TelemetryConfig) -> TelemetryState {
     if !config.is_enabled() {
         return TelemetryState {
             config,
+            meter_provider: None,
+            metrics: None,
+        };
+    }
+
+    // Validate the OTLP endpoint before we wire any exporters. Refuse plain
+    // HTTP to non-loopback hosts so a stale config / `direnv` override
+    // pointing at `http://attacker.tld` cannot silently leak the payloads
+    // (full tool inventory, fingerprint, error stderr) onto the wire.
+    if let Err(why) = config.validate_endpoint() {
+        tracing::warn!(
+            event = "telemetry.endpoint.refused",
+            reason = %why,
+            "disabling telemetry: configured endpoint rejected"
+        );
+        let mut disabled = config;
+        disabled.enabled = false;
+        return TelemetryState {
+            config: disabled,
             meter_provider: None,
             metrics: None,
         };
@@ -971,30 +1030,49 @@ pub fn span_service(backend: &str, action: &str) -> tracing::Span {
 // Privacy Helpers
 // ============================================================================
 
-/// Redact potentially sensitive information from strings
-fn redact_sensitive(s: &str) -> String {
-    // Redact file paths that look like home directories
-    let result = regex::Regex::new(r"(/home/[^/\s]+|/Users/[^/\s]+|C:\\Users\\[^/\\\s]+)")
-        .map(|re| re.replace_all(s, "[HOME]").to_string())
-        .unwrap_or_else(|_| s.to_string());
-
-    // Redact potential environment variable values
+// Compile redaction regexes once. Previously each call to `redact_sensitive`
+// rebuilt both regexes (~50–200 µs each). `tool_failed` and `hook_failed`
+// fire on every install/hook failure — that's the failure path, exactly
+// when users are already waiting on retries.
+static REDACT_HOME_PATH_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"(/home/[^/\s]+|/Users/[^/\s]+|C:\\Users\\[^/\\\s]+)")
+        .expect("static home-path regex must compile")
+});
+static REDACT_ENV_VALUE_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(r"(API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)=\S+")
-        .map(|re| re.replace_all(&result, "$1=[REDACTED]").to_string())
-        .unwrap_or(result)
+        .expect("static env-value regex must compile")
+});
+
+// Cache `dirs::home_dir()` result. Each call queries env / sysconf and
+// allocates; with `redact_path` on the telemetry hot path that adds up.
+static HOME_DIR_STRING: std::sync::LazyLock<Option<String>> =
+    std::sync::LazyLock::new(|| dirs::home_dir().map(|p| p.to_string_lossy().into_owned()));
+
+/// Redact potentially sensitive information from strings.
+///
+/// Returns a `Cow::Borrowed` when no replacement happened so the common
+/// case (no match) avoids allocation entirely.
+fn redact_sensitive(s: &str) -> std::borrow::Cow<'_, str> {
+    let after_home = REDACT_HOME_PATH_RE.replace_all(s, "[HOME]");
+    let home_changed = matches!(after_home, std::borrow::Cow::Owned(_));
+    let after_env = REDACT_ENV_VALUE_RE.replace_all(&after_home, "$1=[REDACTED]");
+    let env_changed = matches!(after_env, std::borrow::Cow::Owned(_));
+
+    if !home_changed && !env_changed {
+        std::borrow::Cow::Borrowed(s)
+    } else {
+        std::borrow::Cow::Owned(after_env.into_owned())
+    }
 }
 
-/// Redact file paths to remove user-identifying information
+/// Redact file paths to remove user-identifying information.
 pub fn redact_path(path: &str) -> String {
-    let home = dirs::home_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
-
-    if !home.is_empty() && path.starts_with(&home) {
-        path.replace(&home, "~")
-    } else {
-        path.to_string()
+    if let Some(home) = HOME_DIR_STRING.as_deref() {
+        if !home.is_empty() && path.starts_with(home) {
+            return path.replacen(home, "~", 1);
+        }
     }
+    path.to_string()
 }
 
 // ============================================================================
@@ -1043,6 +1121,36 @@ mod tests {
         config.metrics = false;
         config.traces = false;
         assert!(!config.is_enabled()); // No signals enabled
+    }
+
+    #[test]
+    fn validate_endpoint_accepts_https_and_loopback() {
+        let mut config = TelemetryConfig::default();
+        config.endpoint = "https://otel.corp.com:4318".to_string();
+        assert!(config.validate_endpoint().is_ok());
+        config.endpoint = "http://localhost:4318".to_string();
+        assert!(config.validate_endpoint().is_ok());
+        config.endpoint = "http://127.0.0.1:4318".to_string();
+        assert!(config.validate_endpoint().is_ok());
+        config.endpoint = "http://[::1]:4318".to_string();
+        assert!(config.validate_endpoint().is_ok());
+    }
+
+    #[test]
+    fn validate_endpoint_rejects_plain_http_remote() {
+        let mut config = TelemetryConfig::default();
+        config.endpoint = "http://attacker.tld:4318".to_string();
+        let err = config.validate_endpoint().unwrap_err();
+        assert!(err.contains("plain HTTP"), "got {err:?}");
+    }
+
+    #[test]
+    fn validate_endpoint_rejects_unknown_scheme() {
+        let mut config = TelemetryConfig::default();
+        config.endpoint = "ftp://otel.corp.com".to_string();
+        assert!(config.validate_endpoint().is_err());
+        config.endpoint = "".to_string();
+        assert!(config.validate_endpoint().is_err());
     }
 
     #[test]

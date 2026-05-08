@@ -33,6 +33,7 @@ mod provisioner;
 pub mod remote;
 mod report;
 mod roles;
+mod security;
 mod services;
 mod setup;
 pub mod shell_init;

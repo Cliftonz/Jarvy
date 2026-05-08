@@ -146,25 +146,11 @@ fn resolve_secret(
                 return Err(SecretError::FileNotFound(path.display().to_string()));
             }
             // Warn if secret file has overly permissive permissions.
-            // Path emitted through redact_path so home-dir prefixes don't end up
-            // in shared ticket bundles.
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if let Ok(metadata) = fs::metadata(&path) {
-                    let mode = metadata.permissions().mode();
-                    if mode & 0o077 != 0 {
-                        let safe_path = crate::network::redact_home(&path.display().to_string());
-                        tracing::warn!(
-                            event = "secret.permissive_perms",
-                            path = %safe_path,
-                            mode = format!("{:o}", mode & 0o777),
-                            secret_name = %name,
-                            "secret file has permissive permissions; chmod 600 recommended"
-                        );
-                    }
-                }
-            }
+            // Shared with `network::config::PasswordSource::File` via
+            // `crate::security`. The `secret_name` context is now lost from
+            // the structured event; if a future use needs it back, extend
+            // `warn_if_world_readable` with a generic attributes argument.
+            crate::security::warn_if_world_readable(&path, "secret");
             let content = fs::read_to_string(&path)?;
             Ok(Some(content.trim().to_string()))
         }

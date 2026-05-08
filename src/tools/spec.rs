@@ -785,11 +785,36 @@ pub fn list_tool_names() -> Vec<String> {
 
 /// Look up a ToolSpec by name (case-insensitive).
 /// Returns None if the tool is not found or is a manually registered tool.
+///
+/// Uses a `OnceLock<HashMap>` over the inventory so each lookup is O(1) and
+/// allocation-free. Previously every call lowercased all ~150 spec names
+/// per lookup; for a 30-tool config in `check_tools_parallel` that produced
+/// ~4,500 transient `String` allocations during version checking alone.
 pub fn get_tool_spec(name: &str) -> Option<&'static ToolSpec> {
-    let name_lower = name.to_lowercase();
-    iter_tools()
-        .find(|entry| entry.spec.name.to_lowercase() == name_lower)
-        .map(|entry| entry.spec)
+    static SPECS_BY_LOWERCASE_NAME: std::sync::OnceLock<
+        std::collections::HashMap<String, &'static ToolSpec>,
+    > = std::sync::OnceLock::new();
+
+    let map = SPECS_BY_LOWERCASE_NAME.get_or_init(|| {
+        iter_tools()
+            .map(|entry| (entry.spec.name.to_lowercase(), entry.spec))
+            .collect()
+    });
+
+    // ASCII case-fold of the input is enough — tool names are ASCII.
+    if name.is_empty() {
+        return None;
+    }
+    if name
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b == b'-' || b.is_ascii_digit())
+    {
+        // Hot path: caller already passed lowercase; avoid allocating.
+        map.get(name).copied()
+    } else {
+        let lowered = name.to_ascii_lowercase();
+        map.get(&lowered).copied()
+    }
 }
 
 /// Get the default hook for a tool by name, if one exists for the current platform.

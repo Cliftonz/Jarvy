@@ -5,6 +5,7 @@ pub mod logging;
 pub mod network;
 pub mod observability;
 pub mod packages;
+pub mod security;
 pub mod ticket;
 pub mod tools;
 pub mod workspace;
