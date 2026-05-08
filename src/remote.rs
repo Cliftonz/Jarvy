@@ -472,6 +472,43 @@ mod tests {
         assert!(err.contains("attacker.tld"));
     }
 
+    // ----- validated_get rejection tests (round-2 QA B3).
+    // The team::* pipeline goes through validated_get (not
+    // fetch_remote_config); it has its own copy of the policy gates
+    // that can drift independently. These tests pin the rejections.
+
+    #[test]
+    fn validated_get_rejects_http_to_remote_host() {
+        let err = validated_get("http://example.com/x.toml")
+            .expect_err("http to non-loopback must be refused");
+        assert!(
+            err.contains("scheme") || err.contains("https"),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validated_get_rejects_disallowed_host() {
+        let err = validated_get("https://attacker.tld/internal.toml")
+            .expect_err("disallowed host must be refused");
+        assert!(err.contains("attacker.tld"), "got {err:?}");
+    }
+
+    #[test]
+    fn validated_get_rejects_file_scheme() {
+        // `file:///etc/passwd` parses with empty host; either rejection
+        // path is fine — the point is the URL must NOT be fetched.
+        let err = validated_get("file:///etc/passwd").expect_err("file:// must be refused");
+        let _ = err;
+    }
+
+    #[test]
+    fn validated_get_rejects_missing_scheme() {
+        let err = validated_get("github.com/owner/repo/blob/main/x.toml")
+            .expect_err("missing scheme must be refused");
+        let _ = err;
+    }
+
     #[test]
     fn header_sensitivity_check_is_case_insensitive() {
         assert!(header_is_sensitive("Authorization"));

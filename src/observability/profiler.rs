@@ -2,14 +2,10 @@
 //!
 //! Tracks timing of all operations with phase breakdown and per-tool statistics.
 //!
-//! ## Usage
+//! ## Usage (crate-internal)
 //!
-//! ```rust
-//! use jarvy::observability::Profiler;
-//!
+//! ```ignore
 //! let mut profiler = Profiler::new();
-
-#![allow(dead_code)] // Public API for performance profiling
 //! profiler.start_phase("config_parsing");
 //! // ... do work ...
 //! profiler.end_phase();
@@ -21,6 +17,8 @@
 //! let report = profiler.report();
 //! println!("{}", report.to_summary());
 //! ```
+
+#![allow(dead_code)] // Public API for performance profiling
 
 use serde::Serialize;
 use std::collections::HashMap;

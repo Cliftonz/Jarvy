@@ -9,8 +9,6 @@
 //! This is the natural seam for future XDG migration and for a
 //! `JARVY_HOME` env override.
 
-#![allow(dead_code)] // Public API; callers migrate incrementally.
-
 use std::path::PathBuf;
 
 /// Internal constant for the base directory name.
@@ -48,14 +46,9 @@ pub fn tickets_dir() -> Result<PathBuf, NoHomeDir> {
     Ok(jarvy_home()?.join("tickets"))
 }
 
-/// `~/.jarvy/cache/`.
-pub fn cache_dir() -> Result<PathBuf, NoHomeDir> {
-    Ok(jarvy_home()?.join("cache"))
-}
-
 /// `~/.jarvy/cache/configs/` — used by `remote::fetch_remote_config`.
 pub fn remote_config_cache_dir() -> Result<PathBuf, NoHomeDir> {
-    Ok(cache_dir()?.join("configs"))
+    Ok(jarvy_home()?.join("cache").join("configs"))
 }
 
 /// `~/.jarvy/staging/` — pre-verify download landing zone for `update`.
@@ -160,7 +153,7 @@ mod tests {
         let home = jarvy_home().unwrap();
         assert!(logs_dir().unwrap().starts_with(&home));
         assert!(tickets_dir().unwrap().starts_with(&home));
-        assert!(cache_dir().unwrap().starts_with(&home));
+        assert!(remote_config_cache_dir().unwrap().starts_with(&home));
         assert!(staging_dir().unwrap().starts_with(&home));
         assert!(backup_dir().unwrap().starts_with(&home));
         assert!(config_toml().unwrap().starts_with(&home));

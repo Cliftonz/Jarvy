@@ -375,10 +375,12 @@ cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc *jarvy-windows-
     }
 
     #[test]
+    #[serial_test::serial(jarvy_allow_unsigned_env)]
     fn unsigned_override_env_parsing() {
-        // Use unique var per test concern; the underlying impl reads
-        // JARVY_ALLOW_UNSIGNED_UPDATE so we set it directly.
-        // SAFETY: tests run in parallel by default. We restore before exit.
+        // Round-2 QA B7 / item 16: serialized via #[serial] so a
+        // parallel test reading JARVY_ALLOW_UNSIGNED_UPDATE during
+        // BinaryInstaller::install_with_options doesn't observe
+        // arbitrary mid-flight values from this test's mutations.
         let key = "JARVY_ALLOW_UNSIGNED_UPDATE";
         let prev = std::env::var(key).ok();
 

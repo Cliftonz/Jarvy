@@ -430,4 +430,33 @@ mod tests {
             Err(GitError::RefusedDangerousConfig(_, _))
         ));
     }
+
+    /// Round-2 QA item 16: every entry in `GIT_SHELL_INTERPRETED_KEYS`
+    /// must refuse `!`-prefixed values. Loops over the constant so that
+    /// adding a new entry there gets coverage automatically — without
+    /// this, a future entry could regress to "no refusal" silently.
+    #[test]
+    fn every_shell_interpreted_key_refuses_bang_prefix() {
+        let setup = GitSetup::new(GitConfig::default());
+        for key in GIT_SHELL_INTERPRETED_KEYS {
+            let err = setup.set_config(key, "!evil").unwrap_err_or_else_panic();
+            match err {
+                GitError::RefusedDangerousConfig(k, _) => assert_eq!(k, *key),
+                other => panic!("expected RefusedDangerousConfig for {key}, got {other:?}"),
+            }
+        }
+    }
+
+    /// Helper trait so the loop above reads naturally.
+    trait UnwrapErrOrPanic<T, E: std::fmt::Debug> {
+        fn unwrap_err_or_else_panic(self) -> E;
+    }
+    impl<T: std::fmt::Debug, E: std::fmt::Debug> UnwrapErrOrPanic<T, E> for Result<T, E> {
+        fn unwrap_err_or_else_panic(self) -> E {
+            match self {
+                Ok(v) => panic!("expected Err, got Ok({v:?})"),
+                Err(e) => e,
+            }
+        }
+    }
 }

@@ -41,7 +41,7 @@ Jarvy is a cross-platform CLI tool that provisions development environments from
 - **`src/tools/common.rs`** - Shared utilities: `Os` enum, `InstallError` type, `run()`, `has()`, `cmd_satisfies()`, package manager detection
 - **`src/tools/spec.rs`** - ToolSpec pattern: `ToolSpec` struct and `define_tool!` macro for declarative tool definitions
 - **`src/packages/`** - Language package dependencies (npm, pip, cargo) with virtual environment support (PRD-039)
-- **`src/logging/`** - Persistent file-based logging with rotation (PRD-050). Key files: `config.rs` (LoggingConfig), `sanitizer.rs` (sensitive data redaction), `writer.rs` (RotatingFileWriter), `rotator.rs` (gzip compression)
+- **`src/logging/`** - Thin re-export layer over `src/observability/` with helpers for log file management. Re-exports `LogConfig`, `LogFormat`, `LogLevel`, `Sanitizer`. Provides `default_log_directory()`, `read_recent_logs()`, `get_log_stats()`, `clean_logs()`. Actual writer/rotation/sanitizer implementations live in `src/observability/`.
 - **`src/ticket/`** - Debug ticket generation (PRD-050). Key files: `collector.rs` (SystemInfo, ToolInfo), `bundler.rs` (ZIP archive creation)
 
 ### Tool Implementation Pattern
@@ -515,16 +515,17 @@ jarvy update disable              # Disable auto-updates
 
 ### Logging & Debug Tickets
 
-Jarvy provides persistent file-based logging with rotation and debug ticket generation for support and diagnostics.
+Jarvy provides persistent file-based logging via the `tracing` ecosystem (with `tracing_appender::rolling` rotation and `tracing_appender::non_blocking` async file writes), plus debug ticket generation for support and diagnostics.
 
-**Module**: `src/logging/` - File-based logging with rotation and sanitization.
+**Module**: `src/observability/` - Tracing subscriber setup, sanitizer, file/OTLP writers.
+**Module**: `src/logging/` - Re-exports from observability + log file management helpers.
 **Module**: `src/ticket/` - Debug ticket generation for support bundles.
 
 **Key Files**:
-- `logging/config.rs` - LoggingConfig, LogLevel, LogFormat types
-- `logging/sanitizer.rs` - Sensitive data redaction (API keys, tokens, passwords, emails)
-- `logging/writer.rs` - Thread-safe RotatingFileWriter with Arc<Mutex>
-- `logging/rotator.rs` - Log rotation with gzip compression
+- `observability/logging.rs` - `LogConfig`, `LogLevel`, `LogFormat` types and `default_log_directory()`
+- `observability/sanitizer.rs` - Sensitive data redaction (API keys, tokens, passwords) using `Cow<'_, str>` to skip allocation when no match
+- `analytics.rs` - tracing-subscriber wiring: console layer, `non_blocking` rolling file appender, optional OTLP layer; `shutdown_logging()` flushes the `SdkLoggerProvider` and the file `WorkerGuard` before `process::exit`
+- `logging/mod.rs` - `read_recent_logs()`, `get_log_stats()`, `clean_logs()`, `format_size()`
 - `ticket/collector.rs` - SystemInfo, ToolInfo collection
 - `ticket/bundler.rs` - ZIP archive creation
 
@@ -556,13 +557,13 @@ jarvy ticket clean [--older-than DAYS]        # Remove expired tickets
 **Tickets Directory**: `~/.jarvy/tickets/` (JARVY-YYYYMMDD-xxxxxxxx.zip)
 
 **Key Types**:
-- `LoggingConfig` - Logging configuration
-- `Sanitizer` - Sensitive data redaction with regex patterns
-- `RotatingFileWriter` - Thread-safe file writer with rotation
-- `LogRotator` - Rotation and gzip compression
+- `LogConfig` - Logging configuration (level, format, directory)
+- `Sanitizer` - Sensitive data redaction with regex patterns; exposes `sanitize_borrowed` returning `Cow<'_, str>` for zero-alloc on the no-match path
 - `TicketData` - Complete ticket data structure
 - `TicketCollector` - System and tool info collection
 - `TicketBundler` - ZIP archive creation
+
+**Rotation & flush**: rotation is handled by `tracing_appender::rolling` (daily rolls; old files deleted by `jarvy logs clean`). Writes are buffered through `tracing_appender::non_blocking`; the worker guard is held in `analytics::FILE_LOGGER_GUARD` and dropped during `shutdown_logging()` so buffered records flush before exit.
 
 ## Testing
 

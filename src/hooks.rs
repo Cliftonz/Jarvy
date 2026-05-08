@@ -112,17 +112,6 @@ pub(crate) fn is_allowed_shell(shell: &str) -> bool {
 /// Result type for hook operations
 pub type HookResult<T> = Result<T, HookError>;
 
-/// Outcome of `Hook::run_with_policy`.
-#[derive(Debug, PartialEq, Eq)]
-pub enum HookOutcome {
-    /// Hook ran successfully (or was skipped in dry-run mode).
-    Ok,
-    /// Hook failed but `continue_on_error = true`; caller should log and proceed.
-    Continue,
-    /// Hook failed and `continue_on_error = false`; caller must abort.
-    Fail,
-}
-
 /// Configuration for a single hook execution
 #[derive(Debug, Clone)]
 pub struct HookConfig {
@@ -387,32 +376,32 @@ impl Hook {
 
     /// Run this hook respecting the policy in `self.config` and an optional
     /// dry-run flag. Returns:
-    /// - `HookOutcome::Ok` on success or skipped dry-run
-    /// - `HookOutcome::Continue` when the hook failed but
-    ///   `continue_on_error = true` — caller logs a warning and proceeds
-    /// - `HookOutcome::Fail` when the hook failed and the caller must abort
+    /// - `Ok(())` on success, on skipped dry-run, OR when the hook failed
+    ///   with `continue_on_error = true` (a warning is already emitted to
+    ///   stderr; the caller proceeds without further action).
+    /// - `Err(HookError)` only when the hook failed AND the caller must
+    ///   abort. Callers typically map this to `error_codes::HOOK_FAILED`.
     ///
     /// Replaces the repeated `match hook.execute() { Err(e) if
     /// !continue_on_error => return HOOK_FAILED } eprintln!(...)` block
-    /// that appeared 4× in `setup_cmd::run_setup` (maintainability
-    /// review #11).
-    pub fn run_with_policy(&self, dry_run: bool) -> HookOutcome {
+    /// that appeared 4× in `setup_cmd::run_setup`.
+    pub fn run_with_policy(&self, dry_run: bool) -> Result<(), HookError> {
         if dry_run {
             self.dry_run();
-            return HookOutcome::Ok;
+            return Ok(());
         }
         match self.execute() {
-            Ok(_) => HookOutcome::Ok,
+            Ok(_) => Ok(()),
             Err(e) => {
                 if self.config.continue_on_error {
                     eprintln!(
                         "Warning: hook `{}` failed but continuing: {e}",
                         self.description
                     );
-                    HookOutcome::Continue
+                    Ok(())
                 } else {
                     eprintln!("Hook `{}` failed: {e}", self.description);
-                    HookOutcome::Fail
+                    Err(e)
                 }
             }
         }
@@ -657,6 +646,46 @@ mod tests {
         // Just ensure it doesn't panic
         let hook = Hook::new("echo test", "Dry run test");
         hook.dry_run();
+    }
+
+    // ----- run_with_policy outcome (round-2 QA B5 + maint #22).
+    // Collapsed from 3-state HookOutcome to Result<(), HookError>: the
+    // only call-site distinction in production was Fail vs not-Fail, and
+    // continue_on_error already emits its warning as a side effect. A
+    // refactor that returns Ok(()) regardless of continue_on_error would
+    // silently swallow blocking hook failures and exit 0 instead of
+    // HOOK_FAILED — these tests catch that.
+
+    #[test]
+    fn run_with_policy_dry_run_returns_ok() {
+        let hook = Hook::new("exit 1", "Dry-run-skipped");
+        assert!(hook.run_with_policy(true).is_ok());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn run_with_policy_success_returns_ok() {
+        let hook = Hook::new("true", "Success");
+        assert!(hook.run_with_policy(false).is_ok());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn run_with_policy_failure_with_continue_on_error_returns_ok() {
+        let mut config = HookConfig::default();
+        config.continue_on_error = true;
+        let hook = Hook::with_config("exit 1", "advisory", config);
+        // continue_on_error swallows the failure into Ok(()) after warning.
+        assert!(hook.run_with_policy(false).is_ok());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn run_with_policy_failure_without_continue_on_error_returns_err() {
+        let mut config = HookConfig::default();
+        config.continue_on_error = false;
+        let hook = Hook::with_config("exit 1", "blocking", config);
+        assert!(hook.run_with_policy(false).is_err());
     }
 
     #[test]

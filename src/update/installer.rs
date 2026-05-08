@@ -560,4 +560,46 @@ mod tests {
         let installer = BinaryInstaller::new();
         assert!(installer.is_ok());
     }
+
+    // ----- verify_no_tar_escape (round-2 QA F5).
+    // The path-traversal verifier IS the supply-chain defense for
+    // unpacked binaries. A regression that always returns Ok(()) would
+    // not have been caught by any test before this.
+
+    #[test]
+    fn verify_no_tar_escape_accepts_contained_tree() {
+        let dest = TempDir::new().unwrap();
+        let canon = fs::canonicalize(dest.path()).unwrap();
+        let inner = canon.join("subdir");
+        fs::create_dir_all(&inner).unwrap();
+        File::create(inner.join("payload.txt"))
+            .unwrap()
+            .write_all(b"x")
+            .unwrap();
+        verify_no_tar_escape(&canon).expect("contained tree must pass");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn verify_no_tar_escape_rejects_symlink_to_outside() {
+        // Build a tarball-like layout where a symlink inside the
+        // extraction root points to /etc — the classic supply-chain
+        // breakout. The verifier must reject the whole tree.
+        let dest = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let outside_canon = fs::canonicalize(outside.path()).unwrap();
+        let canon = fs::canonicalize(dest.path()).unwrap();
+
+        // Create the target file outside, then symlink to it from inside.
+        let target = outside_canon.join("captured.txt");
+        File::create(&target).unwrap().write_all(b"x").unwrap();
+        let symlink = canon.join("escaped");
+        std::os::unix::fs::symlink(&target, &symlink).unwrap();
+
+        let err = verify_no_tar_escape(&canon).expect_err("escape must be refused");
+        assert!(
+            err.contains("outside") || err.contains("resolves"),
+            "got {err:?}"
+        );
+    }
 }

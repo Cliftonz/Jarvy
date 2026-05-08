@@ -18,7 +18,7 @@ use crate::env::{
     generate_dotenv, preview_dotenv, preview_shell_rc, update_shell_rc,
 };
 use crate::error_codes;
-use crate::hooks::{Hook, HookConfig, HookEnv, HookOutcome};
+use crate::hooks::{Hook, HookConfig, HookEnv};
 use crate::onboarding::mark_initialized;
 use crate::packages;
 use crate::remote::fetch_remote_config;
@@ -132,7 +132,7 @@ pub fn run_setup(
         if let Some(ref script) = hooks_config.pre_setup {
             let hook = Hook::with_config(script, "pre_setup", hook_settings.clone())
                 .with_env(HookEnv::global());
-            if hook.run_with_policy(dry_run) == HookOutcome::Fail {
+            if hook.run_with_policy(dry_run).is_err() {
                 return error_codes::HOOK_FAILED;
             }
         }
@@ -459,7 +459,7 @@ pub fn run_setup(
                         hook_settings.clone(),
                     )
                     .with_env(env);
-                    if hook.run_with_policy(false) == HookOutcome::Fail {
+                    if hook.run_with_policy(false).is_err() {
                         return error_codes::HOOK_FAILED;
                     }
                 } else if let Some(default_hook) = tools::spec::get_tool_default_hook(tool_name) {
@@ -617,7 +617,7 @@ pub fn run_setup(
         if let Some(ref script) = hooks_config.post_setup {
             let hook = Hook::with_config(script, "post_setup", hook_settings.clone())
                 .with_env(HookEnv::global());
-            if hook.run_with_policy(dry_run) == HookOutcome::Fail {
+            if hook.run_with_policy(dry_run).is_err() {
                 return error_codes::HOOK_FAILED;
             }
         }

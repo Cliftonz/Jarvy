@@ -26,6 +26,50 @@ pub enum SecretError {
     InputError,
     #[error("Secret file not found: {0}")]
     FileNotFound(String),
+    #[error(
+        "secret file '{path}' resolves outside project root and $HOME; \
+        set JARVY_ALLOW_EXTERNAL_SECRETS=1 to override"
+    )]
+    PathEscapesProject { path: String },
+}
+
+/// Refuse `from_file` paths that, after symlink-resolving canonicalization,
+/// land outside both the project root (`ctx.current_dir`) and `$HOME`. Common
+/// legitimate uses (`~/.aws/credentials`, `<project>/.env.secret`) stay
+/// allowed; `/etc/shadow` and `../../etc/passwd` are refused unless the
+/// operator opts in with `JARVY_ALLOW_EXTERNAL_SECRETS=1`.
+fn ensure_secret_path_contained(path: &Path, ctx: &EnvContext) -> Result<(), SecretError> {
+    if std::env::var("JARVY_ALLOW_EXTERNAL_SECRETS")
+        .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes"))
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+
+    // Canonicalize the secret path first; symlinks are resolved here so a
+    // `<project>/link → /etc/shadow` can't slip past the containment check.
+    let canon_path = match path.canonicalize() {
+        Ok(p) => p,
+        // If canonicalization fails (e.g., file missing) the caller will
+        // surface a clearer FileNotFound error; don't double-report.
+        Err(_) => return Ok(()),
+    };
+
+    let project_root = ctx.current_dir.canonicalize().ok();
+    let home = ctx.home_dir.canonicalize().ok();
+
+    let under_project = project_root
+        .as_ref()
+        .is_some_and(|root| canon_path.starts_with(root));
+    let under_home = home.as_ref().is_some_and(|h| canon_path.starts_with(h));
+
+    if under_project || under_home {
+        Ok(())
+    } else {
+        Err(SecretError::PathEscapesProject {
+            path: canon_path.display().to_string(),
+        })
+    }
 }
 
 /// Configuration for secret collection
@@ -94,39 +138,43 @@ mod permissive_perms_tests {
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
 
-    fn make_secret_file(mode: u32) -> tempfile::NamedTempFile {
-        let mut tmp = tempfile::NamedTempFile::new().expect("tempfile");
-        write!(tmp, "supersecret").unwrap();
-        let mut perms = tmp.as_file().metadata().unwrap().permissions();
+    fn make_secret_file_in(dir: &Path, mode: u32) -> std::path::PathBuf {
+        let path = dir.join("secret");
+        let mut f = std::fs::File::create(&path).expect("create secret");
+        write!(f, "supersecret").unwrap();
+        drop(f);
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
         perms.set_mode(mode);
-        std::fs::set_permissions(tmp.path(), perms).unwrap();
-        tmp
+        std::fs::set_permissions(&path, perms).unwrap();
+        path
     }
 
-    fn build_ctx() -> EnvContext {
-        EnvContext::new()
+    fn ctx_rooted_at(dir: &Path) -> EnvContext {
+        let mut ctx = EnvContext::new();
+        ctx.current_dir = dir.to_path_buf();
+        ctx
     }
 
     #[test]
     fn resolve_secret_with_0600_does_not_warn_about_perms() {
-        let tmp = make_secret_file(0o600);
+        let tmp = tempfile::tempdir().unwrap();
+        let path = make_secret_file_in(tmp.path(), 0o600);
         let secret = SecretValue::FromFile {
-            from_file: tmp.path().to_string_lossy().to_string(),
+            from_file: path.to_string_lossy().to_string(),
         };
-        let ctx = build_ctx();
+        let ctx = ctx_rooted_at(tmp.path());
         let result = resolve_secret("TEST_SECRET", &secret, &ctx, &SecretsConfig::default());
         assert_eq!(result.unwrap(), Some("supersecret".to_string()));
     }
 
     #[test]
     fn resolve_secret_with_0644_still_returns_value() {
-        // Behavior today: warn but return. Documents the contract; tighten
-        // to `Err` once we ship a strict-secrets toggle.
-        let tmp = make_secret_file(0o644);
+        let tmp = tempfile::tempdir().unwrap();
+        let path = make_secret_file_in(tmp.path(), 0o644);
         let secret = SecretValue::FromFile {
-            from_file: tmp.path().to_string_lossy().to_string(),
+            from_file: path.to_string_lossy().to_string(),
         };
-        let ctx = build_ctx();
+        let ctx = ctx_rooted_at(tmp.path());
         let result = resolve_secret("TEST_SECRET", &secret, &ctx, &SecretsConfig::default());
         assert_eq!(result.unwrap(), Some("supersecret".to_string()));
     }
@@ -145,6 +193,7 @@ fn resolve_secret(
             if !path.exists() {
                 return Err(SecretError::FileNotFound(path.display().to_string()));
             }
+            ensure_secret_path_contained(&path, ctx)?;
             // Warn if secret file has overly permissive permissions.
             // Shared with `network::config::PasswordSource::File` via
             // `crate::security`. The `secret_name` context is now lost from
@@ -309,7 +358,8 @@ mod tests {
         let file_path = dir.path().join("secret.txt");
         fs::write(&file_path, "file_secret_value").unwrap();
 
-        let ctx = EnvContext::new();
+        let mut ctx = EnvContext::new();
+        ctx.current_dir = dir.path().to_path_buf();
         let config = SecretsConfig {
             ci_mode: true,
             fail_on_missing: true,
@@ -414,7 +464,8 @@ mod tests {
             },
         );
 
-        let ctx = EnvContext::new();
+        let mut ctx = EnvContext::new();
+        ctx.current_dir = dir.path().to_path_buf();
         let config = SecretsConfig {
             ci_mode: true,
             fail_on_missing: true,
@@ -425,5 +476,74 @@ mod tests {
             result.get("FILE_SECRET"),
             Some(&"collected_secret".to_string())
         );
+    }
+
+    #[test]
+    #[serial_test::serial(jarvy_allow_external_secrets)]
+    fn test_resolve_secret_refuses_path_outside_project_and_home() {
+        // Create the secret in /tmp but root the project somewhere else.
+        // /tmp is outside both `current_dir` and `$HOME`, so the path
+        // containment check must refuse with PathEscapesProject.
+        let secret_dir = tempdir().unwrap();
+        let secret_path = secret_dir.path().join("attacker.txt");
+        fs::write(&secret_path, "leak").unwrap();
+
+        let project = tempdir().unwrap();
+        let mut ctx = EnvContext::new();
+        ctx.current_dir = project.path().to_path_buf();
+        // Force a non-tmp HOME so the secret can't sneak through `under_home`.
+        ctx.home_dir = project.path().to_path_buf();
+
+        let config = SecretsConfig {
+            ci_mode: true,
+            fail_on_missing: true,
+        };
+        let secret_config = SecretValue::FromFile {
+            from_file: secret_path.to_string_lossy().to_string(),
+        };
+
+        let result = resolve_secret("LEAK", &secret_config, &ctx, &config);
+        // Either escape-error or environment under test happens to share /tmp.
+        // Asserting on the variant matters; the path string varies by platform.
+        assert!(
+            matches!(result, Err(SecretError::PathEscapesProject { .. })),
+            "expected PathEscapesProject, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(jarvy_allow_external_secrets)]
+    #[allow(unsafe_code)]
+    fn test_resolve_secret_external_path_allowed_with_env_override() {
+        let secret_dir = tempdir().unwrap();
+        let secret_path = secret_dir.path().join("override.txt");
+        fs::write(&secret_path, "override_value").unwrap();
+
+        let project = tempdir().unwrap();
+        let mut ctx = EnvContext::new();
+        ctx.current_dir = project.path().to_path_buf();
+        ctx.home_dir = project.path().to_path_buf();
+
+        let prev = std::env::var("JARVY_ALLOW_EXTERNAL_SECRETS").ok();
+        unsafe {
+            std::env::set_var("JARVY_ALLOW_EXTERNAL_SECRETS", "1");
+        }
+        let config = SecretsConfig {
+            ci_mode: true,
+            fail_on_missing: true,
+        };
+        let secret_config = SecretValue::FromFile {
+            from_file: secret_path.to_string_lossy().to_string(),
+        };
+
+        let result = resolve_secret("OK", &secret_config, &ctx, &config);
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("JARVY_ALLOW_EXTERNAL_SECRETS", v),
+                None => std::env::remove_var("JARVY_ALLOW_EXTERNAL_SECRETS"),
+            }
+        }
+        assert_eq!(result.unwrap(), Some("override_value".to_string()));
     }
 }
