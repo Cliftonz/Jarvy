@@ -1,0 +1,53 @@
+# Ruby on Rails
+# Run: jarvy setup
+#
+# Template for Rails apps. Pairs Ruby + bundler with the typical Rails sidecars:
+# Postgres, Redis, foreman.
+
+[privileges]
+use_sudo = false
+
+[provisioner]
+git = "latest"
+rbenv = "latest"
+ruby = { version = "3.3", version_manager = true }   # rbenv-managed
+redis = "latest"
+jq = "latest"
+
+[hooks.ruby]
+post_install = """
+ruby --version
+gem install bundler --conservative
+gem install foreman --conservative
+"""
+
+[hooks]
+post_setup = """
+# Postgres is expected via the [services] docker-compose stack below;
+# install a system client (psql) via your OS package manager if you want
+# host-side tooling.
+bundle config set --local path 'vendor/bundle'
+bundle install --jobs=4 --retry=3
+echo 'Rails ready: `bin/dev` to start, `bin/rails test` for tests.'
+"""
+
+[env.vars]
+RAILS_ENV = "development"
+DATABASE_URL = "postgres://localhost/myapp_development"
+REDIS_URL = "redis://localhost:6379/0"
+
+[services]
+enabled = true
+auto_start = true
+compose_file = "docker-compose.yml"
+
+[commands]
+run = "bin/dev"
+test = "bin/rails test"
+console = "bin/rails console"
+migrate = "bin/rails db:migrate"
+
+[drift]
+enabled = true
+version_policy = "minor"
+track_files = ["Gemfile", "Gemfile.lock", ".ruby-version", ".tool-versions"]

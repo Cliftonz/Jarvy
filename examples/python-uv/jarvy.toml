@@ -1,0 +1,51 @@
+# Python with uv (modern, Rust-based pip/venv replacement)
+# Run: jarvy setup
+#
+# Template for Python projects using uv for dependency management. Much faster
+# than pip + venv. Use this template if your repo has a uv.lock or pyproject.toml
+# managed by uv.
+
+[privileges]
+use_sudo = false
+
+[provisioner]
+git = "latest"
+pyenv = "latest"
+python = { version = "3.12", version_manager = true }
+ruff = "latest"
+jq = "latest"
+
+[hooks]
+post_setup = """
+# uv is not yet a first-class Jarvy tool — bootstrap it idempotently here.
+# Install path matches the upstream installer (`~/.cargo/bin` or `~/.local/bin`).
+if ! command -v uv >/dev/null 2>&1; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+fi
+export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+uv --version
+
+# Sync env from uv.lock (or pyproject.toml if no lockfile yet)
+if [ -f uv.lock ]; then
+    uv sync --frozen
+elif [ -f pyproject.toml ]; then
+    uv sync
+fi
+echo 'Python env ready: run `uv run pytest` for tests.'
+"""
+
+[env.vars]
+PYTHONDONTWRITEBYTECODE = "1"
+PYTHONUNBUFFERED = "1"
+UV_PROJECT_ENVIRONMENT = "$PWD/.venv"
+
+[commands]
+run = "uv run python -m app"
+test = "uv run pytest -v"
+lint = "uv run ruff check ."
+format = "uv run ruff format ."
+
+[drift]
+enabled = true
+version_policy = "minor"
+track_files = ["pyproject.toml", "uv.lock", ".python-version"]

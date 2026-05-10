@@ -6,7 +6,8 @@ use_sudo = false
 
 [provisioner]
 git = "latest"
-python = "3.12"
+pyenv = "latest"
+python = { version = "3.12", version_manager = true }
 docker = "latest"
 jq = "latest"
 httpie = "latest"

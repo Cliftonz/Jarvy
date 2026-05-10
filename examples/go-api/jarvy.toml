@@ -1,0 +1,49 @@
+# Go API service
+# Run: jarvy setup
+#
+# Template for Go-based HTTP services. Includes the modern Go toolchain,
+# air for live reload, golangci-lint for the lint gate, and goose for migrations.
+
+[privileges]
+use_sudo = false
+
+[provisioner]
+git = "latest"
+go = "1.22"
+docker = "latest"
+golangci_lint = "latest"
+just = "latest"
+jq = "latest"
+ripgrep = "latest"
+
+[hooks.go]
+post_install = """
+go version
+go env GOPATH GOBIN
+"""
+
+[hooks]
+post_setup = """
+# Install go-binary tools that don't have native package recipes
+go install github.com/air-verse/air@latest
+go install github.com/pressly/goose/v3/cmd/goose@latest
+go mod download
+echo 'Go ready: run `air` for hot-reload, `just test` for the test suite.'
+"""
+
+[env.vars]
+GO111MODULE = "on"
+CGO_ENABLED = "1"
+GOPATH = "$HOME/go"
+PATH = "$HOME/go/bin:$PATH"
+
+[commands]
+run = "air"
+test = "go test -v -race ./..."
+build = "go build -o ./bin/server ./cmd/server"
+lint = "golangci-lint run"
+
+[drift]
+enabled = true
+version_policy = "minor"
+track_files = ["go.mod", "go.sum", ".golangci.yml"]

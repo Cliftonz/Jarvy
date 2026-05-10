@@ -1,0 +1,49 @@
+# Node.js + pnpm
+# Run: jarvy setup
+#
+# Use this template when your repo has a pnpm-lock.yaml. Faster, disk-friendly
+# installs via the pnpm content-addressable store.
+
+[privileges]
+use_sudo = false
+
+[provisioner]
+git = "latest"
+nvm = "latest"
+node = { version = "20", version_manager = true }
+jq = "latest"
+ripgrep = "latest"
+
+[npm]
+typescript = "^5.0"
+eslint = "latest"
+prettier = "^3.0"
+package_manager = "pnpm"   # Auto-detected from pnpm-lock.yaml; explicit for clarity
+from_lockfile = true       # Equivalent to `pnpm install --frozen-lockfile`
+
+[hooks.node]
+post_install = """
+# pnpm ships with corepack since Node 16 — opt in once.
+corepack enable || true
+corepack prepare pnpm@latest --activate || true
+pnpm config set store-dir ~/.pnpm-store
+pnpm --version
+"""
+
+[hooks]
+post_setup = "echo 'Run `pnpm dev` to start.'"
+
+[env.vars]
+NODE_ENV = "development"
+PNPM_HOME = "$HOME/.local/share/pnpm"
+
+[commands]
+run = "pnpm dev"
+test = "pnpm test"
+build = "pnpm build"
+lint = "pnpm lint"
+
+[drift]
+enabled = true
+version_policy = "minor"
+track_files = ["package.json", "pnpm-lock.yaml", ".nvmrc", ".npmrc"]

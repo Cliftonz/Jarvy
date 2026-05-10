@@ -12,7 +12,6 @@ jq = "latest"
 # Role-based tool sets
 [roles.frontend]
 description = "Frontend development"
-tools = ["node", "bun"]
 
 [roles.frontend.tools]
 node = "20"
@@ -20,10 +19,11 @@ bun = "latest"
 
 [roles.backend]
 description = "Backend development"
-tools = ["go", "gopls", "golangci-lint"]
 
 [roles.backend.tools]
 go = "1.22"
+gopls = "latest"
+golangci_lint = "latest"
 
 [roles.fullstack]
 description = "Full-stack development"

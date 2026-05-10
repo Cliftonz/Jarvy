@@ -1,0 +1,46 @@
+# Node.js + npm
+# Run: jarvy setup
+#
+# Use this template for plain npm projects (no pnpm/yarn/bun lockfile).
+# Replaces "did you nvm use the right node?" with one config file.
+
+[privileges]
+use_sudo = false
+
+[provisioner]
+git = "latest"
+nvm = "latest"                                       # version manager for node
+node = { version = "20", version_manager = true }    # nvm-managed
+jq = "latest"
+ripgrep = "latest"
+
+[npm]
+typescript = "^5.0"
+eslint = "latest"
+prettier = "^3.0"
+package_manager = "npm"
+from_lockfile = true       # Run `npm ci` for reproducible installs
+
+[hooks.node]
+post_install = """
+corepack enable || true
+node --version
+npm --version
+"""
+
+[hooks]
+post_setup = "echo 'Node ready: run `npm run dev` to start.'"
+
+[env.vars]
+NODE_ENV = "development"
+
+[commands]
+run = "npm run dev"
+test = "npm test"
+build = "npm run build"
+lint = "npm run lint"
+
+[drift]
+enabled = true
+version_policy = "minor"
+track_files = ["package.json", "package-lock.json", ".nvmrc"]

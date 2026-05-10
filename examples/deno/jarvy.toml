@@ -1,0 +1,38 @@
+# Deno
+# Run: jarvy setup
+#
+# Template for Deno projects. Deno bundles its own toolchain, so the [provisioner]
+# section is small. Use this for Fresh, Hono, or any deno.json-driven project.
+
+[privileges]
+use_sudo = false
+
+[provisioner]
+git = "latest"
+deno = "latest"
+jq = "latest"
+ripgrep = "latest"
+
+[hooks.deno]
+post_install = """
+deno --version
+deno cache --reload deps.ts 2>/dev/null || true
+"""
+
+[hooks]
+post_setup = "echo 'Deno ready: `deno task dev` to start.'"
+
+[env.vars]
+DENO_DIR = "$HOME/.cache/deno"
+DENO_INSTALL_ROOT = "$HOME/.deno"
+
+[commands]
+run = "deno task dev"
+test = "deno test --allow-all"
+lint = "deno lint"
+format = "deno fmt"
+
+[drift]
+enabled = true
+version_policy = "minor"
+track_files = ["deno.json", "deno.jsonc", "deno.lock"]

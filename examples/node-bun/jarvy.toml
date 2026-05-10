@@ -1,0 +1,50 @@
+# Bun
+# Run: jarvy setup
+#
+# Use this template for Bun-native projects. Bun replaces node, npm, and most
+# of the dev-time bundler. node is still installed as a fallback for tools that
+# don't support Bun yet.
+
+[privileges]
+use_sudo = false
+
+[provisioner]
+git = "latest"
+bun = "latest"
+nvm = "latest"
+node = { version = "20", version_manager = true }   # Fallback for non-Bun tools
+jq = "latest"
+ripgrep = "latest"
+
+[npm]
+# Bun reads package.json + bun.lockb; Jarvy delegates installs to Bun via
+# package_manager = "bun". `from_lockfile = true` runs `bun install --frozen-lockfile`.
+typescript = "^5.0"
+eslint = "latest"
+prettier = "^3.0"
+package_manager = "bun"
+from_lockfile = true
+
+[hooks.bun]
+post_install = """
+bun --version
+bun pm trust --all 2>/dev/null || true
+"""
+
+[hooks]
+post_setup = "echo 'Bun ready: run `bun dev` to start.'"
+
+[env.vars]
+NODE_ENV = "development"
+BUN_RUNTIME_TRANSPILER_CACHE_PATH = "$HOME/.bun/cache"
+
+[commands]
+run = "bun dev"
+test = "bun test"
+build = "bun run build"
+lint = "bun run lint"
+
+[drift]
+enabled = true
+version_policy = "minor"
+track_files = ["package.json", "bun.lockb", "bunfig.toml"]

@@ -8,8 +8,10 @@ use_sudo = false
 git = "latest"
 rust = { version = "stable", version_manager = true }
 just = "latest"
-cargo-watch = "latest"
 ripgrep = "latest"
+
+[cargo]
+cargo-watch = "latest"
 
 [hooks]
 post_setup = "cargo build"

@@ -257,7 +257,10 @@ fn validate_structure(parsed: &toml::Value, content: &str, issues: &mut Vec<Vali
         });
     }
 
-    // Check for unknown top-level keys
+    // Check for unknown top-level keys. Keep this list in lockstep with the
+    // top-level sections actually parsed by `Config` and friends — the
+    // templates in `examples/` exercise the full surface, so a missing entry
+    // here produces a noisy false-positive warning.
     let known_keys = [
         "provisioner",
         "privileges",
@@ -267,6 +270,20 @@ fn validate_structure(parsed: &toml::Value, content: &str, issues: &mut Vec<Vali
         "roles",
         "role",
         "extends",
+        // Language package sections (PRD-039)
+        "npm",
+        "pip",
+        "cargo",
+        // Project commands surfaced via `jarvy run` / docs
+        "commands",
+        // Drift detection (PRD-038)
+        "drift",
+        // Git configuration
+        "git",
+        // Network/proxy configuration
+        "network",
+        // Logging configuration
+        "logging",
     ];
     if let Some(table) = parsed.as_table() {
         for key in table.keys() {
@@ -567,6 +584,14 @@ fn is_valid_version(version: &str) -> bool {
         return true;
     }
 
+    // Toolchain channel aliases used by `rustup` (and conceptually by other
+    // version managers). Templates legitimately pin to channels rather than
+    // hard versions — `rust = "stable"` is far more common in CI than
+    // `rust = "1.80.0"`.
+    if matches!(version, "stable" | "beta" | "nightly" | "lts" | "current") {
+        return true;
+    }
+
     // Simple version (1, 1.2, 1.2.3)
     if SIMPLE_RE.is_match(version) {
         return true;
@@ -621,6 +646,12 @@ mod tests {
         assert!(is_valid_version("^1.2.3"));
         assert!(is_valid_version("~1.2"));
         assert!(is_valid_version("=1.0.0"));
+        // Toolchain channels (rust = "stable" etc.)
+        assert!(is_valid_version("stable"));
+        assert!(is_valid_version("beta"));
+        assert!(is_valid_version("nightly"));
+        assert!(is_valid_version("lts"));
+        assert!(is_valid_version("current"));
     }
 
     #[test]

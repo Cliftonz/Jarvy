@@ -848,7 +848,38 @@ ca_bundle = "/etc/ssl/certs/corporate-ca.crt"
 
 ---
 
-## 13. Links
+## 13. Project Templates
+
+Drop-in `jarvy.toml` templates live at `examples/<name>/jarvy.toml` in the
+repo. Pick by detecting lockfiles in the user's project.
+
+| Template | Detect by | Stack |
+|----------|-----------|-------|
+| `node-npm` | `package-lock.json` only | Node.js + npm |
+| `node-pnpm` | `pnpm-lock.yaml` | Node.js + pnpm |
+| `node-bun` | `bun.lockb` or `bunfig.toml` | Bun + node fallback |
+| `deno` | `deno.json` / `deno.jsonc` | Deno |
+| `python-api` | `requirements.txt` | Python + pip + venv |
+| `python-uv` | `uv.lock` | Python + uv |
+| `go-api` | `go.mod` + HTTP service | Go + air + goose + golangci-lint |
+| `rust-cli` | `Cargo.toml` single-crate | Rust CLI |
+| `rust-workspace` | `Cargo.toml` with `[workspace]` | Rust multi-crate |
+| `ruby-rails` | `Gemfile` + Rails | Ruby on Rails + Postgres + Redis |
+| `java-spring` | `pom.xml` w/ spring-boot parent | Java + Spring Boot |
+
+Fetch one:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bearbinary/jarvy/main/examples/<name>/jarvy.toml -o jarvy.toml
+```
+
+Each template ships `[provisioner]`, `[<lang-pkg>]`, `[hooks]`, `[env.vars]`,
+`[commands]`, `[drift]`. See https://docs.jarvy.dev/templates-index/ for the
+full decision table.
+
+---
+
+## 14. Links
 
 - Website: https://jarvy.dev
 - Documentation: https://docs.jarvy.dev

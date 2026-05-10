@@ -6,7 +6,8 @@ use_sudo = false
 
 [provisioner]
 git = "latest"
-node = "20"
+nvm = "latest"
+node = { version = "20", version_manager = true }
 bun = "latest"
 docker = "latest"
 jq = "latest"

@@ -1,0 +1,49 @@
+# Java + Spring Boot
+# Run: jarvy setup
+#
+# Template for Spring Boot services using Maven or Gradle. Pairs OpenJDK with
+# the modern Java toolchain.
+
+[privileges]
+use_sudo = false
+
+[provisioner]
+git = "latest"
+java = "21"
+docker = "latest"
+jq = "latest"
+
+[hooks.java]
+post_install = """
+java -version
+# Maven and Gradle are not currently first-class Jarvy tools — install them
+# via the OS package manager or your team's bootstrap script. Common paths:
+#   macOS:  brew install maven gradle
+#   apt:    apt install -y maven gradle
+#   sdkman: curl -s https://get.sdkman.io | bash && sdk install maven && sdk install gradle
+"""
+
+[hooks]
+post_setup = """
+# Pre-fetch dependencies so the first IDE open is fast
+if [ -f pom.xml ]; then
+    mvn -B dependency:go-offline
+elif [ -f build.gradle ] || [ -f build.gradle.kts ]; then
+    gradle --no-daemon dependencies
+fi
+echo 'Java ready: `mvn spring-boot:run` or `gradle bootRun` to start.'
+"""
+
+[env.vars]
+JAVA_TOOL_OPTIONS = "-Dfile.encoding=UTF-8"
+SPRING_PROFILES_ACTIVE = "dev"
+
+[commands]
+run = "mvn spring-boot:run"
+test = "mvn test"
+build = "mvn -B package -DskipTests"
+
+[drift]
+enabled = true
+version_policy = "major"
+track_files = ["pom.xml", "build.gradle", "build.gradle.kts", "gradle.properties", ".java-version"]

@@ -1,0 +1,50 @@
+# Rust workspace (multi-crate)
+# Run: jarvy setup
+#
+# Template for Cargo workspaces. Heavier than examples/rust-cli — includes
+# nextest, cargo-deny, cargo-watch, and the typical lint/release toolchain
+# you'd want for a published crate.
+
+[privileges]
+use_sudo = false
+
+[provisioner]
+git = "latest"
+rust = { version = "stable", version_manager = true }   # rustup-managed
+just = "latest"
+ripgrep = "latest"
+
+[cargo]
+cargo-watch = "latest"
+cargo-nextest = "latest"
+cargo-deny = "latest"
+cargo-machete = "latest"
+cargo-edit = "latest"
+locked = true     # Reproducible installs
+
+[hooks.rust]
+post_install = """
+rustup component add clippy rustfmt
+rustup show
+"""
+
+[hooks]
+post_setup = """
+cargo fetch
+echo 'Rust ready: `cargo nextest run` for tests, `cargo watch -x check` for hot-rebuild.'
+"""
+
+[env.vars]
+RUST_BACKTRACE = "1"
+CARGO_TERM_COLOR = "always"
+
+[commands]
+run = "cargo run"
+test = "cargo nextest run"
+build = "cargo build --release"
+lint = "cargo clippy --all-features --all-targets -- -D warnings"
+
+[drift]
+enabled = true
+version_policy = "minor"
+track_files = ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml"]
