@@ -15,3 +15,8 @@
 # That commit cannot be rewritten without also rewriting all later commits,
 # so allowlist its fingerprint instead.
 2366a8c126f8a9593bd698a867d5247cc93dc45d:.betterleaksignore:stripe-access-token:8
+
+# Synthetic JWT test fixture in the sanitizer's unit test. The token decodes
+# to {"alg":"HS256","typ":"JWT"}.{"sub":"123456"} with a fake signature; it
+# is not a real credential. Used to verify the JWT redaction regex.
+7edb998242103436f6d09c64bde842a81179fdd8:src/observability/sanitizer.rs:jwt:473
