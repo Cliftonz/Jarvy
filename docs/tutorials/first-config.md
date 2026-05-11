@@ -53,7 +53,7 @@ Verify:
 jarvy --version
 ```
 
-You should see something like `jarvy 0.0.5`.
+You should see something like `jarvy 0.1.0`.
 
 !!! tip "Already have brew, apt, or winget?"
     Jarvy uses your system's native package manager — it doesn't replace it. If `brew install node` already works for you, Jarvy makes a thin call to the same machinery.

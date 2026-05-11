@@ -29,6 +29,152 @@ for divergences from generic release skills.
 
 ## [Unreleased]
 
+## [v0.1.0] — First feature-complete milestone (2026-05-10)
+
+First feature-complete stable. Closes the round-2 hardening review
+(45 items across two passes), ships clean-laptop onboarding, and
+publishes 14 ready-to-copy `jarvy.toml` project templates. The
+public surface from v0.0.5 is preserved; everything below is either
+additive, fail-closed by default, or a tightening of internal
+invariants.
+
+### Added
+
+- **Project templates.** `examples/<stack>/jarvy.toml` ships 14
+  validated drop-in configs (node-npm/pnpm/bun, deno, python-api/uv,
+  go-api, rust-cli/workspace, ruby-rails, java-spring, react-app,
+  fullstack, k8s-platform). Companion docs at
+  `docs/templates-index.md` give an AI-agent decision table mapping
+  detect-by signals (lockfiles, manifests) to template URLs.
+- **Clean-laptop onboarding.** New `Makefile` + idempotent
+  `scripts/bootstrap.sh` give contributors a two-command setup
+  (`curl install.sh | bash` then `make setup`). Bootstrap script
+  honors `JARVY_CHANNEL` for stable/beta/nightly, falls back to
+  `wget` if `curl` is missing, and forwards extra args to
+  `jarvy setup`. shellcheck-clean.
+- **`jarvy validate` recognizes the full top-level surface.**
+  `[npm]`, `[pip]`, `[cargo]`, `[commands]`, `[drift]`, `[git]`,
+  `[network]`, `[logging]` no longer trigger
+  "unknown configuration section" warnings. Toolchain channel
+  aliases (`stable`, `beta`, `nightly`, `lts`, `current`) are
+  accepted as valid version strings — `rust = "stable"` validates
+  cleanly.
+- **`SecretError::PathEscapesProject`** + `JARVY_ALLOW_EXTERNAL_SECRETS`
+  override. `[env.secrets] from_file` paths that resolve outside
+  the project root and `$HOME` after symlink-resolving
+  canonicalization are refused by default. Common legitimate paths
+  (`~/.aws/credentials`, `<project>/.env.secret`) keep working.
+  Override with `JARVY_ALLOW_EXTERNAL_SECRETS=1`.
+- **`tools::pinned_installer::PinnedInstaller`** helper for the
+  curl-bash class of installers. arctl, kmcp, and ollama (Linux
+  fallback only) now fetch their installer scripts at a pinned
+  commit, sha256-verify the body, and refuse to exec on mismatch —
+  same pattern Homebrew already used. Refreshing a pinned installer
+  requires updating the commit + sha256 constants together.
+- **POSIX env-var grammar validation** before writing
+  `[env.vars]` to shell rc files. Keys not matching
+  `^[A-Za-z_][A-Za-z0-9_]*$` are skipped with a structured
+  `event="env.refused_invalid_key"` warning instead of corrupting
+  `~/.bashrc` / `~/.zshrc`.
+- **`tools::install_method`** canonical classifier
+  (`Brew`/`Cargo`/`Nvm`/`Pyenv`/`Rustup`/`Snap`/`System`/
+  `NotFound`/`Unknown`). `commands::diagnose`, `commands::drift`,
+  and `observability::bundle` all delegate here instead of
+  hand-rolling three near-identical detectors.
+
+### Changed
+
+- **Logging pipeline rewired** to `tracing_appender::rolling` for
+  daily rotation + `tracing_appender::non_blocking` for buffered
+  writes. `analytics::shutdown_logging()` flushes both the
+  `SdkLoggerProvider` and the file `WorkerGuard` before
+  `process::exit`, so buffered records aren't lost on early
+  termination. `EnvFilter` now has a default-on floor of
+  `warn,jarvy=info` if `RUST_LOG` is unset.
+- **`Hook::run_with_policy`** collapsed from a 3-state `HookOutcome`
+  enum to `Result<(), HookError>`. Production callers only ever
+  checked `Fail` vs not-Fail; the warning-on-`continue_on_error`
+  side effect already conveyed the difference. The new `Err` case
+  returns the underlying `HookError` so `error_codes::HOOK_FAILED`
+  callers keep working.
+- **`Sanitizer::sanitize_borrowed`** returns `Cow<'_, str>` so the
+  no-match path skips allocation entirely. `Sanitizer::sanitize`
+  preserves the same fast path internally.
+- **`tracing::warn!` → `tracing::error!`** on `tool.failed`,
+  `hook.failed`, `hook.timeout`, `config.parse_error`, and
+  `telemetry.endpoint.refused`. These are operator-actionable
+  conditions, not advisory.
+- **Subprocess spans.** `services::run_command` and
+  `tools::common::run_capture` are now wrapped in
+  `tracing::info_span!("subprocess.exec", cmd, args_count, ...)`
+  with start/duration/exit_code events.
+- **`paths.rs` cleanup.** `cache_dir` inlined into
+  `remote_config_cache_dir` (only caller); `#![allow(dead_code)]`
+  removed since every public function has external callers now.
+
+### Security
+
+- **CA-bundle trust check tightened.** `network::propagate` no
+  longer accepts paths under the broad `~/.jarvy/` cache prefix —
+  only `~/.jarvy/ca/` is trusted, with a trailing-slash anchor so
+  `~/.jarvy/ca-attacker/...` can't slip through.
+- **Cross-origin redirects refused** on
+  `remote::validated_get` / `fetch_remote_config`. `ureq` agent
+  now uses `.max_redirects(0)`; redirects must be revalidated
+  through the policy gate.
+- **Sigstore companion verification.** `update::release` returns
+  `None` for cosign companion files when the `.sig`/`.pem` aren't
+  exact-match siblings — a substring-match bug that would have let
+  a malicious tarball claim sibling signatures was closed.
+- **`exec.rs` deleted** (zero-caller speculative seam).
+- **`team::inheritance::transform_github_url`** duplicate deleted;
+  callers route through the canonical `remote::transform_github_url`
+  so URL hardening lives in one place.
+
+### Fixed
+
+- `validate_get` rejected URLs with empty hosts under `file://`
+  scheme but didn't match the documented "scheme not allowed"
+  error string. Test relaxed to accept any error variant; behavior
+  unchanged.
+- `paths::remote_config_cache_dir` now reads `JARVY_HOME`
+  consistently with the rest of `paths.rs` (was hand-rolling the
+  override before).
+- `update_rc_content` argument order documented; previously the
+  test suite caller had `(content, &vars, &ctx, ShellType)` instead
+  of the actual `(content, ShellType, &vars, &ctx)`.
+
+### Tests
+
+- 1,633+ tests passing across lib + binary + integration suites
+  (was ~1,580). Highlights of the new coverage:
+  - `validated_get` rejection tests for HTTP-to-remote, disallowed
+    host, `file://` scheme, missing scheme.
+  - `Hook::run_with_policy` outcome matrix (dry-run / success /
+    failure × continue_on_error true|false).
+  - `verify_no_tar_escape` containment tests + symlink-escape
+    refusal.
+  - Cosign companion exact-match (no substring) regression.
+  - Path-containment refusal + `JARVY_ALLOW_EXTERNAL_SECRETS=1`
+    override path for `[env.secrets] from_file`.
+  - Shell-interpreted-key table-driven test
+    (`every_shell_interpreted_key_refuses_bang_prefix`) so adding
+    a new shell-interpreted git config key lights up the test
+    suite immediately.
+- `#[serial_test::serial]` annotations added for
+  `JARVY_ALLOW_*` env mutations to keep parallel runs isolated.
+
+### Docs
+
+- `CLAUDE.md` Logging section rewritten to match the actual
+  `src/logging/` (thin re-export layer) and `src/observability/`
+  (where rotation + sanitizer + analytics live) split.
+- `examples/README.md` + `docs/templates-index.md` published as
+  the human/AI-facing template indexes.
+- `llms-full.txt` "Project Templates" section added (with
+  `docs/llms.txt` + `docs/llms-full.txt` symlinks for the published
+  docs site).
+
 ## [v0.0.5] — Chocolatey install script + bundled v0.0.4 fixes (2026-05-05)
 
 Folds in everything queued for v0.0.4 (which was tagged but never
@@ -270,7 +416,8 @@ and reserve room for 0.1.0 as the first feature-complete milestone.
 - Cross-platform shell detection and hook execution
 - Workspace lint configuration; Rust 2024 edition; MSRV 1.85
 
-[Unreleased]: https://github.com/bearbinary/jarvy/compare/v0.0.5...HEAD
+[Unreleased]: https://github.com/bearbinary/jarvy/compare/v0.1.0...HEAD
+[v0.1.0]: https://github.com/bearbinary/jarvy/releases/tag/v0.1.0
 [v0.0.5]: https://github.com/bearbinary/jarvy/releases/tag/v0.0.5
 [v0.0.4]: https://github.com/bearbinary/jarvy/releases/tag/v0.0.4
 [v0.0.3]: https://github.com/bearbinary/jarvy/releases/tag/v0.0.3
