@@ -261,12 +261,12 @@ mod tests {
         };
         let vars = generate_env_vars(&proxy, Some(&tls));
         assert!(
-            vars.get("CURL_CA_BUNDLE").is_none(),
+            !vars.contains_key("CURL_CA_BUNDLE"),
             "untrusted ca_bundle must NOT be propagated; got {:?}",
             vars.get("CURL_CA_BUNDLE")
         );
-        assert!(vars.get("SSL_CERT_FILE").is_none());
-        assert!(vars.get("NODE_EXTRA_CA_CERTS").is_none());
+        assert!(!vars.contains_key("SSL_CERT_FILE"));
+        assert!(!vars.contains_key("NODE_EXTRA_CA_CERTS"));
     }
 
     #[test]

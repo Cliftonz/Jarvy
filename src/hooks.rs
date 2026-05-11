@@ -672,8 +672,10 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn run_with_policy_failure_with_continue_on_error_returns_ok() {
-        let mut config = HookConfig::default();
-        config.continue_on_error = true;
+        let config = HookConfig {
+            continue_on_error: true,
+            ..HookConfig::default()
+        };
         let hook = Hook::with_config("exit 1", "advisory", config);
         // continue_on_error swallows the failure into Ok(()) after warning.
         assert!(hook.run_with_policy(false).is_ok());
@@ -682,8 +684,10 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn run_with_policy_failure_without_continue_on_error_returns_err() {
-        let mut config = HookConfig::default();
-        config.continue_on_error = false;
+        let config = HookConfig {
+            continue_on_error: false,
+            ..HookConfig::default()
+        };
         let hook = Hook::with_config("exit 1", "blocking", config);
         assert!(hook.run_with_policy(false).is_err());
     }

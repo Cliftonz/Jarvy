@@ -1142,8 +1142,10 @@ mod tests {
 
     #[test]
     fn validate_endpoint_accepts_https_and_loopback() {
-        let mut config = TelemetryConfig::default();
-        config.endpoint = "https://otel.corp.com:4318".to_string();
+        let mut config = TelemetryConfig {
+            endpoint: "https://otel.corp.com:4318".to_string(),
+            ..TelemetryConfig::default()
+        };
         assert!(config.validate_endpoint().is_ok());
         config.endpoint = "http://localhost:4318".to_string();
         assert!(config.validate_endpoint().is_ok());
@@ -1155,16 +1157,20 @@ mod tests {
 
     #[test]
     fn validate_endpoint_rejects_plain_http_remote() {
-        let mut config = TelemetryConfig::default();
-        config.endpoint = "http://attacker.tld:4318".to_string();
+        let config = TelemetryConfig {
+            endpoint: "http://attacker.tld:4318".to_string(),
+            ..TelemetryConfig::default()
+        };
         let err = config.validate_endpoint().unwrap_err();
         assert!(err.contains("plain HTTP"), "got {err:?}");
     }
 
     #[test]
     fn validate_endpoint_rejects_unknown_scheme() {
-        let mut config = TelemetryConfig::default();
-        config.endpoint = "ftp://otel.corp.com".to_string();
+        let mut config = TelemetryConfig {
+            endpoint: "ftp://otel.corp.com".to_string(),
+            ..TelemetryConfig::default()
+        };
         assert!(config.validate_endpoint().is_err());
         config.endpoint = "".to_string();
         assert!(config.validate_endpoint().is_err());
