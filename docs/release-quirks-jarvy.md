@@ -117,6 +117,95 @@ publishes" assumption. The point of no return is the **draft publish**, not
 the tag push — though once the tag is pushed the assets are built and
 signed atomically.
 
+## `release:published` events use the tag's commit, not main HEAD
+
+When `publish-packages.yml` (or any other workflow listening on
+`release: published`) fires, GitHub Actions checks out the workflow YAML
+from **the commit the release tag points at**, not the default branch
+HEAD at event time. This breaks the intuitive "fix it on main before
+publishing the draft" workflow.
+
+Discovered when adding a prerelease gate to `publish-packages.yml`:
+
+1. Cut `v0.1.0-rc.10` at commit `bcdff1d`.
+2. Added a `!github.event.release.prerelease` gate to `publish-packages.yml`,
+   committed as `e1bb4ca` on main.
+3. Published the draft for `v0.1.0-rc.10`.
+4. `publish-packages` ran, but `gh run view 25737549987 --json headSha`
+   showed `headSha = bcdff1d` (the tag's commit) — not main HEAD. The
+   gate didn't exist in that workflow file. `cargo publish` started
+   running before the run was manually cancelled.
+
+**Implications**:
+
+- Workflow changes intended to affect a specific release **must be
+  committed before the release tag is created**, and the release tag
+  must descend from that commit.
+- Re-running a cancelled `release: published` workflow run will replay
+  against the same tag-SHA workflow file — fixes on main do not apply
+  retroactively. To bring a fix to bear, cut a new tag (`-rc.(N+1)`)
+  whose commit includes the fix.
+- `workflow_dispatch` triggers DO use the workflow file from whichever
+  branch/SHA the user dispatches against — so manual reruns can pick up
+  main's fixes if invoked with the appropriate ref.
+
+**Mitigation in this repo**: the prerelease gate landed in
+`e1bb4ca` and is included in every rc cut from main going forward. The
+risk window for `v0.1.0-rc.10` itself is closed because the run was
+cancelled before `cargo publish` completed.
+
+## Homebrew pipeline is non-functional pending tarball artifacts
+
+The Homebrew formula in `bearbinary/homebrew-tap` is authored against
+`.tar.gz` tarball assets (`jarvy-v<version>-<arch>-<os>.tar.gz`) that
+`release.yml` does **not** produce. Verified on `v0.0.5`:
+
+```bash
+gh release view v0.0.5 --json assets --jq '.assets[].name' | grep tar.gz
+# (no output — no tarballs in the release)
+```
+
+Actual artifact set: `.dmg` (macOS), `.deb` (Linux deb-based),
+`.rpm` (Linux rpm-based), `.msi` / `.exe` (Windows), `.AppImage`
+(Linux portable), `SHA256SUMS.txt`, SBOMs. None of these match the
+formula's URL pattern.
+
+Consequences:
+
+1. `publish-packages.yml::update-homebrew::Update formula` step greps
+   `SHA256SUMS.txt` for `x86_64-apple-darwin` (etc.) — these substrings
+   never appear, so the placeholder substitution writes empty SHAs.
+2. `publish-packages.yml::update-homebrew::Push to Homebrew tap` is
+   additionally gated on the `HOMEBREW_TAP_DEPLOY_KEY` secret, which
+   is currently unset. The step has been **skipped** on every release
+   (v0.0.1 → v0.0.5). The tap repo's `jarvy.rb` still contains literal
+   `VERSION_PLACEHOLDER` / `SHA256_PLACEHOLDER_*` strings from initial
+   setup on 2026-01-18.
+3. `brew install jarvy` (or `brew install bearbinary/tap/jarvy`)
+   currently fails — the formula is unparseable and references
+   non-existent URLs.
+
+Until the pipeline is rebuilt, Homebrew is **not a viable distribution
+channel** and should not count toward
+[`docs/release-testing.md#cohort-environment`](release-testing.md#cohort-environment)
+coverage. macOS soak coverage runs through `install.sh` and `cargo install`
+instead.
+
+Three real fix paths (none done as of this writing):
+
+1. Add `.tar.gz` artifact production to `release.yml` for macOS arm64,
+   macOS x86_64, Linux x86_64, Linux arm64. Formula then works after
+   the `HOMEBREW_TAP_DEPLOY_KEY` secret is configured per
+   `docs/MAINTAINER_RELEASE_GUIDE.md`.
+2. Rewrite the formula as a Homebrew Cask that installs from the
+   `.dmg` asset (macOS-only; doesn't help Linux brew users).
+3. Rewrite the formula to compile from crates.io via `Language::Rust`
+   (slow user-side install, simplest pipeline — no new artifact work).
+
+Path 1 is the cleanest long-term — adds Homebrew to real cohort
+coverage and lets the existing publish-packages workflow finish what
+it started. Tracked separately; not a v0.1.0 blocker.
+
 ## Multi-channel propagation
 
 Jarvy ships through eight distribution channels. The skills assume one

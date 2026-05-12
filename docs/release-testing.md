@@ -111,6 +111,17 @@ into receiving pre-releases. Their feedback flows through the soak issue (see
 [Signals to Watch](#signals-to-watch)). The maintainer's platforms above remain
 the baseline regardless of how large the opt-in cohort gets.
 
+**Channels temporarily excluded from cohort coverage**: any channel whose
+distribution pipeline is documented as non-functional in
+[`docs/release-quirks-jarvy.md`](release-quirks-jarvy.md) is excluded from
+required coverage until its pipeline gap closes. As of v0.1.0 soak, that
+list is:
+
+- **Homebrew** — formula references `.tar.gz` assets that `release.yml`
+  does not produce; `HOMEBREW_TAP_DEPLOY_KEY` also unset. macOS coverage
+  runs through `install.sh` and `cargo install` instead. Re-add when the
+  pipeline produces real tarballs.
+
 ## Pre-Soak Test Matrix
 
 Run all five paths on the minimum platform set. Do not skip any. Even on a
