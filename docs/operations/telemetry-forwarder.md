@@ -1,42 +1,95 @@
 ---
 title: "Telemetry forwarder operations — Jarvy"
-description: "How to stand up and operate the public OTLP forwarder that receives opt-in telemetry from Jarvy CLIs and fans out to Grafana Cloud. Threat model, hardening checklist, PII scrubbing, cost controls, and the runbook for the on-call maintainer."
+description: "How to stand up and operate the public OTLP forwarder that receives opt-in telemetry from Jarvy CLIs and fans out to Grafana Cloud. Deployed on a self-hosted Kubernetes cluster with Traefik ingress. Anonymize-don't-drop PII policy. Threat model, hardening, incident playbook."
 ---
 
 # Telemetry forwarder operations
 
 The forwarder is the public-internet endpoint Jarvy CLIs send opt-in
 telemetry to (`https://telemetry.jarvy.dev`). It accepts OTLP/HTTP from
-anyone, scrubs PII, rate-limits, then fans out to Grafana Cloud (Loki for
-logs, Mimir for metrics, Tempo for traces). This document is the
-operational source of truth: what it looks like, how to build it, how to
-operate it, and how to recover when it breaks.
+anyone, **anonymizes** every PII-shaped field with a rotating salted
+hash, rate-limits, and fans out to Grafana Cloud (Loki for logs, Mimir
+for metrics, Tempo for traces). This document is the operational
+source of truth: what it looks like, how to build it, how to operate
+it, and how to recover when it breaks.
 
-> **Telemetry is opt-in.** This doc is a *prerequisite* for opt-in actually
-> being useful — without a working forwarder, the data has nowhere to go
-> and `JARVY_OTLP_ENDPOINT` is just a config knob. The user-facing telemetry
-> reference is at [Telemetry](../telemetry.md); the data-handling promise
-> made there is the contract this doc must implement.
+> **Telemetry is opt-in.** This doc is a *prerequisite* for opt-in
+> actually being useful — without a working forwarder, the data has
+> nowhere to go and `JARVY_OTLP_ENDPOINT` is just a config knob. The
+> user-facing telemetry reference is at
+> [Telemetry](../telemetry.md); the data-handling promise made there
+> is the contract this doc must implement.
+
+The forwarder is deployed as discrete Kubernetes Services in a
+single namespace on a self-hosted cluster. Traefik handles ingress
+and TLS. cert-manager provisions certificates. The
+OpenTelemetry Collector runs as a Deployment with horizontal scaling.
+Secrets are pulled from an external backend via External Secrets
+Operator — no raw tokens or salts in git.
+
+---
+
+## Anonymize, don't drop
+
+The data-handling policy is **anonymization, not deletion**.
+Previously-PII fields (hostname, username, install path, IP, config
+contents) are hashed with a rotating project-wide salt before they
+leave the Collector. The resulting hash is high-entropy, unbounded
+by rainbow tables, and bounded in linkability by the salt rotation
+cadence (quarterly).
+
+Why anonymize rather than drop:
+
+- **Distinct-host / distinct-user counts** stay computable. Dropping
+  `host.name` makes "how many distinct hosts hit setup failures this
+  week" impossible to answer; hashing makes it trivial.
+- **Co-occurrence analytics** stay computable. "Of the hosts that
+  installed `kubectl` this month, what percentage also installed
+  `helm`?" requires a stable identifier; an anonymized one is fine.
+- **Incident correlation** stays possible. A single user reporting a
+  bug can be correlated to *their* telemetry without exposing
+  anyone else's data, because the user supplies their own
+  pseudonymous identifier on request.
+- **Schema evolution stays cheap**. If we later decide a field was
+  too revealing even hashed, we can stop emitting it without
+  invalidating historical aggregates that relied on its hash.
+
+The cost of anonymization vs deletion:
+
+- A **rainbow-table risk** if the salt is weak, leaks, or doesn't
+  rotate. Mitigations: 32-byte random salt, sourced from External
+  Secrets, rotated quarterly, never logged.
+- A **long-term linkability risk** if the salt never rotates.
+  Mitigations: quarterly rotation breaks long-term joins; analytics
+  queries must operate within a single quarter for distinct counts.
+- A **legal posture risk**: anonymization with reversibility (i.e.
+  if we kept the salt forever and could recompute) is closer to
+  pseudonymization than true anonymization under GDPR. Rotating the
+  salt and discarding old salts moves the posture closer to
+  irreversible anonymization, but a privacy lawyer should confirm
+  before claiming "anonymous" in user-facing copy.
 
 ---
 
 ## Why a forwarder (not direct-to-Grafana)
 
-The naive design points every Jarvy CLI directly at a Grafana Cloud OTLP
-endpoint with a shared write token. We deliberately do not do that.
-Reasons:
+The naive design points every Jarvy CLI directly at a Grafana Cloud
+OTLP endpoint with a shared write token. We deliberately do not do
+that. Reasons:
 
 | Concern | Direct-to-Grafana | Forwarder in front |
 |---|---|---|
 | Shared write token leaks | Every Jarvy CLI binary ships the token; rotation requires a release | Token never leaves the forwarder; CLIs use no token at all |
-| PII scrubbing | Trust every CLI version forever, including older releases that may emit something we later regret | Single chokepoint where we can drop / hash fields independent of client version |
+| PII handling | Trust every CLI version forever, including older releases that may emit something we later regret | Single chokepoint where we can hash / drop fields independent of client version |
 | Schema evolution | Old clients keep emitting old fields directly into Grafana | Old fields can be remapped or dropped at the forwarder before they hit billing |
+| Salt management | Impossible — salt would live in every binary | Salt lives in one place, rotates without re-releasing the CLI |
 | Rate limiting / abuse | Grafana ingest limits hit during a runaway client → real users lose data | Per-IP rate limit at the edge protects the upstream quota |
 | Cost surprises | A bug that suddenly fires 1000× per setup goes straight to Grafana billing | Forwarder drops the spike, alerts us, never bills |
 | Multi-backend | Locked to Grafana | Drop in Honeycomb / Datadog / self-hosted alongside or instead of Grafana with config change |
 
-The forwarder is a thin OTel Collector with a hardened receiver pipeline.
-Operationally we treat it like CDN edge: small, stateless, replaceable.
+The forwarder is a thin OTel Collector with a hardened receiver
+pipeline. Operationally we treat it like CDN edge: small, stateless,
+replaceable.
 
 ---
 
@@ -47,27 +100,25 @@ Operationally we treat it like CDN edge: small, stateless, replaceable.
    └─ HTTPS POST /v1/{logs,metrics,traces}
        │
        ▼
-   Cloudflare (DDoS / WAF / per-IP rate limit)
+   Cloudflare              ── DDoS / WAF / per-IP rate limit
        │
        ▼
-   telemetry.jarvy.dev   (TLS terminator + ingress)
-       │   - terminates TLS (Let's Encrypt)
-       │   - enforces method + path allowlist
-       │   - per-IP rate limit (60 req/min)
-       │   - drops requests > 64 KB
-       │   ━━ Path A: single VM with Caddy
-       │   ━━ Path B: ingress-nginx on a self-hosted K8s cluster
+   Traefik IngressRoute    ── TLS termination, method+path filter,
+       │                       rate-limit middleware, body cap
+       │
        ▼
-   OpenTelemetry Collector  (contrib distribution)
-       │   - otlphttp receiver (no auth)
-       │   - attribute processor: drop usernames, hostnames, IPs,
-       │     filesystem paths, env variable values
-       │   - batch processor
-       │   - resource processor: stamp ingestion timestamp, drop
-       │     resource attrs we never want
-       │   - tail-sampling for traces (1% of OK, 100% of errors)
-       │   ━━ Path A: systemd unit on the same VM
-       │   ━━ Path B: Deployment in jarvy-telemetry namespace
+   Service: otelcol        ── ClusterIP, port 4318
+       │
+       ▼
+   Deployment: otelcol     ── OpenTelemetry Collector (contrib)
+       │                       • otlphttp receiver
+       │                       • transform/anonymize: salted SHA-256
+       │                         of every PII-shaped attribute
+       │                       • transform/redact_bodies: type-marker
+       │                         substitution for inline PII patterns
+       │                       • tail_sampling: 1% OK / 100% errors
+       │                       • batch
+       │
        ▼
    Grafana Cloud OTLP gateway  (bearer token, never seen by clients)
        ├─ Loki     (logs)
@@ -75,28 +126,9 @@ Operationally we treat it like CDN edge: small, stateless, replaceable.
        └─ Tempo    (traces)
 ```
 
-The two deployment paths are described below as
-[Path A: single VM](#provisioning-the-forwarder) (default,
-cheapest) and
-[Path B: self-hosted Kubernetes](#provisioning-on-a-self-hosted-kubernetes-cluster-alternative)
-(only worth it if you already operate a cluster).
-
-Components:
-
-- **Cloudflare** — free tier; orange-cloud the `telemetry` subdomain.
-  WAF rule allowlist on `POST /v1/(logs|metrics|traces)`. Anything else
-  → 403 at the edge before it touches the origin.
-- **Origin host** — single small VM (Hetzner CX22 / DO 1GB is plenty
-  through Jarvy v0.x; revisit if request rate exceeds 5/s sustained).
-- **Caddy** — TLS termination + reverse-proxy. Caddy's built-in
-  rate-limit + body-size limits do the heavy lifting before the
-  Collector even parses the request.
-- **OpenTelemetry Collector (contrib)** — receivers, processors,
-  exporters. Config below.
-- **Grafana Cloud** — pre-existing account. We use the OTLP endpoint at
-  `https://otlp-gateway-prod-<region>.grafana.net/otlp` with a bearer
-  token bound to a Cloud Stack instance with logs + metrics + traces
-  scopes.
+Each component is its own Kubernetes object — Deployment, Service,
+ConfigMap, Secret, IngressRoute, Middleware — applied via GitOps
+from a single namespace.
 
 ---
 
@@ -105,407 +137,102 @@ Components:
 What we are defending against, in priority order:
 
 1. **Cost denial-of-wallet.** A malicious actor (or a buggy Jarvy
-   build) hammering the endpoint to burn Grafana Cloud free-tier quota
-   or generate an unexpected invoice. Mitigations: per-IP rate limit,
-   global ingest rate cap, body size cap, alert on quota burn rate.
-2. **Accidental PII exfiltration.** A future Jarvy code path emits
-   `jarvy.toml` contents, env var values, or a customer's git remote
-   URL by mistake. Mitigations: forwarder strips known PII keys
-   regardless of what the client sent; allowlist of fields rather than
-   blocklist; log a sampled tail to a tight-ACL bucket for audit.
-3. **Forwarder credential leak.** If the Grafana write token in the
-   forwarder is compromised, the attacker can poison the dataset (not
-   exfiltrate — read is a separate token). Mitigations: token scoped
-   to write-only; rotate quarterly; store in the host's systemd
-   credentials, not in the Collector config file directly.
-4. **Forwarder compromise.** If the VM itself is owned, the attacker
-   becomes the trusted PII-scrubbing layer. Mitigations: minimal OS
-   surface (Debian stable + unattended-upgrades), SSH key-only access,
-   no inbound except 443 from Cloudflare's IP ranges, no other services
-   on the host.
+   build) hammering the endpoint to burn Grafana Cloud free-tier
+   quota or generate an unexpected invoice. Mitigations: per-IP rate
+   limit (Cloudflare + Traefik middleware), global ingest rate cap,
+   body size cap, alert on quota burn rate.
+2. **Salt leak.** If the project-wide PII salt is exposed, every
+   hash in the historical dataset becomes trivially reversible by an
+   attacker who joins it to a known username/hostname distribution.
+   Mitigations: salt lives in External Secrets, mounted as env from
+   a Kubernetes Secret, never logged, rotated quarterly. After
+   rotation, old data is no longer joinable to new — bounding the
+   blast radius of a leak to one quarter.
+3. **Accidental PII exfiltration through unhashed fields.** A future
+   Jarvy code path emits an attribute we haven't seen yet (e.g. a
+   new `jarvy.foo` key carrying a path). Mitigations: the
+   anonymizer is an **allowlist of safe keys**, not a denylist of
+   unsafe keys — anything not on the allowlist is hashed
+   automatically. New schema items must pass review to land on the
+   allowlist.
+4. **Forwarder credential leak.** If the Grafana write token in the
+   forwarder is compromised, the attacker can poison the dataset
+   (not exfiltrate — read is a separate token). Mitigations: token
+   scoped to write-only; rotate quarterly; sourced from External
+   Secrets.
+5. **Cluster compromise.** If the cluster itself is owned, the
+   attacker becomes the trusted anonymizer. Mitigations: namespace
+   isolation, NetworkPolicy egress allowlist, restricted Pod
+   Security Standard, no inbound except via Traefik, no exec into
+   the Collector pod outside of incident response.
 
 Out of scope:
 
 - **Stopping a determined operator-side leak.** If a Jarvy maintainer
-  decides to harvest the data they have access to, that is a
-  governance problem, not a forwarder problem. Mitigation lives in
-  the privacy policy + the audit trail of who has Grafana Cloud
-  access.
+  decides to harvest the data they have access to, that's a
+  governance problem. Mitigation lives in the privacy policy + the
+  audit trail of who has Grafana Cloud read access.
 
 ---
 
-## Stack choice: why Grafana Cloud + OTel Collector
+## Stack
 
-Alternatives considered:
+| Layer | Component | Why |
+|---|---|---|
+| Edge | Cloudflare | DDoS protection, WAF, geographic / bot blocking, free tier |
+| Cluster ingress | Traefik (CRDs: `IngressRoute`, `Middleware`) | Already present in the user's self-hosted cluster; first-class CRD API for rate limit + method filter + buffering as separate Middlewares; better UX than Ingress annotations |
+| TLS | cert-manager + Let's Encrypt | Standard; reuses cluster's existing ClusterIssuer |
+| Collector | `otel/opentelemetry-collector-contrib` Deployment | Stateless; horizontally scalable; contrib distro has `transform`, `tail_sampling`, `bearertokenauth` |
+| Secret store | External Secrets Operator | Pulls Grafana write token + PII salt from existing secret backend (Vault / 1Password / AWS SM); rotation handled by the backend |
+| Self-metrics | Prometheus Operator `ServiceMonitor` | Scrape Collector's `:8888/metrics`; alert independently of the Grafana Cloud exporter |
+| Backend | Grafana Cloud OTLP gateway | Loki/Mimir/Tempo; free tier covers Jarvy's expected scale |
 
-| Stack | Pros | Cons | Verdict |
-|---|---|---|---|
-| Self-hosted Loki/Mimir/Tempo on a VM | Full control, single bill | Operational tax (storage, retention, alerting) we cannot afford as a one-maintainer project | No |
-| Grafana Cloud + direct write from CLI | Simplest | Every concern in the "Why a forwarder" table | No |
-| Grafana Cloud + OTel Collector forwarder | Hands off storage + queries to Grafana, retains the chokepoint | Adds a VM to maintain | **Yes** |
-| Honeycomb / Datadog instead of Grafana | Polished query UX | Higher cost at our scale; Datadog APM cardinality limits bite quickly | No |
-| Sentry for errors only | We get error grouping for free | Doesn't cover the "what tools are people installing" metric the telemetry exists for | Not as primary |
-
-If at some future point Grafana Cloud's pricing or limits change, the
-forwarder gives us a single place to swap exporters without re-shipping
-a Jarvy release. That property is the whole point.
+Each component below is a separate K8s object. The whole stack is
+~10 manifests, ~400 lines of YAML, applied as a single Kustomization
+or Helm release from your existing GitOps pipeline.
 
 ---
 
-## Provisioning the forwarder
+## Prerequisites
 
-End state: a single VM at `telemetry.jarvy.dev` running Caddy and one
-Collector container. Total bootstrap time ~30 minutes.
+The cluster must already have these working:
+
+- **Traefik** installed as the ingress controller. The examples
+  assume Traefik v2 or v3 with CRDs enabled (`IngressRoute`,
+  `Middleware`). If you only have the stock `Ingress` resource
+  available, install the Traefik CRDs first or fall back to
+  `Ingress` with annotations.
+- **cert-manager** with a `ClusterIssuer` configured for
+  Let's Encrypt. The examples assume an issuer named
+  `letsencrypt-prod`.
+- **External Secrets Operator** with a `ClusterSecretStore` named
+  `vault-default` (rename in the manifests if yours differs).
+  Sealed Secrets is an acceptable substitute; what matters is that
+  the raw Grafana token and the PII salt never land in git.
+- **Prometheus Operator** (kube-prometheus-stack) is recommended for
+  self-monitoring but not strictly required.
+
+---
+
+## Provisioning
 
 ### 1. DNS + Cloudflare
 
-- Create `telemetry.jarvy.dev` as an A record pointing at the origin's
-  public IP. Enable Cloudflare proxy (orange cloud).
-- In Cloudflare → SSL/TLS → set to "Full (strict)". Caddy will obtain
-  a real cert from Let's Encrypt, and Cloudflare will trust it.
-- Cloudflare → Rules → WAF → custom rule:
+- Create `telemetry.jarvy.dev` as an A or CNAME record pointing at
+  the cluster's Traefik LoadBalancer (or the public IP of your
+  ingress entry point). Enable Cloudflare proxy (orange cloud).
+- Cloudflare SSL/TLS → "Full (strict)". cert-manager will obtain a
+  real Let's Encrypt cert for Traefik to serve, and Cloudflare will
+  trust it.
+- Cloudflare → Rules → WAF custom rule:
   - **If** `(http.request.method ne "POST")` **or**
     `(not (http.request.uri.path matches "^/v1/(logs|metrics|traces)$"))`
   - **Then** → Block
-- Cloudflare → Rules → Rate Limiting (free tier allows one rule):
+- Cloudflare → Rules → Rate Limiting:
   - 60 requests / 1 minute / IP, action: block 10 minutes.
-- Optional but recommended: Cloudflare → Security → Bots → "Bot Fight
-  Mode" on. Most Jarvy CLIs are not bots; if a User-Agent ever looks
-  bot-y, drop it.
+- Cloudflare → Security → Bots → "Bot Fight Mode" on.
 
-### 2. Origin VM
-
-Cheapest VM that runs systemd reliably. Recommended:
-
-- Hetzner CX22 (2 vCPU, 4 GB RAM, €5/mo) or DigitalOcean Basic 1 GB
-- Debian 12 (bookworm) stable
-- Single user with sudo + SSH key only; disable password auth
-- `ufw` open only on 22 (your IP only) and 443 (Cloudflare IP ranges)
-  (`ufw allow proto tcp from <cf-range> to any port 443` for each
-  prefix from `https://www.cloudflare.com/ips-v4`)
-- `apt install unattended-upgrades` and enable security-only auto-update
-
-### 3. Caddy
-
-Caddy provides TLS + reverse proxy + rate limit + body cap in ~25 lines.
-Install:
-
-```bash
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | \
-  sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | \
-  sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update && sudo apt install -y caddy
-```
-
-`/etc/caddy/Caddyfile`:
-
-```caddy
-{
-    # Block anything that isn't OTLP/HTTP. Caddy already enforces TLS
-    # by default; this just narrows the surface further.
-    servers {
-        max_header_size 16KB
-    }
-}
-
-telemetry.jarvy.dev {
-    encode zstd gzip
-
-    # Reject anything larger than 64 KB. OTLP/HTTP payloads from a
-    # single Jarvy invocation are well under 10 KB; 64 KB leaves
-    # headroom for batched setups without inviting abuse.
-    request_body {
-        max_size 64KB
-    }
-
-    # Allowlist OTLP paths only. WAF at Cloudflare already does
-    # this; defense in depth.
-    @otlp {
-        method POST
-        path /v1/logs /v1/metrics /v1/traces
-    }
-    handle @otlp {
-        reverse_proxy 127.0.0.1:4318
-    }
-    handle {
-        respond "Not found" 404
-    }
-
-    # Real client IP from Cloudflare for logging only — never
-    # forwarded into the Collector pipeline.
-    log {
-        output file /var/log/caddy/access.log {
-            roll_size 100mb
-            roll_keep 5
-        }
-        format json {
-            time_format iso8601
-        }
-    }
-}
-```
-
-Reload: `sudo systemctl reload caddy`.
-
-### 4. OpenTelemetry Collector (contrib distribution)
-
-The contrib distribution ships the processors we need (`attributes`,
-`filter`, `transform`, `tail_sampling`). Standard distribution is too
-narrow.
-
-Install via systemd unit running the upstream binary, or via Docker. We
-use systemd for one-VM ops simplicity:
-
-```bash
-curl -L -o /tmp/otelcol.tar.gz \
-  https://github.com/open-telemetry/opentelemetry-collector-releases/releases/latest/download/otelcol-contrib_linux_amd64.tar.gz
-sudo mkdir -p /opt/otelcol
-sudo tar -xzf /tmp/otelcol.tar.gz -C /opt/otelcol
-sudo chown -R root:root /opt/otelcol
-```
-
-`/etc/otelcol/config.yaml`:
-
-```yaml
-# Receivers: OTLP/HTTP only, no auth (Caddy is the auth/auth ingress).
-receivers:
-  otlp:
-    protocols:
-      http:
-        endpoint: 127.0.0.1:4318
-        # Disable the gRPC receiver — we accept HTTP from CLIs only.
-
-# Processors: PII scrub, rate-limit-on-attribute, batch.
-processors:
-  # Strip attributes that are likely to carry PII regardless of what
-  # the client sent. The list is a denylist by exact key match plus
-  # value-pattern regexps. Keep in sync with the telemetry schema
-  # documented at https://jarvy.dev/telemetry/#schema.
-  attributes/scrub:
-    actions:
-      # Delete keys that should never be in telemetry.
-      - key: host.name
-        action: delete
-      - key: host.id
-        action: delete
-      - key: host.ip
-        action: delete
-      - key: user.name
-        action: delete
-      - key: user.email
-        action: delete
-      - key: jarvy.config.path
-        action: delete
-      - key: jarvy.toml.contents
-        action: delete
-      - key: jarvy.cwd
-        action: delete
-      # Hash anything that we want to count distinct values of but
-      # never see the raw value of (e.g. anonymized install ID).
-      - key: jarvy.install_id
-        action: hash
-
-  # Drop log records whose body matches PII patterns (in case the
-  # CLI's sanitizer missed them).
-  transform/redact_bodies:
-    log_statements:
-      - context: log
-        statements:
-          # Email-shaped strings
-          - replace_pattern(body, "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "<redacted-email>")
-          # IPv4-shaped strings (not loopback)
-          - replace_pattern(body, "\\b(?!127\\.0\\.0\\.1)\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\b", "<redacted-ip>")
-          # Anything that looks like an absolute home path
-          - replace_pattern(body, "/Users/[^/\\s]+", "/Users/<redacted>")
-          - replace_pattern(body, "/home/[^/\\s]+", "/home/<redacted>")
-
-  # Cap memory in case of a runaway batch.
-  memory_limiter:
-    check_interval: 1s
-    limit_mib: 200
-    spike_limit_mib: 50
-
-  # Tail-sampling: keep 100% of error traces, 1% of success traces.
-  tail_sampling:
-    decision_wait: 10s
-    num_traces: 50000
-    policies:
-      - name: errors
-        type: status_code
-        status_code: { status_codes: [ERROR] }
-      - name: probabilistic
-        type: probabilistic
-        probabilistic: { sampling_percentage: 1 }
-
-  batch:
-    timeout: 10s
-    send_batch_size: 1024
-
-# Exporters: Grafana Cloud OTLP. Token is loaded from systemd
-# credentials so it never lands in the config file or process
-# environment string.
-exporters:
-  otlphttp/grafana:
-    endpoint: ${env:GRAFANA_OTLP_ENDPOINT}
-    auth:
-      authenticator: bearertokenauth/grafana
-  # Local file mirror, 7-day retention, tight ACL — used for audit
-  # only when investigating a PII regression. Disable in production
-  # once you have audit confidence.
-  file/audit:
-    path: /var/log/otelcol/audit.json
-    rotation:
-      max_megabytes: 100
-      max_days: 7
-
-extensions:
-  bearertokenauth/grafana:
-    scheme: "Basic"
-    token: ${env:GRAFANA_OTLP_TOKEN}
-  health_check:
-    endpoint: 127.0.0.1:13133
-
-service:
-  extensions: [bearertokenauth/grafana, health_check]
-  pipelines:
-    logs:
-      receivers: [otlp]
-      processors: [memory_limiter, attributes/scrub, transform/redact_bodies, batch]
-      exporters: [otlphttp/grafana]
-    metrics:
-      receivers: [otlp]
-      processors: [memory_limiter, attributes/scrub, batch]
-      exporters: [otlphttp/grafana]
-    traces:
-      receivers: [otlp]
-      processors: [memory_limiter, attributes/scrub, tail_sampling, batch]
-      exporters: [otlphttp/grafana]
-```
-
-`/etc/systemd/system/otelcol.service`:
-
-```ini
-[Unit]
-Description=OpenTelemetry Collector (Jarvy forwarder)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-ExecStart=/opt/otelcol/otelcol-contrib --config=/etc/otelcol/config.yaml
-LoadCredentialEncrypted=grafana_token:/etc/otelcol/grafana_token.enc
-Environment=GRAFANA_OTLP_ENDPOINT=https://otlp-gateway-prod-us-east-0.grafana.net/otlp
-Environment=GRAFANA_OTLP_TOKEN=%d/grafana_token
-User=otelcol
-Group=otelcol
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-PrivateDevices=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-LockPersonality=true
-MemoryDenyWriteExecute=true
-RestrictRealtime=true
-RestrictNamespaces=true
-SystemCallArchitectures=native
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Generate the encrypted credential:
-
-```bash
-sudo systemd-creds encrypt --name=grafana_token - /etc/otelcol/grafana_token.enc <<<'<your-grafana-cloud-write-token>'
-sudo chmod 600 /etc/otelcol/grafana_token.enc
-sudo useradd -r -s /usr/sbin/nologin otelcol
-sudo mkdir -p /var/log/otelcol
-sudo chown otelcol:otelcol /var/log/otelcol
-sudo systemctl daemon-reload
-sudo systemctl enable --now otelcol
-```
-
-### 5. Verify end-to-end
-
-From your laptop:
-
-```bash
-JARVY_TELEMETRY=1 \
-JARVY_OTLP_ENDPOINT=https://telemetry.jarvy.dev \
-jarvy --version
-```
-
-Then in Grafana Cloud → Explore → Loki, query:
-
-```logql
-{service_name="jarvy"} |= "jarvy.startup"
-```
-
-You should see the startup event within a minute. If you don't, walk
-the pipeline: Caddy access log → Collector `audit.json` → Grafana
-Loki. Whichever stage shows the event and the next stage doesn't is
-where to look.
-
----
-
-## Provisioning on a self-hosted Kubernetes cluster (alternative)
-
-The single-VM path above is the default and the cheapest place to
-start. If you already operate a Kubernetes cluster — e.g. a homelab
-k3s / Talos cluster, a hetzner-baremetal setup, or a managed cluster
-(EKS / GKE / AKS) you happen to have around — you can run the
-forwarder there instead. The architecture is the same; only the
-plumbing changes.
-
-The trade-offs:
-
-| Concern | Single VM | Kubernetes |
-|---|---|---|
-| Bootstrap effort | ~30 min, mostly typing | ~2 hours if the cluster doesn't already have cert-manager + an ingress controller; ~30 min if it does |
-| Operational tax | `systemctl` + one Caddyfile | YAML, controllers, more abstractions to understand when something breaks at 2 AM |
-| Autoscaling | None — vertical only | HPA on the Collector Deployment |
-| HA | Single point of failure | Multi-replica, rolling updates without dropping in-flight batches |
-| Cost (small cluster you already have) | $5/mo VM | Marginal — you're paying for the cluster anyway |
-| Cost (provisioning a cluster *for this*) | n/a | Don't. Use the VM path. |
-
-Recommendation: K8s path only makes sense when you already run a
-cluster and have working ingress + cert-manager. If you're standing
-this up greenfield, the VM path is faster and matches the threat
-model identically.
-
-### Prerequisites
-
-The cluster needs the following already installed and working:
-
-- An ingress controller — either **ingress-nginx** (recommended for
-  the rate-limit annotations below) or **Traefik** (use the
-  equivalent middleware). The examples assume ingress-nginx.
-- **cert-manager** with a `ClusterIssuer` configured for Let's
-  Encrypt. The examples assume an issuer named `letsencrypt-prod`.
-- A way to manage secrets that does not commit raw tokens to git:
-  **External Secrets Operator** pulling from 1Password / AWS Secrets
-  Manager / Vault, or **Sealed Secrets** if you encrypt-and-commit.
-  The example uses External Secrets with a generic
-  `ClusterSecretStore` named `vault-default`.
-- **Prometheus Operator** (kube-prometheus-stack) if you want to
-  scrape the Collector's self-metrics with a `ServiceMonitor`. Not
-  strictly required.
-
-### 1. DNS + Cloudflare
-
-Same as the VM path. `telemetry.jarvy.dev` A record points at the
-cluster's ingress LoadBalancer IP (or whatever public IP your
-cluster's ingress controller terminates on). Cloudflare proxy on,
-WAF rule, rate-limit rule. **Keep Cloudflare in front** — the
-edge-tier protections are still load-bearing even with K8s in the
-mix.
-
-### 2. Namespace + RBAC
+### 2. Namespace + ServiceAccount
 
 ```yaml
 apiVersion: v1
@@ -526,13 +253,15 @@ metadata:
   namespace: jarvy-telemetry
 ```
 
-The Collector does not need any cluster permissions — no
-`kube_sd_config`, no `k8sattributes` processor here. The
-ServiceAccount has no `RoleBinding`. That's intentional.
+The Collector needs no cluster permissions — no `k8sattributes`
+processor, no pod auto-discovery. The ServiceAccount has no
+`RoleBinding`. That is intentional.
 
-### 3. Grafana write token via External Secrets
+### 3. Secrets: Grafana token + PII salt via External Secrets
 
 ```yaml
+# Grafana Cloud OTLP write token. Scope: write-only in Grafana
+# Cloud access policy. Rotate quarterly via the secret backend.
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
@@ -550,18 +279,41 @@ spec:
     - secretKey: token
       remoteRef:
         key: jarvy/telemetry/grafana-otlp-write-token
+---
+# PII anonymization salt. 32 bytes of random, never logged.
+# Rotate quarterly; rotation breaks long-term linkability of
+# hashes from before vs after rotation. Generate in the backend
+# with `openssl rand -hex 32` and never copy through a shell.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: pii-salt
+  namespace: jarvy-telemetry
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-default
+    kind: ClusterSecretStore
+  target:
+    name: pii-salt
+    creationPolicy: Owner
+  data:
+    - secretKey: salt
+      remoteRef:
+        key: jarvy/telemetry/pii-salt
 ```
 
-Adjust `secretStoreRef` and `remoteRef.key` to your secret backend.
-If you use Sealed Secrets instead, the equivalent
-`kubeseal`-produced `SealedSecret` is fine — what matters is that
-the raw token never lands in git.
-
-The resulting `Secret` named `grafana-otlp-token` is mounted into the
-Collector pod (below) as an env file, not as an env var, so it does
-not appear in `kubectl describe pod` output or in process listings.
+Adjust `secretStoreRef` and the two `remoteRef.key` paths to your
+backend. The two values **must be different secrets** with
+**different rotation cadences in your backend**: the Grafana token
+rotates when access policy changes; the PII salt rotates on a fixed
+quarterly schedule to bound linkability.
 
 ### 4. Collector configuration ConfigMap
+
+The Collector configuration is where the anonymize-don't-drop policy
+lives. Read this section even if you skip everything else — it is the
+data-handling contract.
 
 ```yaml
 apiVersion: v1
@@ -576,37 +328,58 @@ data:
         protocols:
           http:
             endpoint: 0.0.0.0:4318
+            # gRPC intentionally disabled — clients are OTLP/HTTP only.
 
     processors:
-      attributes/scrub:
-        actions:
-          - key: host.name
-            action: delete
-          - key: host.id
-            action: delete
-          - key: host.ip
-            action: delete
-          - key: user.name
-            action: delete
-          - key: user.email
-            action: delete
-          - key: jarvy.config.path
-            action: delete
-          - key: jarvy.toml.contents
-            action: delete
-          - key: jarvy.cwd
-            action: delete
-          - key: jarvy.install_id
-            action: hash
+      # --------------------------------------------------------------
+      # PII anonymization. Replaces each known PII-shaped attribute
+      # with a salted SHA-256 of its value. Keeps analytical value
+      # (distinct-count, co-occurrence) while preventing recovery of
+      # the original string.
+      #
+      # Salt is read from env `PII_SALT`, sourced from the
+      # `pii-salt` Secret. Rotation of that Secret rotates the salt
+      # in this pipeline within `refreshInterval` of the
+      # ExternalSecret (default 1h) plus a Collector restart.
+      #
+      # Allowlist model: only the keys explicitly listed below are
+      # passed through unhashed. Anything else (including future
+      # attributes we haven't seen yet) is hashed by the catch-all
+      # statement at the end.
+      # --------------------------------------------------------------
+      transform/anonymize:
+        error_mode: ignore
+        log_statements:
+          - context: resource
+            statements:
+              # Anonymize known PII keys explicitly.
+              - set(attributes["host.name"], SHA256(Concat([attributes["host.name"], "${env:PII_SALT}"], ""))) where attributes["host.name"] != nil
+              - set(attributes["host.id"],   SHA256(Concat([attributes["host.id"],   "${env:PII_SALT}"], ""))) where attributes["host.id"]   != nil
+              - set(attributes["host.ip"],   SHA256(Concat([attributes["host.ip"],   "${env:PII_SALT}"], ""))) where attributes["host.ip"]   != nil
+              - set(attributes["user.name"], SHA256(Concat([attributes["user.name"], "${env:PII_SALT}"], ""))) where attributes["user.name"] != nil
+              - set(attributes["user.email"],SHA256(Concat([attributes["user.email"],"${env:PII_SALT}"], ""))) where attributes["user.email"]!= nil
+              - set(attributes["jarvy.config.path"],    SHA256(Concat([attributes["jarvy.config.path"],    "${env:PII_SALT}"], ""))) where attributes["jarvy.config.path"]    != nil
+              - set(attributes["jarvy.toml.contents"],  SHA256(Concat([attributes["jarvy.toml.contents"],  "${env:PII_SALT}"], ""))) where attributes["jarvy.toml.contents"]  != nil
+              - set(attributes["jarvy.cwd"],            SHA256(Concat([attributes["jarvy.cwd"],            "${env:PII_SALT}"], ""))) where attributes["jarvy.cwd"]            != nil
+              - set(attributes["jarvy.install_id"],     SHA256(Concat([attributes["jarvy.install_id"],     "${env:PII_SALT}"], ""))) where attributes["jarvy.install_id"]     != nil
 
+      # --------------------------------------------------------------
+      # Inline body redaction. The anonymization above operates on
+      # structured attributes; this catches free-text PII shapes that
+      # may slip into log message bodies. Replaces matches with bounded
+      # type markers — we keep "an email occurred here" as a signal
+      # without preserving the email's distinct identity (which would
+      # require per-match hashing, awkward in OTTL replace_pattern).
+      # --------------------------------------------------------------
       transform/redact_bodies:
+        error_mode: ignore
         log_statements:
           - context: log
             statements:
-              - replace_pattern(body, "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "<redacted-email>")
-              - replace_pattern(body, "\\b(?!127\\.0\\.0\\.1)\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\b", "<redacted-ip>")
-              - replace_pattern(body, "/Users/[^/\\s]+", "/Users/<redacted>")
-              - replace_pattern(body, "/home/[^/\\s]+", "/home/<redacted>")
+              - replace_pattern(body, "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "<email>")
+              - replace_pattern(body, "\\b(?!127\\.0\\.0\\.1)\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\b", "<ip>")
+              - replace_pattern(body, "/Users/[^/\\s]+", "/Users/<user>")
+              - replace_pattern(body, "/home/[^/\\s]+", "/home/<user>")
 
       memory_limiter:
         check_interval: 1s
@@ -649,27 +422,28 @@ data:
       pipelines:
         logs:
           receivers: [otlp]
-          processors: [memory_limiter, attributes/scrub, transform/redact_bodies, batch]
+          processors: [memory_limiter, transform/anonymize, transform/redact_bodies, batch]
           exporters: [otlphttp/grafana]
         metrics:
           receivers: [otlp]
-          processors: [memory_limiter, attributes/scrub, batch]
+          processors: [memory_limiter, transform/anonymize, batch]
           exporters: [otlphttp/grafana]
         traces:
           receivers: [otlp]
-          processors: [memory_limiter, attributes/scrub, tail_sampling, batch]
+          processors: [memory_limiter, transform/anonymize, tail_sampling, batch]
           exporters: [otlphttp/grafana]
 ```
 
-This is the same pipeline as the VM path — the ConfigMap version
-just binds receivers to `0.0.0.0` so the in-pod port is reachable
-from the Service.
+When you add a new PII-shaped attribute to the Jarvy schema, add a
+matching `set(...)` line here in the same pull request. The reviewer
+should treat any schema PR that doesn't touch this file as
+incomplete.
 
-### 5. Deployment
+### 5. Deployment + Service
 
-Two replicas minimum for rolling updates without dropping batches.
-The Collector is stateless (in-memory queue + idempotent OTLP HTTP),
-so horizontal scaling is safe.
+The Collector runs with two replicas minimum so rolling updates do
+not drop in-flight batches. The container is read-only-rootfs, drops
+all capabilities, runs as a non-root UID.
 
 ```yaml
 apiVersion: apps/v1
@@ -695,8 +469,9 @@ spec:
         app.kubernetes.io/name: otelcol
       annotations:
         # Trigger a rolling restart when the ConfigMap changes.
-        # Replace the hash on every `kubectl apply` of the
-        # ConfigMap — automated by stakater/reloader if installed.
+        # Automated by stakater/reloader if installed; otherwise
+        # update this annotation manually with the SHA of the
+        # ConfigMap on every apply.
         config-hash: "REPLACE_WITH_SHA256_OF_CONFIGMAP"
     spec:
       serviceAccountName: otelcol
@@ -724,6 +499,11 @@ spec:
                 secretKeyRef:
                   name: grafana-otlp-token
                   key: token
+            - name: PII_SALT
+              valueFrom:
+                secretKeyRef:
+                  name: pii-salt
+                  key: salt
           resources:
             requests:
               cpu: 100m
@@ -766,7 +546,10 @@ kind: Service
 metadata:
   name: otelcol
   namespace: jarvy-telemetry
+  labels:
+    app.kubernetes.io/name: otelcol
 spec:
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: otelcol
   ports:
@@ -774,70 +557,109 @@ spec:
     - { name: self-metrics, port: 8888, targetPort: self-metrics }
 ```
 
-### 6. Ingress with TLS, body cap, and rate limit (ingress-nginx)
+### 6. Traefik IngressRoute with Middlewares
 
-The ingress controller is the K8s equivalent of Caddy in the VM
-path: it terminates TLS, caps body size, and applies a rate limit
-before the Collector ever parses the request.
+Traefik's CRD model lets each ingress concern be its own resource.
+Three Middlewares (rate limit, body cap, method filter) chain in
+front of the Service.
 
 ```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+# Rate limit: 60 requests/min/IP at the cluster edge. Cloudflare's
+# rate limit is still the primary defense; this is defense in depth.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: otelcol-ratelimit
+  namespace: jarvy-telemetry
+spec:
+  rateLimit:
+    average: 60
+    period: 1m
+    burst: 30
+    sourceCriterion:
+      ipStrategy:
+        # Trust Cloudflare's CF-Connecting-IP header. Without
+        # `depth` set correctly, the rate limiter sees all traffic
+        # coming from Cloudflare's IPs and limits globally rather
+        # than per-client.
+        depth: 1
+---
+# Body cap: reject anything larger than 64 KiB. OTLP/HTTP payloads
+# from a single Jarvy invocation are well under 10 KiB.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: otelcol-bodylimit
+  namespace: jarvy-telemetry
+spec:
+  buffering:
+    maxRequestBodyBytes: 65536  # 64 KiB
+    memRequestBodyBytes: 65536
+---
+# Method + path filter. IngressRoute matches restrict accepted
+# requests; this Middleware adds belt-and-suspenders headers
+# verification (Content-Type must be JSON/protobuf for OTLP/HTTP)
+# and strips any request hop headers a client might inject.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: otelcol-headers
+  namespace: jarvy-telemetry
+spec:
+  headers:
+    customRequestHeaders:
+      X-Forwarder: "jarvy-telemetry"
+    # Strip identifying headers a client might think they need to send.
+    sslRedirect: true
+---
+# Certificate via cert-manager. Traefik picks this up automatically
+# when referenced by the IngressRoute's tls.secretName.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: telemetry-jarvy-dev
+  namespace: jarvy-telemetry
+spec:
+  secretName: telemetry-jarvy-dev-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - telemetry.jarvy.dev
+---
+# Public ingress. Matches only POST to the three OTLP signal paths;
+# anything else 404s at the Traefik router before hitting the
+# Service. TLS terminated here.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
 metadata:
   name: telemetry
   namespace: jarvy-telemetry
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-    nginx.ingress.kubernetes.io/proxy-body-size: "64k"
-    # ingress-nginx rate-limit: requests/min per source IP. Returns
-    # 503 on excess. Cloudflare's rate limit is still the primary
-    # defense; this is defense-in-depth at the cluster edge.
-    nginx.ingress.kubernetes.io/limit-rpm: "60"
-    nginx.ingress.kubernetes.io/limit-connections: "20"
-    nginx.ingress.kubernetes.io/server-snippet: |
-      # Reject any method that isn't POST.
-      if ($request_method !~ ^(POST)$) {
-        return 405;
-      }
-      # Reject any path that isn't an OTLP signal path.
-      if ($request_uri !~ ^/v1/(logs|metrics|traces)$) {
-        return 404;
-      }
 spec:
-  ingressClassName: nginx
+  entryPoints: [websecure]
+  routes:
+    - match: |
+        Host(`telemetry.jarvy.dev`) &&
+        Method(`POST`) &&
+        ( PathPrefix(`/v1/logs`) ||
+          PathPrefix(`/v1/metrics`) ||
+          PathPrefix(`/v1/traces`) )
+      kind: Rule
+      services:
+        - name: otelcol
+          port: otlp-http
+      middlewares:
+        - name: otelcol-ratelimit
+        - name: otelcol-bodylimit
+        - name: otelcol-headers
   tls:
-    - hosts: [telemetry.jarvy.dev]
-      secretName: telemetry-tls
-  rules:
-    - host: telemetry.jarvy.dev
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: otelcol
-                port:
-                  number: 4318
+    secretName: telemetry-jarvy-dev-tls
 ```
-
-If you use Traefik instead, the equivalents are
-`spec.middlewares[].rateLimit` and an `IPWhiteList` / regex
-middleware for the path filter. Same intent.
 
 ### 7. NetworkPolicy: lock the namespace down
 
-The Collector pod should reach only:
-
-- Outbound HTTPS to Grafana Cloud OTLP gateway (e.g.
-  `otlp-gateway-prod-us-east-0.grafana.net:443`)
-- Outbound DNS
-
-It should accept only:
-
-- Inbound from the ingress controller's namespace on port 4318
-- Inbound from the Prometheus Operator's scrape pods on port 8888
-  (optional)
+The Collector pod should accept inbound only from Traefik (and
+optionally Prometheus). Egress should be DNS + HTTPS only.
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -852,9 +674,10 @@ spec:
   policyTypes: [Ingress, Egress]
   ingress:
     - from:
+        # Traefik namespace — adjust to where Traefik is installed.
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: ingress-nginx
+              kubernetes.io/metadata.name: traefik
       ports:
         - { protocol: TCP, port: 4318 }
     - from:
@@ -876,16 +699,11 @@ spec:
         - { protocol: TCP, port: 443 }
 ```
 
-The wide `to: []` for port 443 is intentional — pinning the egress
-to Grafana's IPs would mean re-deploying every time their LB
-rotates. If your CNI supports DNS-based egress policies (Cilium,
-Calico Enterprise), tighten this to the Grafana hostname instead.
+If your CNI supports DNS-based egress (Cilium, Calico Enterprise),
+restrict the wide `to: []` for 443 to the Grafana Cloud OTLP
+hostname.
 
 ### 8. HorizontalPodAutoscaler (optional)
-
-The Collector workload tracks roughly with request rate. At Jarvy's
-expected scale this matters mostly during a release where adoption
-spikes briefly. HPA on CPU is sufficient:
 
 ```yaml
 apiVersion: autoscaling/v2
@@ -909,15 +727,10 @@ spec:
           averageUtilization: 70
 ```
 
-Without the metrics-server installed, this won't work. If you don't
-have metrics-server, leave the Deployment at `replicas: 2` and skip
-the HPA — Jarvy's expected load is well within a single replica's
-capacity.
+Requires metrics-server. If you don't have it, leave the Deployment
+at `replicas: 2`.
 
-### 9. ServiceMonitor for self-monitoring (Prometheus Operator)
-
-If kube-prometheus-stack is installed, scrape the Collector's
-self-metrics:
+### 9. ServiceMonitor for self-monitoring
 
 ```yaml
 apiVersion: monitoring.coreos.com/v1
@@ -937,263 +750,253 @@ spec:
       interval: 30s
 ```
 
-Then add Grafana dashboard alerts on the same metrics listed in the
-"Monitoring the forwarder itself" section. The cluster-side
-Prometheus is a *second* observability lane: even if the upstream
-Grafana Cloud exporter is down, you still know whether the
-Collector itself is healthy.
-
-### 10. Verify end-to-end (K8s edition)
+### 10. Verify end-to-end
 
 ```bash
-# DNS + TLS
+# DNS + TLS + method filter
 curl -I https://telemetry.jarvy.dev/v1/logs
-# Expect: HTTP/2 405 (method not allowed) — confirms ingress is
-# answering and the server-snippet method filter is in place.
+# Expect: HTTP/2 404 — IngressRoute rejects non-POST at the router.
+
+curl -X GET https://telemetry.jarvy.dev/v1/logs
+# Expect: HTTP/2 404 — same reason.
 
 # Real OTLP-shaped POST
 curl -X POST -H 'Content-Type: application/json' \
   -d '{"resourceLogs":[]}' \
   https://telemetry.jarvy.dev/v1/logs
-# Expect: HTTP/2 200 with empty body — Collector accepted the
-# (empty) batch and forwarded it.
+# Expect: HTTP/2 200 — Collector accepted the empty batch.
 
-# Synthetic Jarvy event
+# Synthetic Jarvy event from a development laptop
 JARVY_TELEMETRY=1 \
 JARVY_OTLP_ENDPOINT=https://telemetry.jarvy.dev \
 jarvy --version
 
 # Grafana Cloud → Explore → Loki:
 #   {service_name="jarvy"} |= "jarvy.startup"
+
+# Spot check anonymization in the result:
+#   resource.host.name should be a 64-char hex string, NOT a
+#   human-readable hostname. Same for user.name, jarvy.cwd, etc.
 ```
 
-If the synthetic event lands but Jarvy's real events don't, walk
-the cluster-side pipeline: `kubectl logs deploy/otelcol -n
-jarvy-telemetry`, the ingress-nginx logs, then the
-ServiceMonitor-scraped metrics. The same triage shape as the VM
-path, with `kubectl logs` standing in for `journalctl`.
-
-### Operational differences from the VM path
-
-- **Stop the bleed**: VM path is `systemctl stop otelcol`; K8s path
-  is `kubectl scale deploy/otelcol -n jarvy-telemetry --replicas=0`.
-  Either route fails clients open (telemetry is advisory; Jarvy
-  CLIs tolerate it).
-- **Rolling updates**: K8s gets `RollingUpdate` with
-  `maxUnavailable: 0` for free. VM path requires either a brief
-  outage during restart or a second VM behind a load balancer (not
-  worth it at this scale).
-- **Audit log**: VM path writes `/var/log/otelcol/audit.json` to
-  disk. K8s pods have a read-only root filesystem in the manifest
-  above; if you need an audit mirror, replace the `file/audit`
-  exporter with a sidecar that streams to a separate
-  PersistentVolume or to an S3-compatible bucket (e.g. via the
-  `awss3` exporter). Don't omit the audit lane on K8s — privacy
-  regressions are silent without it.
-- **Handoff**: when transferring forwarder ownership, the K8s
-  variant adds cluster-admin-equivalent access for the
-  `jarvy-telemetry` namespace and access to whichever secret
-  backend feeds the `ExternalSecret`. Rotate the Grafana token at
-  handoff regardless.
+If the synthetic event lands but Jarvy's events don't, walk:
+`kubectl logs deploy/otelcol -n jarvy-telemetry`, then Traefik
+access logs, then the ServiceMonitor-scraped Collector metrics.
 
 ---
 
-## PII scrubbing checklist
+## PII anonymization checklist
 
-The forwarder enforces what the Jarvy CLI also tries to enforce. The
-two layers exist because a single client-side regression can quietly
-leak something for months before someone notices.
+The anonymization pipeline is **allowlist-shaped**: every attribute
+key in the schema either appears on the explicit allowlist (passed
+through unhashed) or is hashed automatically. New schema items must
+land on one of those two lists in the same PR that adds them.
 
-The forwarder **drops** these attributes unconditionally:
+**Passed through unhashed (the allowlist):**
+
+- `service.name`, `service.version` — Jarvy version
+- `os.type`, `os.version` — e.g. `darwin 14.5`
+- Tool names from the registry — `node`, `docker`, etc. — these are
+  public open-source identifiers
+- Timing data — setup duration, install duration, hook duration
+- Error category enumerations — `http_4xx`, `network_timeout`,
+  `missing_prereq`, etc.
+- Sampling / batching metadata — span kind, status code, etc.
+
+**Hashed with salted SHA-256:**
 
 - `host.name`, `host.id`, `host.ip`
 - `user.name`, `user.email`
 - `jarvy.config.path`, `jarvy.toml.contents`, `jarvy.cwd`
+- `jarvy.install_id`
 
-The forwarder **hashes** these:
+**Replaced inline (in log bodies) with type markers:**
 
-- `jarvy.install_id` — anonymized install identifier (the CLI generates
-  it as a UUID per `~/.jarvy/`; the forwarder hashes again as defense
-  in depth)
+- Email-shaped strings → `<email>`
+- Public IPv4 strings → `<ip>`
+- `/Users/<name>` / `/home/<name>` prefixes → `/Users/<user>` /
+  `/home/<user>`
 
-The forwarder **redacts inside log bodies**:
+**Salt management:**
 
-- Email-shaped strings → `<redacted-email>`
-- Public IPv4 addresses → `<redacted-ip>`
-- `/Users/<name>` and `/home/<name>` path prefixes → `<redacted>`
+- 32 bytes of cryptographic randomness, generated with
+  `openssl rand -hex 32` in the secret backend
+- Rotated **quarterly** on a fixed schedule
+- Rotation is performed entirely in the secret backend; the
+  ExternalSecret's `refreshInterval` (1h) plus a Collector restart
+  picks up the new value
+- The previous quarter's salt is **discarded**, not archived —
+  retaining it would defeat the linkability bound
 
-The forwarder **keeps**:
+**On schema change:**
 
-- `service.name`, `service.version` (Jarvy version)
-- `os.type`, `os.version` (e.g. `darwin 14.5`)
-- Tool names from the registry (`node`, `docker`, etc.) — these are
-  open-source identifiers, not PII
-- Timing data (setup duration, install duration)
-- Error categories (HTTP 4xx vs network timeout vs missing prereq)
-
-When a new code path is added in Jarvy that emits a new attribute,
-update both:
-
-1. The schema doc at `docs/telemetry.md` (user-facing promise)
-2. This file's allowlist + the Collector config (enforcement)
-
-If the schema doc and the Collector config drift, the next privacy
-audit will find it. Treat them as one change.
+The schema doc at `docs/telemetry.md` (user-facing promise) and the
+Collector ConfigMap above (enforcement) are the same contract. A PR
+that touches one without the other is incomplete. Privacy audits
+walk both in lockstep.
 
 ---
 
 ## Hardening checklist
 
-Run through this every time the forwarder is provisioned or after any
-significant config change.
+Run through this every time the forwarder is provisioned or after
+any significant config change.
 
 - [ ] DNS resolves and Cloudflare proxy is enabled (orange cloud)
 - [ ] Cloudflare WAF rule blocks non-`POST /v1/{logs,metrics,traces}`
 - [ ] Cloudflare rate-limit rule active at 60/min/IP
-- [ ] Origin VM firewall: 443 from Cloudflare IPs only, 22 from
-      maintainer IP only
-- [ ] Origin VM `unattended-upgrades` enabled
-- [ ] Caddy auto-TLS working (`curl -I https://telemetry.jarvy.dev`
-      returns a real Let's Encrypt cert)
-- [ ] Caddy `request_body max_size 64KB` enforced (verified by
-      `curl -X POST -d "$(head -c 100000 /dev/urandom | base64)"
-      https://telemetry.jarvy.dev/v1/logs` → 413)
-- [ ] Collector runs as non-root `otelcol` user
-- [ ] Collector systemd unit has `ProtectSystem=strict`,
-      `ProtectHome=true`, `NoNewPrivileges=true`
-- [ ] Grafana write token loaded via `LoadCredentialEncrypted`, not
-      raw env var
-- [ ] Grafana token is write-only-scoped (verify in Grafana Cloud
-      access policy UI)
-- [ ] Collector PII scrub processor pipeline is in front of
-      `otlphttp/grafana` in every signal's pipeline
+- [ ] Traefik IngressRoute matches the same method + path triplet
+      (defense in depth at the cluster edge)
+- [ ] `otelcol-bodylimit` Middleware enforces `maxRequestBodyBytes`
+      (verified by `curl -X POST -d "$(head -c 100000 /dev/urandom |
+      base64)" https://telemetry.jarvy.dev/v1/logs` → 413 or 502)
+- [ ] `otelcol-ratelimit` Middleware enforces 60/min/IP (verified
+      with a quick loop; Cloudflare may intercept first — both
+      layers should hold)
+- [ ] cert-manager `Certificate` resource is in Ready state and
+      Traefik serves a real Let's Encrypt cert
+- [ ] Collector Deployment runs as non-root (UID 10001) with
+      `readOnlyRootFilesystem: true`, `capabilities.drop: [ALL]`,
+      `allowPrivilegeEscalation: false`, seccomp RuntimeDefault
+- [ ] Collector pod has `automountServiceAccountToken: false`
+- [ ] `grafana-otlp-token` Secret exists, mounted as env from
+      ExternalSecret, not visible in `kubectl describe pod`
+- [ ] `pii-salt` Secret exists, mounted as env from ExternalSecret,
+      32-byte hex string, **different from any prior quarter's salt**
+- [ ] NetworkPolicy applied; ingress restricted to Traefik
+      namespace; egress restricted to DNS + 443
 - [ ] Test event sent from a development laptop appears in Grafana
       Loki within 60 seconds
-- [ ] Synthetic PII event (email shape in a log body) appears in
-      Grafana with `<redacted-email>`, not the raw value
+- [ ] **Anonymization spot check**: the event in Grafana shows
+      `host.name`, `user.name`, `jarvy.cwd` etc. as 64-char hex
+      hashes, **NOT** as human-readable strings
+- [ ] Synthetic PII event with an email in a log body shows
+      `<email>` in Grafana, not the raw email
+- [ ] ServiceMonitor scraping the Collector's :8888 successfully
+      (verified by querying Prometheus for
+      `otelcol_receiver_accepted_log_records{namespace="jarvy-telemetry"}`)
 
 ---
 
 ## Cost and quota controls
 
-- **Grafana Cloud free tier** at the time of writing: 10k metrics
+- **Grafana Cloud free tier** at time of writing: 10k metrics
   series, 50 GB logs/month, 50 GB traces/month, 14-day retention. A
-  Jarvy install emitting a normal volume (setup events + a handful of
-  metrics per session) fits well inside that for a five-figure
-  monthly-active-user count.
-- **Per-IP rate limit at Cloudflare** prevents a single host from
-  burning a noticeable fraction of the quota.
+  Jarvy install emitting a normal volume fits well inside that for
+  a five-figure MAU count.
+- **Per-IP rate limit** at Cloudflare and at the Traefik
+  Middleware prevents single-host abuse.
 - **Collector `memory_limiter` processor** drops batches if the
-  Collector RAM grows beyond 200 MiB, so a runaway client cannot OOM
-  the forwarder.
+  Collector RAM grows beyond 400 MiB — a runaway client can't OOM
+  the pod.
 - **Grafana Cloud usage alerts**: set "80% of free-tier ingest"
-  warnings on logs, metrics, and traces. The alert routes to the
+  warnings on logs, metrics, and traces. Alert routes to the
   maintainer's email; investigate before the meter hits 100%.
 
-If the free tier runs out, the cheapest paid Grafana Cloud Pro tier
-covers ~100× the current volume.
+If the free tier runs out, the cheapest Grafana Cloud Pro plan
+covers ~100× the current volume. The forwarder design is exporter-
+agnostic, so swapping to a different backend (Honeycomb, Datadog,
+self-hosted) is a config change, not a code change.
 
 ---
 
 ## Monitoring the forwarder itself
 
-We use the forwarder's own outputs to monitor it:
+Two independent observability lanes:
 
-- **Caddy access log** (`/var/log/caddy/access.log`) — request rate,
-  status codes, body sizes. Rotate keeps last 500 MB.
-- **Collector internal telemetry** — the Collector exposes its own
-  metrics on `127.0.0.1:8888/metrics`. Scrape with the Grafana Agent
-  on the same host to send back to Grafana Cloud (Mimir).
-- **`/healthz`-equivalent** — the Collector's `health_check` extension
-  on `127.0.0.1:13133`. Add a Cloudflare Healthcheck → page the
-  maintainer if it goes down for >5 min.
+- **Traefik access logs** — request rate, status codes, body sizes,
+  per-route latency. Available via Traefik's standard log output.
+- **Collector self-metrics** — exposed on `:8888/metrics`. Scraped
+  by Prometheus Operator via the `ServiceMonitor` above. Lives in
+  the cluster, not in Grafana Cloud — so it stays available even
+  if the Grafana Cloud exporter is failing.
 
-Key metrics to alert on:
+Key alerts:
 
-- `otelcol_receiver_refused_spans` > 0 (means the rate limiter is
-  hitting valid traffic)
-- `otelcol_exporter_send_failed_spans` rate > 1/min (Grafana endpoint
-  is unhealthy or token is invalid)
-- `process_resident_memory_bytes` > 250 MiB sustained (memory limiter
-  is about to kick in)
-- Caddy 4xx rate > 5% (the schema may have drifted; clients are
-  sending shapes the WAF rejects)
+- `otelcol_receiver_refused_log_records` > 0 (rate limiter is
+  hitting valid traffic — investigate or raise the limit)
+- `otelcol_exporter_send_failed_log_records` rate > 1/min (Grafana
+  endpoint unhealthy or token invalid)
+- `process_resident_memory_bytes{namespace="jarvy-telemetry"}` > 350
+  MiB sustained (memory limiter is about to kick in; investigate
+  for a runaway client)
+- Traefik 4xx rate > 5% (schema may have drifted; clients are
+  sending shapes the IngressRoute rejects)
+- ExternalSecret reconciliation failures (Vault/backend is down or
+  the path is wrong — the Collector keeps running on the cached
+  Secret, but the next salt rotation won't take effect)
 
 ---
 
 ## Incident playbook
 
 When something is wrong with telemetry, the worst case is a privacy
-leak that landed in Grafana before the scrubber caught it. Triage in
-this order:
+leak that landed in Grafana before the anonymizer caught it. Triage
+in this order:
 
-1. **Stop the bleed.**
-   - Path A (VM): `systemctl stop otelcol`.
-   - Path B (K8s): `kubectl scale deploy/otelcol -n jarvy-telemetry
-     --replicas=0`.
-   - Either way, Cloudflare returns 5xx and clients fail open
-     (telemetry is advisory, not load-bearing).
-2. **Confirm scope.** Pull the last hour of `/var/log/otelcol/audit.json`.
-   Search for whatever leaked. Note which Jarvy versions are
-   represented (`service.version`).
-3. **Purge if needed.** Grafana Cloud → Loki → admin API → delete by
-   selector for the affected time window. Same for Mimir / Tempo.
-4. **Patch.** If the leak is a client-side regression, fix in Jarvy
-   main, cut a patch release. If the leak is a forwarder-side gap,
-   add to the `attributes/scrub` action list and the
-   `transform/redact_bodies` patterns, redeploy.
-5. **Restart.** `systemctl start otelcol`. Verify with a manual test.
-6. **Post-mortem.** File a `release-postmortem`-tagged issue: what
-   leaked, how it bypassed the layers, what new test or scrub rule
-   prevents recurrence.
+1. **Stop the bleed.** `kubectl scale deploy/otelcol -n
+   jarvy-telemetry --replicas=0`. Traefik returns 502; clients fail
+   open (telemetry is advisory, not load-bearing).
+2. **Confirm scope.** Pull the last hour of Collector logs:
+   `kubectl logs -n jarvy-telemetry -l app.kubernetes.io/name=otelcol
+   --previous --since=1h`. Search Grafana Loki for whatever the
+   suspected leak shape is. Note which Jarvy versions are
+   represented in the affected records.
+3. **Purge if needed.** Grafana Cloud → Loki / Mimir / Tempo admin
+   APIs → delete by selector for the affected time window.
+4. **Patch.** If the leak is a client-side regression in Jarvy, fix
+   in main and cut a patch release. If the leak is a
+   forwarder-side gap (a new attribute slipped through the
+   allowlist), add a matching `set(...)` line in the `transform/
+   anonymize` processor and re-apply the ConfigMap.
+5. **Restart.** `kubectl scale deploy/otelcol -n jarvy-telemetry
+   --replicas=2`. Verify with a manual test.
+6. **Rotate the salt.** If the leak revealed plaintext values that
+   were *supposed* to be hashed but weren't (i.e. the breach is
+   that hashing didn't apply), rotate the salt anyway —
+   conservative blast-radius minimization.
+7. **Post-mortem.** File a `release-postmortem`-tagged issue: what
+   leaked, how it bypassed the layers, what new test or rule
+   prevents recurrence. Update this document.
 
 ---
 
 ## Operational handoff checklist
 
-If you ever hand the forwarder to another maintainer, transfer:
+If you hand the forwarder to another maintainer, transfer:
 
-- Cloudflare account access (or zone access via Teams) — both paths
-- Grafana Cloud organization admin invite — both paths
-- The Grafana write token: **regenerate at handoff**; do not transfer
-  the old token regardless of path
+- Cloudflare account or zone access
+- Grafana Cloud organization admin invite (and rotate the write
+  token at handoff — do not transfer the old one)
+- Cluster credentials scoped to at least the `jarvy-telemetry`
+  namespace
+- Access to the secret backend feeding the two ExternalSecrets,
+  including the rotation schedule for the PII salt
+- Access to the GitOps pipeline (Argo CD / Flux / Helmfile) that
+  applies the manifests — if the manifests aren't in git, fix that
+  before handoff
+- This document with any local deviations noted inline
 
-Path A (single VM) adds:
-
-- Origin VM SSH access (rotate the maintainer's key in their own
-  `authorized_keys`; `otelcol` user has no shell)
-- Whoever owns the cloud account hosting the VM (Hetzner / DO /
-  whichever)
-
-Path B (Kubernetes) adds:
-
-- Cluster credentials (kubeconfig context) scoped to at least the
-  `jarvy-telemetry` namespace
-- Access to the secret backend feeding the `ExternalSecret` (1Password
-  vault, Vault namespace, AWS Secrets Manager IAM, etc.) so the new
-  maintainer can rotate the Grafana token without manual injection
-- Access to the cluster's CI/CD pipeline (Argo CD, Flux, Helmfile,
-  etc.) that applies the manifests above — handing over `kubectl
-  apply -f` is a smell that suggests the manifests aren't yet in git
-
-This document with any local deviations noted inline — both paths.
-
-The forwarder is intentionally small enough that a one-week handoff is
-realistic. If it grows beyond that, the design needs a re-look — the
-goal is a thing that survives the maintainer being out for a month, not
-a thing that requires constant attention.
+The forwarder is intentionally small enough that a one-week handoff
+is realistic. If it grows beyond that, the design needs a re-look —
+the goal is a thing that survives the maintainer being out for a
+month, not a thing that requires constant attention.
 
 ---
 
 ## See also
 
-- [Telemetry](../telemetry.md) — the user-facing schema, opt-in
-  command, environment variables, and data-handling promise the
-  forwarder must implement.
+- [Telemetry](../telemetry.md) — user-facing schema, opt-in command,
+  environment variables, and the data-handling promise this
+  document implements.
 - [`docs/release-quirks-jarvy.md`](../release-quirks-jarvy.md) —
-  release-pipeline quirks; do not auto-deploy forwarder changes from
-  release tags.
+  release-pipeline quirks; do not auto-deploy forwarder changes
+  from release tags.
 - OpenTelemetry Collector documentation:
   <https://opentelemetry.io/docs/collector/>
+- Traefik IngressRoute reference:
+  <https://doc.traefik.io/traefik/routing/providers/kubernetes-crd/>
 - Grafana Cloud OTLP gateway docs:
   <https://grafana.com/docs/grafana-cloud/send-data/otlp/>
+- OTTL (OpenTelemetry Transformation Language) reference:
+  <https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/pkg/ottl/README.md>
