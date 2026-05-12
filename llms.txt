@@ -10,6 +10,9 @@ A: Jarvy is an open-source, cross-platform CLI tool that provisions developer wo
 Q: How do I install Jarvy?
 A: Install via Cargo (`cargo install jarvy`), Homebrew (`brew install jarvy`), or download a pre-built binary from the GitHub Releases page at https://github.com/bearbinary/jarvy/releases.
 
+Q: How do I integrate or implement Jarvy into an existing project?
+A: Eight-step workflow. (1) Confirm `jarvy --version` works on the user's machine; do not auto-install — Jarvy runs with elevated privileges, the user must opt in. (2) Detect the project's stack from lockfiles and manifests (e.g. `pnpm-lock.yaml` → `node-pnpm` template, `uv.lock` → `python-uv`, `Cargo.toml` with `[workspace]` → `rust-workspace`). Full decision table at https://docs.jarvy.dev/templates-index/#decision-table. (3) `curl -fsSL https://raw.githubusercontent.com/bearbinary/jarvy/main/examples/<template>/jarvy.toml -o jarvy.toml`. Optionally also fetch the project `Makefile` + `scripts/bootstrap.sh` so new contributors get a one-command setup. (4) Customize `jarvy.toml` to match the project's actual versions from `.nvmrc` / `.python-version` / `go.mod` / `rust-toolchain.toml` / `.tool-versions`; never invent versions. (5) Validate: `jarvy validate && jarvy diff && jarvy setup --dry-run`. (6) Surface the dry-run plan to the user and get explicit confirmation before any real `jarvy setup`. (7) Commit `jarvy.toml` (and the optional `Makefile` + `scripts/bootstrap.sh`). (8) Optionally generate a CI snippet with `jarvy ci-config <provider>` so dev/CI parity is enforced. Full walkthrough at https://docs.jarvy.dev/for-ai-agents/#integration-quickstart-integrate-jarvy-into-this-project.
+
 Q: What problem does Jarvy solve?
 A: Jarvy eliminates the "works on my machine" problem. It codifies your team's required tools and versions in a version-controlled config file, so new developers can run `jarvy setup` and have a fully configured workstation in seconds instead of days.
 

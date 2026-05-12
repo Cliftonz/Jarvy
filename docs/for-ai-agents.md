@@ -13,6 +13,182 @@ This page is written for AI assistants (Claude, GPT, Gemini, Cursor, Copilot, in
 
 Each mode has different needs. Jump to the section that matches your task.
 
+If the user said **"integrate Jarvy into this project"** or **"implement
+https://jarvy.dev into this project"** or any close variant — read the
+[Integration Quickstart](#integration-quickstart-integrate-jarvy-into-this-project)
+below first. That's the canonical first-contact workflow.
+
+---
+
+## Integration Quickstart: "Integrate Jarvy Into This Project"
+
+This is the canonical workflow when a user asks an AI assistant in their
+own repo to add Jarvy to the project. The end state is a committed
+`jarvy.toml` (plus optionally a `Makefile` + `scripts/bootstrap.sh`) that
+any teammate or new laptop can use to bring up a working dev environment
+in one command.
+
+### Step 1: Confirm Jarvy is installed on the user's machine
+
+```bash
+jarvy --version
+```
+
+If the command isn't found, ask the user to install Jarvy first. **Do not
+auto-install** — Jarvy runs with elevated privileges and the user should
+opt in explicitly. Point them at:
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/bearbinary/jarvy/main/dist/scripts/install.sh | bash
+
+# Or
+cargo install jarvy
+```
+
+```powershell
+# Windows
+irm https://raw.githubusercontent.com/bearbinary/jarvy/main/dist/scripts/install.ps1 | iex
+```
+
+Wait for the user to confirm install before continuing.
+
+### Step 2: Detect the project's stack
+
+Look for stack-defining files in the repo root and immediate subdirectories.
+Use them to pick the right template (full table:
+[Templates Decision Table](templates-index.md#decision-table)):
+
+| Signal | Template |
+|--------|----------|
+| `package-lock.json` only | `node-npm` |
+| `pnpm-lock.yaml` | `node-pnpm` |
+| `bun.lockb` or `bunfig.toml` | `node-bun` |
+| `deno.json` or `deno.jsonc` | `deno` |
+| `uv.lock`, or `pyproject.toml` with `[tool.uv]` | `python-uv` |
+| `requirements.txt`, no uv | `python-api` |
+| `go.mod` (HTTP service shape) | `go-api` |
+| `Cargo.toml` with `[workspace]` | `rust-workspace` |
+| `Cargo.toml` single `[package]` | `rust-cli` |
+| `Gemfile` + Rails layout | `ruby-rails` |
+| `pom.xml` with Spring Boot parent | `java-spring` |
+| React/Vite frontend | `react-app` |
+| Mixed frontend + backend monorepo | `fullstack` |
+| Terraform/Helm/K8s tooling repo | `k8s-platform` |
+
+If two templates match equally, ask the user which one fits. If nothing
+matches, start from `examples/node-npm` or `examples/python-api` as the
+closest analog and tell the user to expect more customization.
+
+### Step 3: Fetch the template into the project
+
+```bash
+TEMPLATE=<picked-template>
+curl -fsSL \
+  "https://raw.githubusercontent.com/bearbinary/jarvy/main/examples/${TEMPLATE}/jarvy.toml" \
+  -o jarvy.toml
+```
+
+If the user wants the clean-laptop bootstrap as well (gives `make setup`
+as the one-command path for new contributors), also fetch:
+
+```bash
+curl -fsSL \
+  https://raw.githubusercontent.com/bearbinary/jarvy/main/Makefile \
+  -o Makefile
+mkdir -p scripts
+curl -fsSL \
+  https://raw.githubusercontent.com/bearbinary/jarvy/main/scripts/bootstrap.sh \
+  -o scripts/bootstrap.sh
+chmod +x scripts/bootstrap.sh
+```
+
+### Step 4: Customize `jarvy.toml` to the project's actual versions
+
+Read the project's existing version hints and reflect them in `jarvy.toml`:
+
+| Source | Maps to |
+|--------|---------|
+| `.nvmrc` or `package.json` `engines.node` | `node = "<version>"` |
+| `.python-version` or `pyproject.toml` `requires-python` | `python = "<version>"` |
+| `go.mod` `go <version>` | `go = "<version>"` |
+| `rust-toolchain.toml` `channel` | `rust = "<channel>"` |
+| `.tool-versions` (asdf/mise) | one line per tool |
+| `.ruby-version` | `ruby = "<version>"` |
+
+**Do not** invent versions. If a hint file is missing, leave the template's
+default and ask the user to confirm before commit.
+
+Strip sections the project doesn't need (e.g. drop `[git]` if the team
+already manages git config; drop `[network]` if no corporate proxy).
+
+### Step 5: Validate
+
+```bash
+jarvy validate          # Schema + value check
+jarvy diff              # What would change on this machine
+jarvy setup --dry-run   # Full execution plan, no mutations
+```
+
+If `jarvy validate` fails, fix the reported issues and re-run. **Never run
+`jarvy setup` for real until `validate` and `--dry-run` both look right.**
+
+### Step 6: Get explicit user confirmation before any non-dry-run
+
+Surface the dry-run output to the user. Ask whether to:
+
+1. Just commit the config so teammates can run it themselves, OR
+2. Also run `jarvy setup` now to provision this machine.
+
+Wait for the user to pick. Do not pick for them.
+
+### Step 7: Commit the config
+
+```bash
+git add jarvy.toml
+# If Makefile + bootstrap.sh were also fetched:
+git add Makefile scripts/bootstrap.sh
+git commit -m "feat(devenv): provision via Jarvy"
+```
+
+For team rollout, update the project's contributing or onboarding doc to
+mention `make setup` (if `Makefile` was added) or `jarvy setup` (if not).
+
+### Step 8: Optional — wire CI
+
+If the project has CI, also offer to generate a config that installs the
+same tools in CI so dev/CI parity is enforced:
+
+```bash
+jarvy ci-config github         # Or: gitlab | circleci | etc.
+```
+
+This emits a CI snippet the user can paste into their existing workflow,
+or a complete workflow file if they don't have one yet.
+
+### Anti-patterns during integration
+
+- **Don't run `jarvy setup` without `--dry-run` first.** Jarvy installs
+  with elevated privileges (sudo on Linux, Homebrew/winget elsewhere).
+  Always show the user what will happen before it happens.
+- **Don't auto-commit secrets.** If the template references a secret, use
+  `{ env = "VAR_NAME" }` indirection so the secret stays in the user's
+  shell or 1Password, not in version control.
+- **Don't pin every tool to `latest`.** Pin at least the major version
+  (`node = "20"`) so version drift is bounded across the team.
+- **Don't duplicate tools the registry already has.** Run `jarvy search
+  <tool>` first — there are 174+ tools already defined. Only fall back
+  to a custom hook if `jarvy search` returns nothing.
+- **Don't bypass roles.** If two teammates need different tool sets, model
+  it with `[roles.X]`, not by maintaining separate `jarvy.toml` files.
+
+### Reference
+
+- [Templates index](templates-index.md) — full decision table + per-template details
+- [Configuration reference](configuration.md) — every field, every section
+- [Roles](roles.md) — for projects with multiple developer roles
+- [CI/CD](ci-cd.md) — for the optional Step 8
+
 ---
 
 ## Mode 1: Use Jarvy on Behalf of the User

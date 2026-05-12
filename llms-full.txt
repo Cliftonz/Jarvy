@@ -67,6 +67,87 @@ jarvy setup
 
 Every developer who runs `jarvy setup` gets the same tools and versions.
 
+### Integrating Jarvy Into An Existing Project (LLM workflow)
+
+Canonical first-contact workflow when a user asks an AI assistant in
+their own repo to "implement https://jarvy.dev/ into this project" or
+similar. End state: a committed `jarvy.toml` (plus optionally
+`Makefile` + `scripts/bootstrap.sh`) that any teammate or new laptop
+can bring up with one command.
+
+```
+Step 1. Confirm Jarvy is installed: `jarvy --version`
+        If not, ask the user to install (do NOT auto-install — Jarvy
+        runs with elevated privileges, user must opt in):
+          curl -fsSL https://raw.githubusercontent.com/bearbinary/jarvy/main/dist/scripts/install.sh | bash
+          # or
+          cargo install jarvy
+          # Windows
+          irm https://raw.githubusercontent.com/bearbinary/jarvy/main/dist/scripts/install.ps1 | iex
+
+Step 2. Detect the project's stack from lockfiles / manifests:
+          pnpm-lock.yaml          → node-pnpm
+          bun.lockb / bunfig.toml → node-bun
+          package-lock.json (only) → node-npm
+          deno.json / deno.jsonc  → deno
+          uv.lock / pyproject [tool.uv] → python-uv
+          requirements.txt (no uv) → python-api
+          go.mod (HTTP service)   → go-api
+          Cargo.toml [workspace]  → rust-workspace
+          Cargo.toml single [package] → rust-cli
+          Gemfile + config/application.rb → ruby-rails
+          pom.xml Spring Boot parent → java-spring
+          React/Vite              → react-app
+          mixed FE+BE monorepo    → fullstack
+          Terraform/Helm/K8s repo → k8s-platform
+        Full table: https://docs.jarvy.dev/templates-index/#decision-table
+
+Step 3. Fetch the template into the project:
+          TEMPLATE=<picked>
+          curl -fsSL "https://raw.githubusercontent.com/bearbinary/jarvy/main/examples/${TEMPLATE}/jarvy.toml" -o jarvy.toml
+        Optionally add the one-command bootstrap:
+          curl -fsSL https://raw.githubusercontent.com/bearbinary/jarvy/main/Makefile -o Makefile
+          mkdir -p scripts
+          curl -fsSL https://raw.githubusercontent.com/bearbinary/jarvy/main/scripts/bootstrap.sh -o scripts/bootstrap.sh
+          chmod +x scripts/bootstrap.sh
+
+Step 4. Customize versions from the project's actual hint files:
+          .nvmrc / package.json engines.node → node = "..."
+          .python-version / pyproject requires-python → python = "..."
+          go.mod "go X.Y" → go = "..."
+          rust-toolchain.toml channel → rust = "..."
+          .tool-versions (asdf/mise) → one line per tool
+          .ruby-version → ruby = "..."
+        Never invent versions. If a hint is missing, keep the template
+        default and ask the user.
+
+Step 5. Validate:
+          jarvy validate
+          jarvy diff
+          jarvy setup --dry-run
+
+Step 6. Surface the dry-run plan to the user. Get explicit
+        confirmation before any real `jarvy setup`. Ask whether to
+        (a) commit config only for teammates to run later, or
+        (b) also run `jarvy setup` now to provision this machine.
+
+Step 7. Commit:
+          git add jarvy.toml [Makefile scripts/bootstrap.sh]
+          git commit -m "feat(devenv): provision via Jarvy"
+
+Step 8. Optional — wire CI:
+          jarvy ci-config github   # or: gitlab | circleci | etc.
+```
+
+Anti-patterns: do not run `jarvy setup` without `--dry-run` first; do
+not auto-commit secrets (use `{ env = "VAR" }` indirection); do not
+pin every tool to `latest` (pin at least the major); do not duplicate
+tools the registry already has (run `jarvy search <tool>`); do not
+bypass roles when teammates need different tool sets.
+
+Full walkthrough with rationale and per-step anti-patterns:
+https://docs.jarvy.dev/for-ai-agents/#integration-quickstart-integrate-jarvy-into-this-project
+
 ### Templates
 
 ```bash
