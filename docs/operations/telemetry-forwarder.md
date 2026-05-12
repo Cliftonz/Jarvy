@@ -50,11 +50,13 @@ Operationally we treat it like CDN edge: small, stateless, replaceable.
    Cloudflare (DDoS / WAF / per-IP rate limit)
        │
        ▼
-   telemetry.jarvy.dev   (Caddy reverse proxy + auto-TLS)
-       │   - terminates TLS
+   telemetry.jarvy.dev   (TLS terminator + ingress)
+       │   - terminates TLS (Let's Encrypt)
        │   - enforces method + path allowlist
-       │   - per-IP rate limit (10 req/min)
+       │   - per-IP rate limit (60 req/min)
        │   - drops requests > 64 KB
+       │   ━━ Path A: single VM with Caddy
+       │   ━━ Path B: ingress-nginx on a self-hosted K8s cluster
        ▼
    OpenTelemetry Collector  (contrib distribution)
        │   - otlphttp receiver (no auth)
@@ -64,12 +66,20 @@ Operationally we treat it like CDN edge: small, stateless, replaceable.
        │   - resource processor: stamp ingestion timestamp, drop
        │     resource attrs we never want
        │   - tail-sampling for traces (1% of OK, 100% of errors)
+       │   ━━ Path A: systemd unit on the same VM
+       │   ━━ Path B: Deployment in jarvy-telemetry namespace
        ▼
    Grafana Cloud OTLP gateway  (bearer token, never seen by clients)
        ├─ Loki     (logs)
        ├─ Mimir    (metrics)
        └─ Tempo    (traces)
 ```
+
+The two deployment paths are described below as
+[Path A: single VM](#provisioning-the-forwarder) (default,
+cheapest) and
+[Path B: self-hosted Kubernetes](#provisioning-on-a-self-hosted-kubernetes-cluster-alternative)
+(only worth it if you already operate a cluster).
 
 Components:
 
@@ -443,6 +453,551 @@ where to look.
 
 ---
 
+## Provisioning on a self-hosted Kubernetes cluster (alternative)
+
+The single-VM path above is the default and the cheapest place to
+start. If you already operate a Kubernetes cluster — e.g. a homelab
+k3s / Talos cluster, a hetzner-baremetal setup, or a managed cluster
+(EKS / GKE / AKS) you happen to have around — you can run the
+forwarder there instead. The architecture is the same; only the
+plumbing changes.
+
+The trade-offs:
+
+| Concern | Single VM | Kubernetes |
+|---|---|---|
+| Bootstrap effort | ~30 min, mostly typing | ~2 hours if the cluster doesn't already have cert-manager + an ingress controller; ~30 min if it does |
+| Operational tax | `systemctl` + one Caddyfile | YAML, controllers, more abstractions to understand when something breaks at 2 AM |
+| Autoscaling | None — vertical only | HPA on the Collector Deployment |
+| HA | Single point of failure | Multi-replica, rolling updates without dropping in-flight batches |
+| Cost (small cluster you already have) | $5/mo VM | Marginal — you're paying for the cluster anyway |
+| Cost (provisioning a cluster *for this*) | n/a | Don't. Use the VM path. |
+
+Recommendation: K8s path only makes sense when you already run a
+cluster and have working ingress + cert-manager. If you're standing
+this up greenfield, the VM path is faster and matches the threat
+model identically.
+
+### Prerequisites
+
+The cluster needs the following already installed and working:
+
+- An ingress controller — either **ingress-nginx** (recommended for
+  the rate-limit annotations below) or **Traefik** (use the
+  equivalent middleware). The examples assume ingress-nginx.
+- **cert-manager** with a `ClusterIssuer` configured for Let's
+  Encrypt. The examples assume an issuer named `letsencrypt-prod`.
+- A way to manage secrets that does not commit raw tokens to git:
+  **External Secrets Operator** pulling from 1Password / AWS Secrets
+  Manager / Vault, or **Sealed Secrets** if you encrypt-and-commit.
+  The example uses External Secrets with a generic
+  `ClusterSecretStore` named `vault-default`.
+- **Prometheus Operator** (kube-prometheus-stack) if you want to
+  scrape the Collector's self-metrics with a `ServiceMonitor`. Not
+  strictly required.
+
+### 1. DNS + Cloudflare
+
+Same as the VM path. `telemetry.jarvy.dev` A record points at the
+cluster's ingress LoadBalancer IP (or whatever public IP your
+cluster's ingress controller terminates on). Cloudflare proxy on,
+WAF rule, rate-limit rule. **Keep Cloudflare in front** — the
+edge-tier protections are still load-bearing even with K8s in the
+mix.
+
+### 2. Namespace + RBAC
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jarvy-telemetry
+  labels:
+    # Enforce restricted Pod Security Standard. The Collector runs
+    # fine with no special capabilities; lock it down.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otelcol
+  namespace: jarvy-telemetry
+```
+
+The Collector does not need any cluster permissions — no
+`kube_sd_config`, no `k8sattributes` processor here. The
+ServiceAccount has no `RoleBinding`. That's intentional.
+
+### 3. Grafana write token via External Secrets
+
+```yaml
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: grafana-otlp-token
+  namespace: jarvy-telemetry
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-default
+    kind: ClusterSecretStore
+  target:
+    name: grafana-otlp-token
+    creationPolicy: Owner
+  data:
+    - secretKey: token
+      remoteRef:
+        key: jarvy/telemetry/grafana-otlp-write-token
+```
+
+Adjust `secretStoreRef` and `remoteRef.key` to your secret backend.
+If you use Sealed Secrets instead, the equivalent
+`kubeseal`-produced `SealedSecret` is fine — what matters is that
+the raw token never lands in git.
+
+The resulting `Secret` named `grafana-otlp-token` is mounted into the
+Collector pod (below) as an env file, not as an env var, so it does
+not appear in `kubectl describe pod` output or in process listings.
+
+### 4. Collector configuration ConfigMap
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otelcol-config
+  namespace: jarvy-telemetry
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      attributes/scrub:
+        actions:
+          - key: host.name
+            action: delete
+          - key: host.id
+            action: delete
+          - key: host.ip
+            action: delete
+          - key: user.name
+            action: delete
+          - key: user.email
+            action: delete
+          - key: jarvy.config.path
+            action: delete
+          - key: jarvy.toml.contents
+            action: delete
+          - key: jarvy.cwd
+            action: delete
+          - key: jarvy.install_id
+            action: hash
+
+      transform/redact_bodies:
+        log_statements:
+          - context: log
+            statements:
+              - replace_pattern(body, "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "<redacted-email>")
+              - replace_pattern(body, "\\b(?!127\\.0\\.0\\.1)\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\b", "<redacted-ip>")
+              - replace_pattern(body, "/Users/[^/\\s]+", "/Users/<redacted>")
+              - replace_pattern(body, "/home/[^/\\s]+", "/home/<redacted>")
+
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 400
+        spike_limit_mib: 100
+
+      tail_sampling:
+        decision_wait: 10s
+        num_traces: 50000
+        policies:
+          - name: errors
+            type: status_code
+            status_code: { status_codes: [ERROR] }
+          - name: probabilistic
+            type: probabilistic
+            probabilistic: { sampling_percentage: 1 }
+
+      batch:
+        timeout: 10s
+        send_batch_size: 1024
+
+    exporters:
+      otlphttp/grafana:
+        endpoint: ${env:GRAFANA_OTLP_ENDPOINT}
+        auth:
+          authenticator: bearertokenauth/grafana
+
+    extensions:
+      bearertokenauth/grafana:
+        scheme: "Basic"
+        token: ${env:GRAFANA_OTLP_TOKEN}
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    service:
+      extensions: [bearertokenauth/grafana, health_check]
+      telemetry:
+        metrics:
+          address: 0.0.0.0:8888
+      pipelines:
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, attributes/scrub, transform/redact_bodies, batch]
+          exporters: [otlphttp/grafana]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, attributes/scrub, batch]
+          exporters: [otlphttp/grafana]
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, attributes/scrub, tail_sampling, batch]
+          exporters: [otlphttp/grafana]
+```
+
+This is the same pipeline as the VM path — the ConfigMap version
+just binds receivers to `0.0.0.0` so the in-pod port is reachable
+from the Service.
+
+### 5. Deployment
+
+Two replicas minimum for rolling updates without dropping batches.
+The Collector is stateless (in-memory queue + idempotent OTLP HTTP),
+so horizontal scaling is safe.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otelcol
+  namespace: jarvy-telemetry
+  labels:
+    app.kubernetes.io/name: otelcol
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: otelcol
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: otelcol
+      annotations:
+        # Trigger a rolling restart when the ConfigMap changes.
+        # Replace the hash on every `kubectl apply` of the
+        # ConfigMap — automated by stakater/reloader if installed.
+        config-hash: "REPLACE_WITH_SHA256_OF_CONFIGMAP"
+    spec:
+      serviceAccountName: otelcol
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: otelcol
+          image: otel/opentelemetry-collector-contrib:0.107.0  # pin a digest in prod
+          args: ["--config=/etc/otelcol/config.yaml"]
+          ports:
+            - { name: otlp-http, containerPort: 4318 }
+            - { name: health, containerPort: 13133 }
+            - { name: self-metrics, containerPort: 8888 }
+          env:
+            - name: GRAFANA_OTLP_ENDPOINT
+              value: https://otlp-gateway-prod-us-east-0.grafana.net/otlp
+            - name: GRAFANA_OTLP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-otlp-token
+                  key: token
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+          livenessProbe:
+            httpGet: { path: /, port: health }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /, port: health }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - { name: config, mountPath: /etc/otelcol }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: config
+          configMap:
+            name: otelcol-config
+        - name: tmp
+          emptyDir: {}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: otelcol
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otelcol
+  namespace: jarvy-telemetry
+spec:
+  selector:
+    app.kubernetes.io/name: otelcol
+  ports:
+    - { name: otlp-http, port: 4318, targetPort: otlp-http }
+    - { name: self-metrics, port: 8888, targetPort: self-metrics }
+```
+
+### 6. Ingress with TLS, body cap, and rate limit (ingress-nginx)
+
+The ingress controller is the K8s equivalent of Caddy in the VM
+path: it terminates TLS, caps body size, and applies a rate limit
+before the Collector ever parses the request.
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: telemetry
+  namespace: jarvy-telemetry
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "64k"
+    # ingress-nginx rate-limit: requests/min per source IP. Returns
+    # 503 on excess. Cloudflare's rate limit is still the primary
+    # defense; this is defense-in-depth at the cluster edge.
+    nginx.ingress.kubernetes.io/limit-rpm: "60"
+    nginx.ingress.kubernetes.io/limit-connections: "20"
+    nginx.ingress.kubernetes.io/server-snippet: |
+      # Reject any method that isn't POST.
+      if ($request_method !~ ^(POST)$) {
+        return 405;
+      }
+      # Reject any path that isn't an OTLP signal path.
+      if ($request_uri !~ ^/v1/(logs|metrics|traces)$) {
+        return 404;
+      }
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [telemetry.jarvy.dev]
+      secretName: telemetry-tls
+  rules:
+    - host: telemetry.jarvy.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: otelcol
+                port:
+                  number: 4318
+```
+
+If you use Traefik instead, the equivalents are
+`spec.middlewares[].rateLimit` and an `IPWhiteList` / regex
+middleware for the path filter. Same intent.
+
+### 7. NetworkPolicy: lock the namespace down
+
+The Collector pod should reach only:
+
+- Outbound HTTPS to Grafana Cloud OTLP gateway (e.g.
+  `otlp-gateway-prod-us-east-0.grafana.net:443`)
+- Outbound DNS
+
+It should accept only:
+
+- Inbound from the ingress controller's namespace on port 4318
+- Inbound from the Prometheus Operator's scrape pods on port 8888
+  (optional)
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: otelcol
+  namespace: jarvy-telemetry
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: otelcol
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - { protocol: TCP, port: 4318 }
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - { protocol: TCP, port: 8888 }
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+    - to: []
+      ports:
+        - { protocol: TCP, port: 443 }
+```
+
+The wide `to: []` for port 443 is intentional — pinning the egress
+to Grafana's IPs would mean re-deploying every time their LB
+rotates. If your CNI supports DNS-based egress policies (Cilium,
+Calico Enterprise), tighten this to the Grafana hostname instead.
+
+### 8. HorizontalPodAutoscaler (optional)
+
+The Collector workload tracks roughly with request rate. At Jarvy's
+expected scale this matters mostly during a release where adoption
+spikes briefly. HPA on CPU is sufficient:
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: otelcol
+  namespace: jarvy-telemetry
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: otelcol
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+```
+
+Without the metrics-server installed, this won't work. If you don't
+have metrics-server, leave the Deployment at `replicas: 2` and skip
+the HPA — Jarvy's expected load is well within a single replica's
+capacity.
+
+### 9. ServiceMonitor for self-monitoring (Prometheus Operator)
+
+If kube-prometheus-stack is installed, scrape the Collector's
+self-metrics:
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: otelcol
+  namespace: jarvy-telemetry
+  labels:
+    # Match whatever label your Prometheus instance selects on.
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: otelcol
+  endpoints:
+    - port: self-metrics
+      interval: 30s
+```
+
+Then add Grafana dashboard alerts on the same metrics listed in the
+"Monitoring the forwarder itself" section. The cluster-side
+Prometheus is a *second* observability lane: even if the upstream
+Grafana Cloud exporter is down, you still know whether the
+Collector itself is healthy.
+
+### 10. Verify end-to-end (K8s edition)
+
+```bash
+# DNS + TLS
+curl -I https://telemetry.jarvy.dev/v1/logs
+# Expect: HTTP/2 405 (method not allowed) — confirms ingress is
+# answering and the server-snippet method filter is in place.
+
+# Real OTLP-shaped POST
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"resourceLogs":[]}' \
+  https://telemetry.jarvy.dev/v1/logs
+# Expect: HTTP/2 200 with empty body — Collector accepted the
+# (empty) batch and forwarded it.
+
+# Synthetic Jarvy event
+JARVY_TELEMETRY=1 \
+JARVY_OTLP_ENDPOINT=https://telemetry.jarvy.dev \
+jarvy --version
+
+# Grafana Cloud → Explore → Loki:
+#   {service_name="jarvy"} |= "jarvy.startup"
+```
+
+If the synthetic event lands but Jarvy's real events don't, walk
+the cluster-side pipeline: `kubectl logs deploy/otelcol -n
+jarvy-telemetry`, the ingress-nginx logs, then the
+ServiceMonitor-scraped metrics. The same triage shape as the VM
+path, with `kubectl logs` standing in for `journalctl`.
+
+### Operational differences from the VM path
+
+- **Stop the bleed**: VM path is `systemctl stop otelcol`; K8s path
+  is `kubectl scale deploy/otelcol -n jarvy-telemetry --replicas=0`.
+  Either route fails clients open (telemetry is advisory; Jarvy
+  CLIs tolerate it).
+- **Rolling updates**: K8s gets `RollingUpdate` with
+  `maxUnavailable: 0` for free. VM path requires either a brief
+  outage during restart or a second VM behind a load balancer (not
+  worth it at this scale).
+- **Audit log**: VM path writes `/var/log/otelcol/audit.json` to
+  disk. K8s pods have a read-only root filesystem in the manifest
+  above; if you need an audit mirror, replace the `file/audit`
+  exporter with a sidecar that streams to a separate
+  PersistentVolume or to an S3-compatible bucket (e.g. via the
+  `awss3` exporter). Don't omit the audit lane on K8s — privacy
+  regressions are silent without it.
+- **Handoff**: when transferring forwarder ownership, the K8s
+  variant adds cluster-admin-equivalent access for the
+  `jarvy-telemetry` namespace and access to whichever secret
+  backend feeds the `ExternalSecret`. Rotate the Grafana token at
+  handoff regardless.
+
+---
+
 ## PII scrubbing checklist
 
 The forwarder enforces what the Jarvy CLI also tries to enforce. The
@@ -572,9 +1127,12 @@ When something is wrong with telemetry, the worst case is a privacy
 leak that landed in Grafana before the scrubber caught it. Triage in
 this order:
 
-1. **Stop the bleed.** `systemctl stop otelcol` on the forwarder.
-   Cloudflare WAF will return 5xx; clients fail open (telemetry is
-   advisory, not load-bearing).
+1. **Stop the bleed.**
+   - Path A (VM): `systemctl stop otelcol`.
+   - Path B (K8s): `kubectl scale deploy/otelcol -n jarvy-telemetry
+     --replicas=0`.
+   - Either way, Cloudflare returns 5xx and clients fail open
+     (telemetry is advisory, not load-bearing).
 2. **Confirm scope.** Pull the last hour of `/var/log/otelcol/audit.json`.
    Search for whatever leaked. Note which Jarvy versions are
    represented (`service.version`).
@@ -595,14 +1153,30 @@ this order:
 
 If you ever hand the forwarder to another maintainer, transfer:
 
-- Cloudflare account access (or zone access via Teams)
-- Origin VM SSH access (rotate the maintainer's key in
-  `~otelcol/.ssh/authorized_keys` and the maintainer's own
-  authorized_keys)
-- Grafana Cloud organization admin invite
-- The encrypted Grafana write token (regenerate; do not transfer the
-  old token)
-- This document, with any local deviations noted inline
+- Cloudflare account access (or zone access via Teams) — both paths
+- Grafana Cloud organization admin invite — both paths
+- The Grafana write token: **regenerate at handoff**; do not transfer
+  the old token regardless of path
+
+Path A (single VM) adds:
+
+- Origin VM SSH access (rotate the maintainer's key in their own
+  `authorized_keys`; `otelcol` user has no shell)
+- Whoever owns the cloud account hosting the VM (Hetzner / DO /
+  whichever)
+
+Path B (Kubernetes) adds:
+
+- Cluster credentials (kubeconfig context) scoped to at least the
+  `jarvy-telemetry` namespace
+- Access to the secret backend feeding the `ExternalSecret` (1Password
+  vault, Vault namespace, AWS Secrets Manager IAM, etc.) so the new
+  maintainer can rotate the Grafana token without manual injection
+- Access to the cluster's CI/CD pipeline (Argo CD, Flux, Helmfile,
+  etc.) that applies the manifests above — handing over `kubectl
+  apply -f` is a smell that suggests the manifests aren't yet in git
+
+This document with any local deviations noted inline — both paths.
 
 The forwarder is intentionally small enough that a one-week handoff is
 realistic. If it grows beyond that, the design needs a re-look — the
