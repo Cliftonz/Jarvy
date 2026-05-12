@@ -10,16 +10,20 @@ name: Deploy Docs
 # Triggers:
 #   - push to main: live docs always reflect the default branch (and the
 #     auto-generated cli-reference + tools-registry pages it carries)
-#   - push of a release tag: re-build at the tagged commit so screenshots
-#     and binary-driven pages reflect that release
 #   - workflow_dispatch: manual rebuild from any ref
+#
+# Tag pushes are intentionally NOT a trigger. The `github-pages`
+# environment has a "Deployment branches" protection rule allowing
+# only `main` — tag refs fail the Deploy step silently after 3
+# seconds with no log. The release tag's commit lands on main first
+# anyway (normal flow), so the main-push run already rebuilds the
+# site with that commit. Single-version docs site = no versioned
+# rebuild on tags. Re-add tag triggers (and configure the environment
+# to allow tag refs) only if versioning via mike comes back.
 on:
   push:
     branches:
       - main
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
-      - 'v[0-9]+.[0-9]+.[0-9]+-*'
   workflow_dispatch:
 
 permissions:
