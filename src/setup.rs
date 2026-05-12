@@ -55,8 +55,11 @@ pub fn setup() {
 }
 
 fn check_hard_dependencies(platform: &str) {
+    // `platform` is `env::consts::OS` — lowercase. Same case-mismatch
+    // bug as refresh_shell (was "macOS"); never fired on actual
+    // macOS hosts. Hard-dep check is now actually reachable.
     match platform {
-        "macOS" => {
+        "macos" => {
             let Some(output) = crate::tools::common::run_capture(
                 "brew",
                 &["--version"],
@@ -171,8 +174,13 @@ pub(crate) fn shell_single_quote(s: &str) -> Option<String> {
 }
 
 fn refresh_shell(platform: &str) {
+    // `platform` is `env::consts::OS` — lowercase ("macos", "linux",
+    // "windows"). The original arms used "macOS" (capital S) and
+    // therefore never matched, falling through to the default arm
+    // which printed a truncated "Unsupported sh" line. Match the
+    // lowercase value the constant actually carries.
     match platform {
-        "macOS" => {
+        "macos" => {
             let zprofile = env::var("ZPROFILE").unwrap_or_else(|_| {
                 let home = env::var("HOME").unwrap_or_else(|_| "~".to_string());
                 format!("{home}/.zprofile")
@@ -249,7 +257,11 @@ fn refresh_shell(platform: &str) {
             }
         }
         _ => {
-            println!("Unsupported sh")
+            // Linux / FreeBSD / unknown — shell-refresh is a no-op.
+            // The legacy "Unsupported sh" string printed here was a
+            // typo (truncated "Unsupported shell") AND was reached
+            // on macOS because the arm above checked the wrong case.
+            // Silence both bugs.
         }
     }
 }

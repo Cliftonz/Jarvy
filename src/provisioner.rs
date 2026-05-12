@@ -159,8 +159,19 @@ pub fn install_docker() {
 ///
 /// # Arguments
 /// * `compose_file` - Path to the docker-compose file. Defaults to `./docker/docker-compose.yml`.
+///
+/// If the resolved compose file does not exist, this is a no-op — the legacy
+/// `setup()` flow calls this unconditionally for backward-compat, but most
+/// projects don't have a `docker/docker-compose.yml`. Previously this branch
+/// emitted `An error occurred: open .../docker-compose.yml: no such file or
+/// directory. Please run this from the root of your repository.` even for
+/// projects that never asked Jarvy to manage compose — confusing noise that
+/// looks like a setup failure.
 pub fn start_docker_infra_with_config(compose_file: Option<&str>) {
     let compose_path = compose_file.unwrap_or("./docker/docker-compose.yml");
+    if !std::path::Path::new(compose_path).exists() {
+        return;
+    }
     let start = telemetry::now();
     let Some(docker_compose_output) = run_capture(
         "docker-compose",

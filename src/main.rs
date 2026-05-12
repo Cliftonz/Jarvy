@@ -73,7 +73,15 @@ fn main() {
 
     // Initialize after parsing arguments
     let global_config = initialize();
-    init_logging(global_config.settings.telemetry);
+    // The legacy `settings.telemetry` flag was opt-out (defaulted true),
+    // which contradicted the documented "opt-in by default" promise in
+    // CLAUDE.md and made the OTLP layer fire on every first-run install
+    // — emitting `BatchLogProcessor.ExportError: ConnectionRefused on
+    // http://localhost:4318/` for every user without a local OTLP
+    // collector. The authoritative flag is `[telemetry] enabled`, which
+    // properly defaults false (see TelemetryConfig::default). Gate OTLP
+    // init on that one instead.
+    init_logging(global_config.telemetry.enabled);
 
     // Initialize unified telemetry (OTEL-based)
     // Priority: env vars > project jarvy.toml > global ~/.jarvy/config.toml
