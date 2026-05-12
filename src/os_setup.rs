@@ -1,8 +1,6 @@
 use std::process::{Command, Output};
 use std::str;
 
-use inquire::Select;
-
 pub(crate) fn handle_output(output: &Output) {
     if !output.status.success() {
         eprintln!("Error: {}", String::from_utf8_lossy(&output.stderr));
@@ -95,35 +93,28 @@ pub fn set_up_os(platform: &str) {
             };
 
             if xcode_check.status.success() {
-                let update_xcode_prompt = Select::new(
-                    "Xcode is already installed, do you want to update it?",
-                    vec!["Yes", "No"],
-                )
-                .prompt();
-
-                println!("\n");
-
-                match update_xcode_prompt {
-                    Ok(answer) => match answer {
-                        "Yes" => match Command::new("softwareupdate").arg("-ia").spawn() {
-                            Ok(mut child) => {
-                                if let Err(e) = child.wait() {
-                                    eprintln!("Failed to wait on software update: {e}");
-                                }
-                            }
-                            Err(e) => eprintln!("Failed to start software update: {e}"),
-                        },
-                        "No" => {
-                            println!("Xcode will not be updated.");
-                        }
-                        _ => unreachable!(),
-                    },
-                    Err(_) => {
-                        println!("Could not read your response.");
-                    }
-                }
+                // Command Line Tools already installed — nothing to do.
+                // CLT updates are out of scope for `jarvy setup`: the only
+                // reason we care is that Homebrew needs CLT to exist, and
+                // it does.
+                //
+                // The previous version of this branch prompted "Xcode is
+                // already installed, do you want to update it?" and ran
+                // `softwareupdate -ia` on Yes. Two bugs there:
+                // 1. `xcode-select -p` detects CLT, not the full Xcode IDE,
+                //    so the prompt was misnamed.
+                // 2. `softwareupdate -ia` is "install **all** available
+                //    updates" — including pending macOS point releases.
+                //    Confirmed in the wild on 2026-05-12: a Yes pulled in
+                //    a full macOS Tahoe 26.5 system update (~20 min,
+                //    required sudo password) without the user realizing
+                //    that's what they were authorizing.
+                //
+                // If the user genuinely wants to update CLT, they can run
+                // `softwareupdate -l` and pick the labeled CLT entry.
+                println!("Command Line Tools for Xcode already installed.");
             } else {
-                println!("Installing Xcode...");
+                println!("Installing Command Line Tools for Xcode...");
                 match Command::new("xcode-select").args(["--install"]).spawn() {
                     Ok(mut child) => {
                         if let Err(e) = child.wait() {
