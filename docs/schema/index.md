@@ -14,7 +14,7 @@ Jarvy publishes a JSON Schema for `jarvy.toml`. Wire it into your editor and you
 **Schema URL:**
 
 ```text
-https://docs.jarvy.dev/schema/jarvy.schema.json
+https://jarvy.dev/schema/jarvy.schema.json
 ```
 
 ---
@@ -26,7 +26,7 @@ Install the [Even Better TOML](https://marketplace.visualstudio.com/items?itemNa
 ```json title=".vscode/settings.json"
 {
   "evenBetterToml.schema.associations": {
-    "jarvy.toml": "https://docs.jarvy.dev/schema/jarvy.schema.json"
+    "jarvy.toml": "https://jarvy.dev/schema/jarvy.schema.json"
   }
 }
 ```
@@ -34,7 +34,7 @@ Install the [Even Better TOML](https://marketplace.visualstudio.com/items?itemNa
 Or use the inline schema directive at the top of `jarvy.toml` (works without any settings):
 
 ```toml title="jarvy.toml"
-#:schema https://docs.jarvy.dev/schema/jarvy.schema.json
+#:schema https://jarvy.dev/schema/jarvy.schema.json
 
 [provisioner]
 node = "20"
@@ -55,7 +55,7 @@ JetBrains has built-in JSON Schema support for TOML. Add the schema in **Setting
 | Field | Value |
 |---|---|
 | **Name** | `jarvy.toml` |
-| **Schema file or URL** | `https://docs.jarvy.dev/schema/jarvy.schema.json` |
+| **Schema file or URL** | `https://jarvy.dev/schema/jarvy.schema.json` |
 | **Schema version** | JSON Schema version 7 |
 | **File path pattern** | `jarvy.toml` |
 
@@ -69,7 +69,7 @@ Use [taplo](https://taplo.tamasfe.dev/) as a TOML language server with the schem
 
 ```toml title=".taplo.toml"
 [[schema.rule]]
-url = "https://docs.jarvy.dev/schema/jarvy.schema.json"
+url = "https://jarvy.dev/schema/jarvy.schema.json"
 formats = ["toml"]
 include = ["**/jarvy.toml"]
 ```
@@ -83,7 +83,7 @@ Then start your editor with `taplo` configured as the TOML LSP. You'll get hover
 If your team is air-gapped or wants to pin to a specific Jarvy version:
 
 ```bash
-curl -fsSL https://docs.jarvy.dev/schema/jarvy.schema.json -o .jarvy/jarvy.schema.json
+curl -fsSL https://jarvy.dev/schema/jarvy.schema.json -o .jarvy/jarvy.schema.json
 ```
 
 Then point the schema URL at the local file:

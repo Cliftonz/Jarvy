@@ -118,9 +118,14 @@ required coverage until its pipeline gap closes. As of v0.1.0 soak, that
 list is:
 
 - **Homebrew** — formula references `.tar.gz` assets that `release.yml`
-  does not produce; `HOMEBREW_TAP_DEPLOY_KEY` also unset. macOS coverage
-  runs through `install.sh` and `cargo install` instead. Re-add when the
+  does not produce; `HOMEBREW_TAP_DEPLOY_KEY` also unset. Re-add when the
   pipeline produces real tarballs.
+- **`install.sh` and `install.ps1`** — both scripts build URLs for
+  `.tar.gz` (Unix) and `.zip` (Windows) tarballs that `release.yml`
+  does not produce. Same root cause as the Homebrew gap; confirmed
+  broken since v0.0.1. macOS / Linux coverage runs through
+  `cargo install --git <repo> --tag <tag>` (compiles from source)
+  instead. Re-add when the pipeline produces real tarballs.
 
 ## Pre-Soak Test Matrix
 

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://docs.jarvy.dev/schema/jarvy.schema.json",
+  "$id": "https://jarvy.dev/schema/jarvy.schema.json",
   "title": "jarvy.toml",
-  "description": "Jarvy declarative dev environment config. Matches the schema accepted by `jarvy validate`. See https://docs.jarvy.dev/configuration/ for the full reference.",
+  "description": "Jarvy declarative dev environment config. Matches the schema accepted by `jarvy validate`. See https://jarvy.dev/configuration/ for the full reference.",
   "type": "object",
   "properties": {
     "role": {

@@ -154,6 +154,39 @@ Discovered when adding a prerelease gate to `publish-packages.yml`:
 risk window for `v0.1.0-rc.10` itself is closed because the run was
 cancelled before `cargo publish` completed.
 
+## Universal install scripts are also broken pending tarballs
+
+`dist/scripts/install.sh` (line 282) builds:
+
+```bash
+https://github.com/${JARVY_REPO}/releases/download/v${version}/jarvy-v${version}-${platform}.tar.gz
+```
+
+`dist/scripts/install.ps1` builds the same pattern with `.zip`.
+Neither of these asset shapes is produced by `release.yml` — same
+gap that breaks Homebrew. Install scripts have been broken since
+v0.0.1; symptom is `curl: (56) The requested URL returned error:
+404` immediately after the "Download URL" log line.
+
+Confirmed on a fresh macOS arm64 machine 2026-05-12 trying to
+install rc.10 via `JARVY_CHANNEL=beta curl … | bash`. The
+`JARVY_CHANNEL` env var also doesn't propagate when set on the
+left of the curl invocation (sets it for curl, not for the piped
+bash) — but even if it did, the URL 404s. Use
+`curl … | JARVY_CHANNEL=beta bash` if you need the channel to
+take effect, and combine that with the upstream tarball fix.
+
+Workaround for users right now: `cargo install --git
+https://github.com/bearbinary/Jarvy --tag v0.1.0-rc.10 jarvy`
+(compiles from source).
+
+This needs to be fixed before any soak claims `install.sh` /
+`install.ps1` cohort coverage — Path 1 (fresh install) cannot
+exercise these channels until tarballs are produced. Add
+`dist/scripts/install.{sh,ps1}` to the channels excluded from
+required cohort coverage in `docs/release-testing.md` until the
+upstream tarball fix lands (same blocker as Homebrew).
+
 ## Homebrew pipeline is non-functional pending tarball artifacts
 
 The Homebrew formula in `bearbinary/homebrew-tap` is authored against

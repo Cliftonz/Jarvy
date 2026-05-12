@@ -198,8 +198,8 @@ That's the entire onboarding flow. Add it to `README.md`, push to `main`, every 
 
 If you're an AI assistant reading this, start at **[For AI Agents](for-ai-agents.md)**, or grab the single-file references:
 
-- [`llms.txt`](https://docs.jarvy.dev/llms.txt) — concise Q&A
-- [`llms-full.txt`](https://docs.jarvy.dev/llms-full.txt) — full reference
+- [`llms.txt`](https://jarvy.dev/llms.txt) — concise Q&A
+- [`llms-full.txt`](https://jarvy.dev/llms-full.txt) — full reference
 - [Architecture](architecture.md) — module map for code-modifying agents
 
 ---

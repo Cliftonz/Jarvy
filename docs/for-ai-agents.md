@@ -166,6 +166,69 @@ jarvy ci-config github         # Or: gitlab | circleci | etc.
 This emits a CI snippet the user can paste into their existing workflow,
 or a complete workflow file if they don't have one yet.
 
+### Real-world example: Node.js + bun project
+
+End state of a real integration on 2026-05-12, after running the
+8 steps above on a fresh Node + bun repo (template: `node-bun`).
+
+**Files added:**
+
+- `jarvy.toml` — declarative env config. Provisions: `git = "latest"`,
+  `nvm = "latest"`, `node = "latest"`, `bun = "latest"`. Hooks:
+  `corepack enable` post-node-install, `bun install` post-setup.
+- `.mcp.json` — registers the `jarvy mcp` server so Claude Code can
+  list / install tools via [MCP](mcp-server.md) instead of shelling
+  out.
+
+**Files modified:**
+
+- `package.json` adds three scripts that wire Jarvy into the project's
+  existing workflow:
+
+  ```jsonc
+  {
+    "scripts": {
+      "setup": "jarvy setup",
+      "predev": "command -v jarvy >/dev/null 2>&1 && jarvy setup --quiet || echo 'jarvy not installed — skipping auto-provision (run bun run setup to install)'",
+      "prebuild": "command -v jarvy >/dev/null 2>&1 && jarvy setup --quiet || echo 'jarvy not installed — skipping auto-provision'"
+    }
+  }
+  ```
+
+  - `setup` — manual `jarvy setup` invocation (`bun run setup`).
+  - `predev` — auto-runs before `bun dev`. **Gracefully skips** if
+    `jarvy` is not on PATH (lets CI and not-yet-onboarded contributors
+    proceed without a hard error).
+  - `prebuild` — same pattern for `bun run build`.
+
+**Why the graceful skip matters**: bun runs `predev` before `dev`
+automatically. If `jarvy` is missing the predev fails the whole bun
+dev startup. `command -v jarvy >/dev/null 2>&1 && … || …` makes the
+auto-provision opt-in by presence — onboarded devs get the provision;
+others see a one-line hint and move on.
+
+**Verified outputs:**
+
+- `jarvy validate` → `[OK] Configuration is valid!` (0 errors,
+  0 warnings)
+- `bun run setup` → installed nvm, ran the `corepack enable` hook
+  after node, ran `bun install` post-setup hook, wrote
+  `.jarvy/state.json` baseline so [drift detection](drift.md) can
+  surface future divergence.
+
+**Effect on team workflow:**
+
+| User | First experience |
+|------|------------------|
+| New contributor (no jarvy) | clones, runs `bun dev`, sees one-line hint, runs `bun run setup`, jarvy installs node/bun/nvm/git via native package managers + runs `bun install`, then `bun dev` works |
+| Existing dev (has jarvy) | `bun dev` triggers `jarvy setup --quiet` → no-op fast skip when satisfied, drift check passes |
+| CI runner (no jarvy) | `bun dev` / `bun run build` proceeds; hint printed; CI installs deps via its own caching path |
+
+This pattern (`pre<script>` with `command -v` graceful skip) is the
+recommended way to wire Jarvy into a project's existing
+`package.json` / `Makefile` / `justfile` without forcing every
+collaborator (or CI lane) to have Jarvy installed.
+
 ### Anti-patterns during integration
 
 - **Don't run `jarvy setup` without `--dry-run` first.** Jarvy installs

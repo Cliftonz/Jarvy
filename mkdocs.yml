@@ -80,7 +80,7 @@ extra:
       link: https://github.com/bearbinary/jarvy
       name: Jarvy on GitHub
     - icon: fontawesome/brands/x-twitter
-      link: https://twitter.com/intent/tweet?text=Check%20out%20Jarvy%20%E2%80%94%20dev%20environments%20as%20code&url=https://docs.jarvy.dev
+      link: https://twitter.com/intent/tweet?text=Check%20out%20Jarvy%20%E2%80%94%20dev%20environments%20as%20code&url=https://jarvy.dev
       name: Share on X
   generator: false
   status:
@@ -94,7 +94,7 @@ extra:
   analytics:
     provider: custom
     plausible:
-      domain: docs.jarvy.dev
+      domain: jarvy.dev
       script: https://plausible.io/js/script.js
 
 extra_css:
@@ -214,8 +214,8 @@ nav:
     - Overview: for-ai-agents.md
     - MCP server: mcp-server.md
     - Architecture: architecture.md
-    - llms.txt (concise): https://docs.jarvy.dev/llms.txt
-    - llms-full.txt (full): https://docs.jarvy.dev/llms-full.txt
+    - llms.txt (concise): https://jarvy.dev/llms.txt
+    - llms-full.txt (full): https://jarvy.dev/llms-full.txt
 
   - Comparisons:
     - Overview: competitors/competitive-analysis.md

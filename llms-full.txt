@@ -1,10 +1,10 @@
 # Jarvy — Full LLM Reference
 
-> Single-file flat reference for AI agents. Optimized for one-shot context injection. For human-readable docs see https://docs.jarvy.dev. For interactive AI integration use the MCP server (`jarvy mcp`).
+> Single-file flat reference for AI agents. Optimized for one-shot context injection. For human-readable docs see https://jarvy.dev. For interactive AI integration use the MCP server (`jarvy mcp`).
 
 Jarvy is a fast, Rust-based, cross-platform CLI that provisions local development environments from a declarative `jarvy.toml` config file. It runs on macOS, Linux, and Windows, using each platform's native package managers (Homebrew, apt, dnf, pacman, apk, winget, Chocolatey, Scoop). It is MIT/Apache-2.0 licensed and hosted at https://github.com/bearbinary/jarvy.
 
-This file is the canonical machine-consumption reference. It mirrors `https://docs.jarvy.dev` but flattened for easy ingestion.
+This file is the canonical machine-consumption reference. It mirrors `https://jarvy.dev` but flattened for easy ingestion.
 
 ---
 
@@ -100,7 +100,7 @@ Step 2. Detect the project's stack from lockfiles / manifests:
           React/Vite              → react-app
           mixed FE+BE monorepo    → fullstack
           Terraform/Helm/K8s repo → k8s-platform
-        Full table: https://docs.jarvy.dev/templates-index/#decision-table
+        Full table: https://jarvy.dev/templates-index/#decision-table
 
 Step 3. Fetch the template into the project:
           TEMPLATE=<picked>
@@ -146,7 +146,51 @@ tools the registry already has (run `jarvy search <tool>`); do not
 bypass roles when teammates need different tool sets.
 
 Full walkthrough with rationale and per-step anti-patterns:
-https://docs.jarvy.dev/for-ai-agents/#integration-quickstart-integrate-jarvy-into-this-project
+https://jarvy.dev/for-ai-agents/#integration-quickstart-integrate-jarvy-into-this-project
+
+### Real-world integration example (Node.js + bun)
+
+End state of a verified integration into a Node + bun project on
+2026-05-12 using the `node-bun` template:
+
+Added:
+  jarvy.toml      — provisions git, nvm, node, bun (all "latest").
+                    Hooks: corepack enable post-node-install,
+                    bun install post-setup.
+  .mcp.json       — registers `jarvy mcp` server for Claude Code
+                    AI integration.
+
+Modified `package.json` scripts:
+
+  "setup":    "jarvy setup"
+  "predev":   "command -v jarvy >/dev/null 2>&1 && jarvy setup --quiet || echo 'jarvy not installed — skipping auto-provision (run bun run setup to install)'"
+  "prebuild": "command -v jarvy >/dev/null 2>&1 && jarvy setup --quiet || echo 'jarvy not installed — skipping auto-provision'"
+
+Why graceful skip: bun runs `predev` before `dev` automatically. A
+hard failure when jarvy is missing would block contributors who
+have not yet installed jarvy and would break CI lanes. The
+`command -v jarvy && … || …` form makes auto-provision opt-in by
+presence.
+
+Verified:
+  - `jarvy validate` → [OK] Configuration is valid! (0 errors,
+    0 warnings)
+  - `bun run setup` → installed nvm, ran corepack hook after node,
+    ran bun install post-setup hook, wrote .jarvy/state.json drift
+    baseline.
+
+User flows after integration:
+  - New contributor (no jarvy): clones, runs `bun dev`, sees hint,
+    runs `bun run setup`, jarvy installs node/bun/nvm/git via
+    native package managers + runs bun install, then bun dev works.
+  - Existing dev (has jarvy): `bun dev` triggers `jarvy setup
+    --quiet` → no-op fast skip when satisfied; drift check passes.
+  - CI runner (no jarvy): bun dev / bun run build proceed with hint
+    printed; CI installs deps via its own caching path.
+
+This pre<script>+graceful-skip pattern is the recommended way to
+wire Jarvy into existing package.json / Makefile / justfile without
+forcing every collaborator or CI lane to have Jarvy installed.
 
 ### Templates
 
@@ -955,7 +999,7 @@ curl -fsSL https://raw.githubusercontent.com/bearbinary/jarvy/main/examples/<nam
 ```
 
 Each template ships `[provisioner]`, `[<lang-pkg>]`, `[hooks]`, `[env.vars]`,
-`[commands]`, `[drift]`. See https://docs.jarvy.dev/templates-index/ for the
+`[commands]`, `[drift]`. See https://jarvy.dev/templates-index/ for the
 full decision table.
 
 ---
@@ -963,7 +1007,7 @@ full decision table.
 ## 14. Links
 
 - Website: https://jarvy.dev
-- Documentation: https://docs.jarvy.dev
+- Documentation: https://jarvy.dev
 - Repository: https://github.com/bearbinary/jarvy
 - Issues: https://github.com/bearbinary/jarvy/issues
 - llms.txt (concise): https://github.com/bearbinary/jarvy/blob/main/llms.txt
