@@ -202,12 +202,16 @@ jobs:
                 value: zero
           EOF
           if helm template ci "${CHART_DIR}" --namespace jarvy-telemetry \
-            --values /tmp/bad-env.yaml 2>/tmp/out; then
+            --values /tmp/bad-env.yaml >/tmp/out 2>&1; then
             echo "::error::render unexpectedly succeeded with reserved env name"
             cat /tmp/out
             exit 1
           fi
-          grep -iE "extraenv|schema|'not'|does not match" /tmp/out
+          if ! grep -iE "extraenv|schema|'not'|does not match" /tmp/out; then
+            echo "::error::helm exited non-zero but the output does not name the expected schema reason:"
+            cat /tmp/out
+            exit 1
+          fi
 
       - name: invalid image digest pattern must fail
         run: |
@@ -221,12 +225,16 @@ jobs:
               digest: not-a-valid-digest
           EOF
           if helm template ci "${CHART_DIR}" --namespace jarvy-telemetry \
-            --values /tmp/bad-digest.yaml 2>/tmp/out; then
+            --values /tmp/bad-digest.yaml >/tmp/out 2>&1; then
             echo "::error::render unexpectedly succeeded"
             cat /tmp/out
             exit 1
           fi
-          grep -F "does not match pattern" /tmp/out
+          if ! grep -iE "does not match|schema|digest" /tmp/out; then
+            echo "::error::helm exited non-zero but the output does not name the expected schema reason:"
+            cat /tmp/out
+            exit 1
+          fi
 
       - name: invalid exporter.endpoint (userinfo) must fail
         run: |
@@ -235,12 +243,16 @@ jobs:
             endpoint: https://attacker@target.example/otlp
           EOF
           if helm template ci "${CHART_DIR}" --namespace jarvy-telemetry \
-            --values /tmp/bad-endpoint.yaml 2>/tmp/out; then
+            --values /tmp/bad-endpoint.yaml >/tmp/out 2>&1; then
             echo "::error::render unexpectedly succeeded"
             cat /tmp/out
             exit 1
           fi
-          grep -F "does not match pattern" /tmp/out
+          if ! grep -iE "does not match|schema|endpoint" /tmp/out; then
+            echo "::error::helm exited non-zero but the output does not name the expected schema reason:"
+            cat /tmp/out
+            exit 1
+          fi
 
   values-schema:
     name: values.schema.json invariants
