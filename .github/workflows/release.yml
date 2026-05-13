@@ -131,7 +131,7 @@ jobs:
 
       - name: Set PKG_CONFIG_SYSROOT_DIR (cross only)
         if: matrix.cross && matrix.sysroot != ''
-        run: echo "PKG_CONFIG_SYSROOT_DIR=${{ matrix.sysroot }}" >> $GITHUB_ENV
+        run: echo "PKG_CONFIG_SYSROOT_DIR=${{ matrix.sysroot }}" >> "$GITHUB_ENV"
 
       - name: Install app dependencies
         # Prebuilt binaries via taiki-e/install-action drop the install step
