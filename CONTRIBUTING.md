@@ -74,6 +74,48 @@ PROPTEST_CASES=10000 cargo test --test property
 - Document the properties being tested
 - Use shrinking to find minimal failing inputs
 
+### Sandbox Integration Tests
+
+`tests/sandbox_integration.rs` exercises the sandbox detector and
+verify-only / auto-baseline paths (PRD-053) against real Docker
+containers. Linux CI runners pick this up automatically as part of
+`cargo test`. macOS / Apple Silicon contributors need a cross-built
+Linux binary so the container exec doesn't get a mach-o binary it
+can't run.
+
+```bash
+# One-time: install cross (Docker-based Rust cross-compiler)
+cargo install cross --git https://github.com/cross-rs/cross
+
+# Cross-build the Linux jarvy + run the sandbox integration suite
+make test-sandbox
+```
+
+`make test-sandbox` cross-builds for `aarch64-unknown-linux-gnu` by
+default (native on Apple Silicon — no QEMU emulation). To target
+x86_64 instead, override the target:
+
+```bash
+make test-sandbox SANDBOX_TARGET=x86_64-unknown-linux-gnu
+```
+
+The harness skips with a printed reason when Docker is unreachable
+or when the resolved jarvy binary is not a Linux ELF, so a stray
+`cargo test` on macOS without the cross setup never paints the
+suite red.
+
+**Required:**
+- Docker Desktop (or any Docker daemon) running
+- `cross` installed (one-time)
+
+**Optional debug knobs:**
+- `JARVY_TEST_BIN=/absolute/path/to/jarvy` — bypass the Makefile and
+  point at any pre-built Linux jarvy binary
+- `JARVY_FORCE_VERIFY_ONLY=1` — used by the verify-only branch tests
+  to force the install-capability probe into `VerifyOnly`
+- `JARVY_SANDBOX=1` — used by tests to force seamless mode regardless
+  of the runner's own env
+
 ### Fuzz Testing
 
 We use `cargo-fuzz` with libfuzzer for fuzz testing. Requires nightly Rust.

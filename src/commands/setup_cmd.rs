@@ -172,6 +172,74 @@ pub fn run_setup(
     // Report version check results
     println!("{}", version_check.summary_string());
 
+    // Verify-only fallback (PRD-053). If we're in a sandbox that
+    // can't install (read-only rootfs, sudoless + no user-scope
+    // package manager), don't even try — report gaps and exit. The
+    // doctor pipeline ran inline as `version_check` above, so we
+    // already know what's missing.
+    //
+    // Auto-baseline runs *inside* this branch on the success path
+    // too: a pre-loaded sandbox image that already satisfies the
+    // config should leave behind a drift baseline regardless of
+    // whether installs were possible, because subsequent sessions
+    // need that baseline to do meaningful drift checks.
+    if !dry_run
+        && let Some(env) = crate::sandbox::detect()
+        && let crate::sandbox::InstallCapability::VerifyOnly(reason) =
+            crate::sandbox::install_capability()
+    {
+        if version_check.needs_install.is_empty() && version_check.unknown.is_empty() {
+            let project_dir = std::path::Path::new(file)
+                .parent()
+                .unwrap_or(std::path::Path::new("."));
+            if !crate::paths::state_json(project_dir).exists() {
+                let known_tools_for_baseline: Vec<(&String, &crate::config::Tool)> = tool_configs
+                    .iter()
+                    .filter(|(_, t)| tools::get_tool(&t.name).is_some())
+                    .collect();
+                capture_drift_baseline_borrowed(
+                    project_dir,
+                    &known_tools_for_baseline,
+                    &[],
+                    /* auto = */ true,
+                );
+            }
+            tracing::info!(
+                event = "setup.verify_only.passed",
+                provider = %env.provider,
+                reason = %reason,
+                "sandbox verify-only mode passed; all configured tools present"
+            );
+            eprintln!(
+                "[jarvy] sandbox cannot install tools (read-only or no package manager); \
+                 all configured tools already present — verify-only mode passed"
+            );
+            return error_codes::EXIT_SUCCESS;
+        } else {
+            // Build the missing list once into a single buffer; avoids
+            // intermediate Vec<&str> + String allocation pair.
+            let mut missing = String::with_capacity(64);
+            for (i, (n, _)) in version_check.needs_install.iter().enumerate() {
+                if i > 0 {
+                    missing.push_str(", ");
+                }
+                missing.push_str(n);
+            }
+            tracing::warn!(
+                event = "setup.verify_only.refused",
+                provider = %env.provider,
+                reason = %reason,
+                missing = %missing,
+                "sandbox cannot install tools"
+            );
+            eprintln!(
+                "[jarvy] sandbox cannot install tools (read-only or no package manager); \
+                 missing: {missing}"
+            );
+            return error_codes::PREREQ_MISSING;
+        }
+    }
+
     // Log already-satisfied tools (verbose mode)
     if !version_check.satisfied.is_empty() {
         println!(
@@ -185,7 +253,11 @@ pub fn run_setup(
         );
     }
 
-    // Log unknown tools - critical for MCP feedback loop
+    // Log unknown tools - critical for MCP feedback loop. Suppress
+    // the telemetry-disabled nag in seamless mode (PRD-053) — those
+    // environments are usually multi-tenant or ephemeral, and the
+    // nag is noise the operator can't act on.
+    let seamless = crate::sandbox::is_seamless();
     for (name, version) in &version_check.unknown {
         let msg = format!(
             "We do not currently have support for {} package but we have logged it and will be adding it soon.",
@@ -194,7 +266,7 @@ pub fn run_setup(
         eprintln!("{}", msg);
         // Emit telemetry for unknown tool (used by MCP feedback)
         telemetry::tool_not_supported(name, Some(version), telemetry::Source::Config);
-        if !telemetry::is_enabled() {
+        if !telemetry::is_enabled() && !seamless {
             eprintln!(
                 "Telemetry is disabled. Please consider creating a feature request here: https://github.com/bearbinary/Jarvy/issues/new"
             );
@@ -534,12 +606,12 @@ pub fn run_setup(
         // Build environment context
         let ctx = EnvContext::new();
 
-        // Collect secrets if any (skip in CI mode or if dry run)
+        // Collect secrets if any (skip in unattended mode or dry run).
+        // Reuse SecretsConfig::default()'s ci_mode (which already
+        // routes through sandbox::is_seamless per PRD-053) and OR in
+        // dry-run; only fail_on_missing differs from the default.
         let secrets_config = SecretsConfig {
-            ci_mode: std::env::var("CI").is_ok()
-                || std::env::var("JARVY_CI").is_ok()
-                || std::env::var("JARVY_TEST_MODE").is_ok()
-                || dry_run,
+            ci_mode: SecretsConfig::default().ci_mode || dry_run,
             fail_on_missing: false,
         };
 
@@ -644,55 +716,29 @@ pub fn run_setup(
         }
     }
 
-    // Capture environment state for drift detection
+    // Capture environment state for drift detection. Normally gated
+    // on `[drift].enabled` in jarvy.toml, but in seamless mode
+    // (sandbox or CI) we auto-baseline on first run when the
+    // version_check came back clean — turning a pre-loaded sandbox
+    // image into a drift-trackable baseline without the operator
+    // running `jarvy drift accept` at image bake time (PRD-053).
     if !dry_run {
         let drift_config = config.drift.clone().unwrap_or_default();
-        if drift_config.enabled {
-            let project_dir = std::path::Path::new(file)
-                .parent()
-                .unwrap_or(std::path::Path::new("."));
-
-            let mut state = crate::drift::EnvironmentState::new();
-
-            // Capture tool states
-            for (tool_name, tool) in &known_tools {
-                if let Ok(path) = which::which(tool_name) {
-                    state.set_tool(
-                        tool_name,
-                        &tool.version,
-                        &path,
-                        &detect_install_method(tool_name),
-                    );
-                }
-            }
-
-            // Capture tracked file hashes
-            for file_path in &drift_config.track_files {
-                let full_path = project_dir.join(file_path);
-                if full_path.exists() {
-                    if let Ok(hash) = crate::drift::state::hash_file(&full_path) {
-                        state.set_file_hash(file_path, &hash);
-                    }
-                }
-            }
-
-            // Capture config file hash
-            let config_path = project_dir.join("jarvy.toml");
-            if config_path.exists() {
-                if let Ok(hash) = crate::drift::state::hash_file(&config_path) {
-                    state.set_config_hash(&hash);
-                }
-            }
-
-            // Save state
-            if let Err(e) = state.save(project_dir) {
-                eprintln!("Warning: Could not save drift detection state: {}", e);
-            } else {
-                println!(
-                    "\nDrift detection baseline captured ({} tools)",
-                    state.tool_count()
-                );
-            }
+        let project_dir = std::path::Path::new(file)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let auto_baseline_eligible = !drift_config.enabled
+            && crate::sandbox::is_seamless()
+            && version_check.needs_install.is_empty()
+            && version_check.unknown.is_empty()
+            && !crate::paths::state_json(project_dir).exists();
+        if drift_config.enabled || auto_baseline_eligible {
+            capture_drift_baseline(
+                project_dir,
+                &known_tools,
+                &drift_config.track_files,
+                auto_baseline_eligible,
+            );
         }
     }
 
@@ -875,6 +921,87 @@ fn run_services_phase(config: &Config, file: &str, is_ci: bool, dry_run: bool) {
 /// onto this one source of truth.
 fn detect_install_method(tool: &str) -> String {
     crate::tools::install_method::detect_install_method_for_tool(tool).to_string()
+}
+
+/// Capture a drift baseline (`.jarvy/state.json`) for the project.
+///
+/// `auto` distinguishes the seamless-mode silent auto-baseline (one
+/// stderr line, `[jarvy] auto-baselined ...`) from the explicit
+/// `[drift].enabled = true` path (full stdout summary). Both write
+/// the same on-disk state file.
+fn capture_drift_baseline(
+    project_dir: &std::path::Path,
+    known_tools: &[(String, crate::config::Tool)],
+    track_files: &[String],
+    auto: bool,
+) {
+    let borrowed: Vec<(&String, &crate::config::Tool)> =
+        known_tools.iter().map(|(k, v)| (k, v)).collect();
+    capture_drift_baseline_borrowed(project_dir, &borrowed, track_files, auto)
+}
+
+/// Borrow-based variant of `capture_drift_baseline` — lets the
+/// verify-only auto-baseline path filter `tool_configs` without
+/// deep-cloning every entry. Same on-disk output shape.
+fn capture_drift_baseline_borrowed(
+    project_dir: &std::path::Path,
+    known_tools: &[(&String, &crate::config::Tool)],
+    track_files: &[String],
+    auto: bool,
+) {
+    let mut state = crate::drift::EnvironmentState::new();
+    for (tool_name, tool) in known_tools {
+        if let Ok(path) = which::which(tool_name.as_str()) {
+            state.set_tool(
+                tool_name,
+                &tool.version,
+                &path,
+                &detect_install_method(tool_name),
+            );
+        }
+    }
+    for file_path in track_files {
+        let full_path = project_dir.join(file_path);
+        if full_path.exists()
+            && let Ok(hash) = crate::drift::state::hash_file(&full_path)
+        {
+            state.set_file_hash(file_path, &hash);
+        }
+    }
+    let config_path = project_dir.join("jarvy.toml");
+    if config_path.exists()
+        && let Ok(hash) = crate::drift::state::hash_file(&config_path)
+    {
+        state.set_config_hash(&hash);
+    }
+    match state.save(project_dir) {
+        Err(e) => eprintln!("Warning: Could not save drift detection state: {}", e),
+        Ok(()) if auto => {
+            tracing::info!(
+                event = "drift.baseline.auto_captured",
+                tool_count = state.tool_count(),
+                provider = %crate::sandbox::detect()
+                    .map(|e| e.provider.to_string())
+                    .unwrap_or_default(),
+                "auto-baselined drift state for seamless mode"
+            );
+            eprintln!(
+                "[jarvy] auto-baselined drift state for seamless mode ({} tools)",
+                state.tool_count()
+            );
+        }
+        Ok(()) => {
+            tracing::info!(
+                event = "drift.baseline.captured",
+                tool_count = state.tool_count(),
+                "drift detection baseline captured"
+            );
+            println!(
+                "\nDrift detection baseline captured ({} tools)",
+                state.tool_count()
+            );
+        }
+    }
 }
 
 #[cfg(test)]

@@ -190,15 +190,14 @@ fn print_plain_banner<W: Write>(w: &mut W) {
 /// Returns false if:
 /// - quiet mode is enabled
 /// - JSON format is requested
-/// - running in CI
+/// - running in any unattended environment (CI or sandbox; PRD-053)
 /// - show_welcome config is false
 pub fn should_show_welcome(quiet: bool, json_format: bool) -> bool {
     if quiet || json_format {
         return false;
     }
 
-    // Check CI environment
-    if std::env::var("CI").is_ok() {
+    if crate::sandbox::is_seamless() {
         return false;
     }
 

@@ -1,4 +1,5 @@
 // Re-export public modules for use by integration tests and external crates
+pub mod ci;
 pub mod drift;
 pub mod git;
 pub mod logging;
@@ -7,6 +8,7 @@ pub mod network;
 pub mod observability;
 pub mod packages;
 pub mod paths;
+pub mod sandbox;
 pub mod security;
 pub mod ticket;
 pub mod tools;

@@ -9,26 +9,79 @@
 //! This is the natural seam for future XDG migration and for a
 //! `JARVY_HOME` env override.
 
-use std::path::PathBuf;
+use std::path::{Component, PathBuf};
 
 /// Internal constant for the base directory name.
 const JARVY_DIR: &str = ".jarvy";
 
 /// Returned when `dirs::home_dir()` cannot be resolved (rare; running as
-/// `nobody`, certain container images, etc.).
+/// `nobody`, certain container images, etc.) OR when `JARVY_HOME` is
+/// rejected as unsafe.
 #[derive(Debug, thiserror::Error)]
 #[error("cannot determine home directory")]
 pub struct NoHomeDir;
 
 /// `~/.jarvy/`. Honors `JARVY_HOME` if set so the user can override the
 /// base location for tests and ad-hoc isolation.
+///
+/// `JARVY_HOME` is treated as a trust-boundary input: rejected if not
+/// absolute or if it contains `..` traversal components. On Unix, if
+/// the path already exists, ownership must match the current uid —
+/// prevents `sudo -E jarvy ...` style attacks where a less-privileged
+/// actor's env points a privileged jarvy run at e.g. `/etc` or
+/// `/root/.ssh`. See PRD-053 security review F2.
 pub fn jarvy_home() -> Result<PathBuf, NoHomeDir> {
     if let Ok(custom) = std::env::var("JARVY_HOME") {
-        if !custom.trim().is_empty() {
-            return Ok(PathBuf::from(custom));
+        let trimmed = custom.trim();
+        if !trimmed.is_empty() {
+            let p = PathBuf::from(trimmed);
+            if !is_safe_jarvy_home(&p) {
+                return Err(NoHomeDir);
+            }
+            return Ok(p);
         }
     }
     dirs::home_dir().map(|h| h.join(JARVY_DIR)).ok_or(NoHomeDir)
+}
+
+/// Validate a `JARVY_HOME` override: must be absolute, must not contain
+/// `..` components, and (on Unix, if it exists) must be owned by the
+/// current uid. Returns true if safe to use.
+fn is_safe_jarvy_home(p: &std::path::Path) -> bool {
+    if !p.is_absolute() {
+        return false;
+    }
+    if p.components().any(|c| matches!(c, Component::ParentDir)) {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        // Only check ownership if the path already exists; if jarvy
+        // is the one creating it, the new dir will be owned by the
+        // current uid by definition.
+        if let Ok(meta) = std::fs::symlink_metadata(p)
+            && meta.uid() != current_uid()
+        {
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(unix)]
+fn current_uid() -> u32 {
+    // Avoid pulling in `libc` for one syscall. `getuid` is linked by
+    // default via the platform libc on all Unix Rust targets we care
+    // about; declaring it locally as an `unsafe extern "C"` block is
+    // sufficient under Rust 2024 edition rules.
+    #[allow(unsafe_code)]
+    unsafe {
+        unsafe extern "C" {
+            fn getuid() -> u32;
+        }
+        getuid()
+    }
 }
 
 /// `~/.jarvy/config.toml` — global user config.
@@ -143,10 +196,10 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(jarvy_home_env)]
     fn derived_paths_share_jarvy_home() {
-        // Don't rely on actual env; just check the suffixes are right.
-        // We don't expect this in CI to use JARVY_HOME, so the default
-        // ~/.jarvy/<x> shape is what we verify.
+        // Serialized via #[serial(jarvy_home_env)] so the sibling override
+        // test can't mutate JARVY_HOME mid-assertion.
         if std::env::var("JARVY_HOME").is_ok() {
             return;
         }

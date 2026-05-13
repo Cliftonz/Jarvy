@@ -14,16 +14,14 @@ pub const HOMEBREW_INSTALLER_COMMIT: &str = "540da2ca91271886910572df3a50332540c
 pub const HOMEBREW_INSTALLER_SHA256: &str =
     "dfd5145fe2aa5956a600e35848765273f5798ce6def01bd08ecec088a1268d91";
 
-/// Returns true if `jarvy` is running in a CI environment. Auto-fetching an
-/// installer script in CI is too high-risk because the user often can't
-/// audit what landed.
-fn in_ci() -> bool {
-    std::env::var("CI").is_ok() || std::env::var("GITHUB_ACTIONS").is_ok()
-}
-
 /// Returns true if auto-installing brew in this environment is allowed.
+///
+/// Disallowed in any unattended environment — CI runners AND AI/dev
+/// sandboxes (Codespaces, Claude Code, Cursor, e2b, etc.). The risk
+/// is the same in both: an installer script that lands code on the
+/// host with no human to audit it. See PRD-053.
 pub fn brew_auto_install_allowed() -> bool {
-    !in_ci()
+    !crate::sandbox::is_seamless()
 }
 
 /// Build the bash one-liner that fetches the pinned Homebrew installer,

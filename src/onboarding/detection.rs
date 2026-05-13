@@ -15,8 +15,9 @@ const FIRST_RUN_MARKER: &str = ".jarvy_initialized";
 ///
 /// Returns true if the marker file does not exist in the config directory.
 pub fn is_first_run() -> bool {
-    // Skip first-run detection in CI environments
-    if is_ci_environment() {
+    // Skip first-run logic in any unattended environment (CI runner or
+    // AI/dev sandbox). See PRD-053.
+    if crate::sandbox::is_seamless() {
         return false;
     }
 
@@ -57,13 +58,6 @@ fn get_marker_path() -> Option<std::path::PathBuf> {
     crate::paths::jarvy_home()
         .ok()
         .map(|h| h.join(FIRST_RUN_MARKER))
-}
-
-/// Check if we're running in a CI environment. Delegates to the canonical
-/// detector in `crate::ci` so onboarding's first-run logic stays in sync
-/// with `update`, `telemetry`, and `setup` heuristics.
-fn is_ci_environment() -> bool {
-    crate::ci::is_ci()
 }
 
 /// Type of project detected in the current directory
@@ -375,12 +369,5 @@ mod tests {
         assert_eq!(ProjectType::Rust.suggested_template(), Some("rust-cli"));
         assert_eq!(ProjectType::Go.suggested_template(), Some("go-api"));
         assert_eq!(ProjectType::Unknown.suggested_template(), Some("essential"));
-    }
-
-    #[test]
-    fn test_is_ci_environment() {
-        // This test just verifies the function doesn't panic
-        // Actual CI detection depends on environment
-        let _ = is_ci_environment();
     }
 }

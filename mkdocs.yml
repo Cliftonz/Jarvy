@@ -213,6 +213,7 @@ nav:
   - For AI Agents:
     - Overview: for-ai-agents.md
     - MCP server: mcp-server.md
+    - AI sandboxes: ai-sandboxes.md
     - Architecture: architecture.md
     - llms.txt (concise): https://jarvy.dev/llms.txt
     - llms-full.txt (full): https://jarvy.dev/llms-full.txt

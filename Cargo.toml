@@ -81,6 +81,14 @@ proptest = "1.11"
 criterion = { version = "0.8", features = ["html_reports"] }
 serial_test = "3.2"
 
+# Integration tests for src/sandbox capability probe (PRD-053).
+# Used by tests/sandbox_integration.rs to spin real containers and
+# assert verify-only / auto-baseline / banner behavior. Cross-platform:
+# CI Linux runners exercise it directly; macOS/Apple-Silicon devs run
+# it via `make test-sandbox` (cross-compiled aarch64-linux binary
+# mounted into an arm64 debian container, native, no emulation).
+testcontainers = { version = "0.27", features = ["blocking"] }
+
 [[bench]]
 name = "config_parsing"
 harness = false

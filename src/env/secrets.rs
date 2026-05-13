@@ -83,10 +83,13 @@ pub struct SecretsConfig {
 
 impl Default for SecretsConfig {
     fn default() -> Self {
+        // `ci_mode` here means "don't prompt; rely on env-supplied
+        // secrets only." That semantic matches every unattended
+        // environment, not just CI runners — AI sandboxes have no
+        // human to type a secret either. Route through the canonical
+        // unattended predicate (PRD-053).
         Self {
-            ci_mode: std::env::var("CI").is_ok()
-                || std::env::var("JARVY_CI").is_ok()
-                || std::env::var("JARVY_TEST_MODE").is_ok(),
+            ci_mode: crate::sandbox::is_seamless() || std::env::var("JARVY_TEST_MODE").is_ok(),
             fail_on_missing: true,
         }
     }

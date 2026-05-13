@@ -35,6 +35,7 @@ mod provisioner;
 pub mod remote;
 mod report;
 mod roles;
+mod sandbox;
 mod security;
 mod services;
 mod setup;
@@ -126,11 +127,49 @@ fn main() {
     }
     telemetry::init(telemetry_config);
 
-    // Install panic hook
+    // Install panic hook BEFORE the banner so any (currently hard-to-
+    // hit) stderr-emission failure produces a structured panic
+    // message instead of a default Rust backtrace dump.
     std::panic::set_hook(Box::new(|info| {
         eprintln!("Jarvy panic: {}", info);
         tracing::error!(event = "panic", message = %info);
     }));
+
+    // Seamless-mode banner: if Jarvy detects an AI sandbox or
+    // long-running container env, surface one line so the operator
+    // understands why prompts/telemetry/update checks are off.
+    // Suppressed when the invocation is already quiet or asks for
+    // structured output (which goes to stdout — keep stderr quiet).
+    // The tracing event in `sandbox::detect()` fires regardless of
+    // muting, so jarvy.log records the decision even for `--json`
+    // consumers. See PRD-053.
+    if let Some(sb) = sandbox::detect() {
+        // Walk argv with peek so `--format json` (space form) is
+        // recognised alongside `--format=json` (equals form).
+        let mut muted = std::env::var("JARVY_QUIET").as_deref() == Ok("1");
+        if !muted {
+            let mut prev_was_format_flag = false;
+            for a in std::env::args() {
+                if a == "--quiet"
+                    || a == "-q"
+                    || a == "--json"
+                    || a.starts_with("--format=json")
+                    || a.starts_with("--log-format=json")
+                {
+                    muted = true;
+                    break;
+                }
+                if prev_was_format_flag && a == "json" {
+                    muted = true;
+                    break;
+                }
+                prev_was_format_flag = a == "--format" || a == "--log-format";
+            }
+        }
+        if !muted {
+            sandbox::print_banner_once(&sb);
+        }
+    }
 
     // Telemetry smoke test
     if std::env::var("JARVY_TELEMETRY_SMOKE").as_deref() == Ok("1") {

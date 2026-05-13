@@ -128,12 +128,17 @@ impl TelemetryConfig {
             }
         }
 
-        // CI-aware: auto-disable in CI unless explicitly enabled
-        if env::var("CI").is_ok() || env::var("GITHUB_ACTIONS").is_ok() {
-            // If JARVY_TELEMETRY is not explicitly set, disable in CI
-            if env::var("JARVY_TELEMETRY").is_err() {
-                config.enabled = false;
-            }
+        // Unattended-mode auto-disable: covers CI runners AND modern
+        // AI agent sandboxes (Codespaces, Claude Code, Cursor, e2b,
+        // etc.). See `crate::sandbox::is_seamless_auto` and PRD-053.
+        //
+        // Uses the `_auto` variant: a hostile dotfile or compromised
+        // devcontainer image that sets `JARVY_SANDBOX=1` should not
+        // silently silence telemetry on a victim's machine. Forced
+        // sandbox requires explicit `JARVY_TELEMETRY=0`. If
+        // `JARVY_TELEMETRY` is set, the user's choice wins either way.
+        if crate::sandbox::is_seamless_auto() && env::var("JARVY_TELEMETRY").is_err() {
+            config.enabled = false;
         }
 
         config
@@ -1136,7 +1141,7 @@ mod tests {
     fn test_telemetry_config_default() {
         let config = TelemetryConfig::default();
         assert!(!config.enabled);
-        assert_eq!(config.endpoint, "http://localhost:4318");
+        assert_eq!(config.endpoint, "https://telemetry.jarvy.dev");
         assert_eq!(config.protocol, "http");
         assert!(config.logs);
         assert!(config.metrics);

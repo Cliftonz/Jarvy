@@ -217,8 +217,13 @@ impl UpdateConfig {
             }
         }
 
-        // CI detection - disable updates in CI by default
-        if is_ci_environment() && env::var("JARVY_UPDATE").is_err() {
+        // Unattended-mode auto-disable: covers CI runners AND sandbox
+        // environments (Codespaces, Claude Code, e2b, etc.). Uses the
+        // `_auto` variant so a hostile env that forces `JARVY_SANDBOX=1`
+        // cannot silence security-patch self-updates on a victim's
+        // machine — forced sandbox requires explicit `JARVY_UPDATE=0`.
+        // See `crate::sandbox::is_seamless_auto` and PRD-053.
+        if crate::sandbox::is_seamless_auto() && env::var("JARVY_UPDATE").is_err() {
             self.enabled = false;
         }
     }
@@ -265,18 +270,6 @@ impl UpdateConfig {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::write(&config_path, content)
     }
-}
-
-/// Detect if running in a CI environment.
-///
-/// Delegates to the canonical detector in `crate::ci`. The local copy
-/// previously drifted from the canonical detector (different provider
-/// list), making "are we in CI" semantics inconsistent across `update`,
-/// `telemetry`, `secrets`, and `setup`. Keeping it here as a thin
-/// re-export preserves the public function name for callers but routes
-/// detection through one source of truth.
-pub fn is_ci_environment() -> bool {
-    crate::ci::is_ci()
 }
 
 /// Check if running in interactive mode (TTY available)

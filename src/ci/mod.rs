@@ -15,7 +15,6 @@ pub use config::{CiConfigError, CiConfigTemplate, generate_ci_config};
 #[allow(unused_imports)]
 pub use output::{CiOutput, GroupGuard};
 
-use crate::telemetry;
 use std::env;
 
 /// Supported CI/CD providers
@@ -223,6 +222,44 @@ impl CiEnvironment {
 /// 3. Check specific provider variables (in order of popularity)
 /// 4. Check generic CI=true as fallback
 pub fn detect() -> Option<CiEnvironment> {
+    cached_detect()
+}
+
+#[cfg(not(test))]
+fn cached_detect() -> Option<CiEnvironment> {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<Option<CiEnvironment>> = OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let ci_env = detect_uncached();
+            // Emit telemetry inside the cache initializer so it fires
+            // at most once per process — was duplicated previously
+            // when `is_seamless()` callers re-entered `detect()` from
+            // multiple subsystems. `tracing::info!` here is the same
+            // event shape that `telemetry::ci_detected` would emit;
+            // the OTLP subscriber will pick it up if enabled.
+            if let Some(ref env) = ci_env {
+                tracing::info!(
+                    event = "ci.detected",
+                    provider = %env.provider.name(),
+                    build_id = %env.build_id.as_deref().unwrap_or("unknown"),
+                    branch = %env.branch.as_deref().unwrap_or("unknown"),
+                );
+            }
+            ci_env
+        })
+        .clone()
+}
+
+#[cfg(test)]
+fn cached_detect() -> Option<CiEnvironment> {
+    // Tests need fresh detection per call — they mutate env then
+    // re-call. Telemetry is suppressed in tests, so the duplicate-
+    // event concern of the prod path doesn't apply.
+    detect_uncached()
+}
+
+fn detect_uncached() -> Option<CiEnvironment> {
     // Allow forcing non-CI mode
     if env::var("JARVY_NO_CI").as_deref() == Ok("1") {
         return None;
@@ -235,18 +272,7 @@ pub fn detect() -> Option<CiEnvironment> {
         ));
     }
 
-    let ci_env = detect_provider().map(CiEnvironment::new);
-
-    // Emit telemetry if CI detected
-    if let Some(ref env) = ci_env {
-        telemetry::ci_detected(
-            env.provider.name(),
-            env.build_id.as_deref(),
-            env.branch.as_deref(),
-        );
-    }
-
-    ci_env
+    detect_provider().map(CiEnvironment::new)
 }
 
 /// Detects the specific CI provider without checking force flags
@@ -332,10 +358,11 @@ pub fn is_non_interactive() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
-    // Use a mutex to serialize tests that modify environment variables
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    // Test serialization is enforced by `#[serial_test::serial(ci_sandbox_env)]`
+    // on each test — shared lock name with `crate::sandbox::tests` so the
+    // two suites do not race on CI/sandbox env vars they both touch
+    // (PRD-053 QA review F15).
 
     /// Every CI provider env var jarvy looks at. `with_env` clears all of
     /// these before setting the test's target vars so the test runs with
@@ -366,13 +393,8 @@ mod tests {
     where
         F: FnOnce() -> R,
     {
-        // Recover from poisoned mutex: a previous test's panic shouldn't
-        // cascade-fail every other test that needs the env-isolation lock.
-        // The data inside is only ever a unit guard, so taking the
-        // poisoned guard back is safe.
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
-        // SAFETY: Tests run single-threaded with ENV_LOCK mutex.
+        // SAFETY: Callers are gated by `#[serial(ci_sandbox_env)]`
+        // so no other test in this lock group runs concurrently.
         //
         // Step 1: snapshot every known CI provider var and clear them all.
         // This isolates the test from the runner's CI vars (GITHUB_ACTIONS,
@@ -426,14 +448,9 @@ mod tests {
     where
         F: FnOnce() -> R,
     {
-        // Recover from poisoned mutex: a previous test's panic shouldn't
-        // cascade-fail every other test that needs the env-isolation lock.
-        // The data inside is only ever a unit guard, so taking the
-        // poisoned guard back is safe.
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
+        // SAFETY: Callers are gated by `#[serial(ci_sandbox_env)]`
+        // so no other test in this lock group runs concurrently.
         // Save original values and clear them
-        // SAFETY: Tests run single-threaded with ENV_LOCK mutex
         let originals: Vec<_> = vars_to_clear
             .iter()
             .map(|k| {
@@ -456,6 +473,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(ci_sandbox_env)]
     fn test_github_actions_detection() {
         with_env(&[("GITHUB_ACTIONS", "true")], || {
             let ci = detect();
@@ -468,6 +486,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(ci_sandbox_env)]
     fn test_gitlab_ci_detection() {
         with_env(&[("GITLAB_CI", "true")], || {
             let ci = detect();
@@ -479,6 +498,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(ci_sandbox_env)]
     fn test_circleci_detection() {
         with_env(&[("CIRCLECI", "true")], || {
             let ci = detect();
@@ -488,6 +508,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(ci_sandbox_env)]
     fn test_azure_devops_detection() {
         // Azure DevOps uses "True" with capital T
         with_env(&[("TF_BUILD", "True")], || {
@@ -501,6 +522,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(ci_sandbox_env)]
     fn test_jenkins_detection() {
         with_env(&[("JENKINS_URL", "http://jenkins.example.com")], || {
             let ci = detect();
@@ -510,6 +532,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(ci_sandbox_env)]
     fn test_generic_ci_detection() {
         with_env(&[("CI", "true")], || {
             let ci = detect();
@@ -519,6 +542,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(ci_sandbox_env)]
     fn test_jarvy_ci_force() {
         with_env(&[("JARVY_CI", "1")], || {
             let ci = detect();
@@ -529,6 +553,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(ci_sandbox_env)]
     fn test_jarvy_no_ci_override() {
         with_env(&[("CI", "true"), ("JARVY_NO_CI", "1")], || {
             let ci = detect();
@@ -537,6 +562,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(ci_sandbox_env)]
     fn test_provider_name() {
         assert_eq!(CiProvider::GitHubActions.name(), "GitHub Actions");
         assert_eq!(CiProvider::GitLabCi.name(), "GitLab CI");
@@ -544,11 +570,13 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(ci_sandbox_env)]
     fn test_provider_display() {
         assert_eq!(format!("{}", CiProvider::GitHubActions), "GitHub Actions");
     }
 
     #[test]
+    #[serial_test::serial(ci_sandbox_env)]
     fn test_no_ci_detected() {
         with_cleared_env(
             &[
