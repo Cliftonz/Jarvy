@@ -110,6 +110,7 @@ jobs:
           helm template smoke "${CHART_DIR}" \
             --namespace jarvy-telemetry \
             --set gatewayApi.gateway.create=false \
+            --set gatewayApi.httpRoute.allowCrossNamespaceParent=true \
             --set 'gatewayApi.httpRoute.parentRefs[0].name=shared-gw' \
             --set 'gatewayApi.httpRoute.parentRefs[0].namespace=networking' \
             --set 'gatewayApi.httpRoute.parentRefs[0].sectionName=https' \
