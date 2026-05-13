@@ -19,6 +19,9 @@ on:
       - 'dist/helm/jarvy-telemetry-forwarder/**'
       - 'docs/schema/jarvy-telemetry-forwarder.values.schema.json'
       - '.github/workflows/helm-release.yml'
+      - '.github/workflows/helm-chart-ci.yml'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/publish-packages.yml'
       - '.github/actions/verify-signed-tag/**'
       - '.github/actions/install-kubeconform/**'
 
