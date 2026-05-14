@@ -29,6 +29,110 @@ for divergences from generic release skills.
 
 ## [Unreleased]
 
+### Added
+
+- **Sandbox auto-detection (PRD-053).** New `src/sandbox/` module
+  detects AI agent sandboxes (Claude Code, Cursor, e2b, Modal,
+  Daytona, Replit), long-running container envs (GitHub Codespaces,
+  Gitpod, devcontainers), and a generic `/.dockerenv` + non-TTY
+  fallback. `crate::sandbox::is_seamless()` is the canonical
+  "unattended" predicate; CI detection is now a strict subset.
+  `JARVY_SANDBOX=0` disables detection, `JARVY_SANDBOX=1` forces
+  generic-container (or whatever named provider also matches).
+- **Seamless mode** wires through telemetry auto-disable, update-
+  check suppression, first-run welcome suppression, brew auto-install
+  block, and secrets non-interactive default — five subsystems that
+  previously each carried their own `env::var("CI")` heuristic now
+  share one predicate.
+- **Verify-only fallback** in `jarvy setup`. When the sandbox cannot
+  install tools (read-only rootfs, no user-scope package manager, no
+  passwordless sudo), setup runs the doctor pipeline inline and exits
+  `PREREQ_MISSING (3)` on gaps; clean runs return `0` with a
+  verify-only success message. The probe records why via a
+  `VerifyOnlyReason` enum (`NoJarvyHome` / `ReadOnlyRoot` /
+  `NoInstallPath` / `Forced`) so support tickets explain which gate
+  tripped.
+- **Auto-baseline.** On the first seamless-mode run with zero gaps,
+  Jarvy snapshots the current state as `.jarvy/state.json` so
+  subsequent runs can do meaningful drift checks. Gated on a *full*
+  doctor match — partial matches never auto-baseline (PRD-053 risk
+  row 2). Works on both the install-capable and verify-only paths so
+  pre-loaded sandbox images still get a baseline.
+- **Seamless banner** on stderr, one line per process, summarizing
+  which provider was detected and the `JARVY_SANDBOX=0` escape hatch.
+  Muted by `--quiet`, `-q`, `--json`, `--format=json`,
+  `--log-format=json`, or `JARVY_QUIET=1`. The corresponding
+  `tracing::info!(event = "sandbox.detected")` fires regardless so
+  `jarvy.log` records the decision even for JSON consumers.
+- **`is_seamless_auto()`** — same as `is_seamless()` minus *forced*
+  sandbox detection. Telemetry + update auto-disable now route
+  through this variant so a hostile dotfile or compromised
+  devcontainer base image that sets `JARVY_SANDBOX=1` cannot silence
+  security-patch updates or anomaly telemetry on a victim's machine
+  (PRD-053 security review F1).
+
+### Changed
+
+- **`JARVY_HOME` validation.** Paths must be absolute and contain no
+  `..` traversal components; on Unix, existing paths must be owned by
+  the current uid. Defends against `sudo -E jarvy ...` patterns where
+  a less-privileged actor's env points a privileged jarvy run at
+  `/etc` or `/root/.ssh` (PRD-053 security review F2).
+- **Install-capability probe** writes to a per-PID `.probe-<pid>`
+  filename via `OpenOptions::create_new(true)` (`O_CREAT|O_EXCL`)
+  instead of `fs::write` to `.probe`. A pre-staged symlink at the
+  probe path now errors out instead of being silently followed and
+  clobbered (PRD-053 security review F3).
+- **Banner emission moved after panic-hook install** in `main.rs` so
+  any future stderr-write failure during banner emission produces a
+  structured panic message instead of a default backtrace dump.
+- **`detect()` and `ci::detect()` are now cached** via `OnceLock` —
+  env vars and `/.dockerenv` do not change mid-run, and the previous
+  implementation re-walked ~25 `getenv` calls per `is_seamless()`
+  invocation × 4 callers per `jarvy setup`. Telemetry `ci_detected`
+  event likewise fires at most once per process instead of once per
+  call.
+- **`InstallCapability::VerifyOnly` carries a `VerifyOnlyReason`** so
+  log lines and tickets explain *which* probe tripped.
+
+### Removed
+
+- **`update::config::is_ci_environment` and the parallel shim in
+  `onboarding::detection`**. Both were thin re-exports of
+  `sandbox::is_seamless()`; in-tree callers now use the canonical
+  predicate directly. Jarvy is a `bin` crate, no external library
+  consumers to break.
+- **Hand-rolled `which()` helper in `src/sandbox/mod.rs`** replaced
+  by the `which` crate (already a project dep). Local impl ignored
+  the Unix exec bit and only handled three Windows extensions.
+
+### Security
+
+- **Test images pinned by sha256 digest.** `debian:bookworm-slim` and
+  `buildpack-deps:bookworm-scm` in `tests/sandbox_integration.rs`
+  resolve to specific bytes regardless of registry tag drift or tag-
+  replay MITM.
+- **Read-only binary bind-mount.** The host's jarvy binary is mounted
+  into integration-test containers via
+  `Mount::bind_mount(...).with_access_mode(AccessMode::ReadOnly)` so
+  a malicious container cannot truncate or replace the host binary
+  mid-test (PRD-053 security review F8).
+
+### Tests
+
+- 10 new sandbox unit tests: forced-with/without named signal,
+  `JARVY_SANDBOX=0 && CI=true` precedence, `is_seamless_auto` matrix,
+  generic-container truth table, `VerifyOnlyReason` Display, force-
+  verify-only probe short-circuit, banner idempotence.
+- 4 new docker-backed integration tests: partial-match negative gate
+  (must not auto-baseline on gaps), banner suppression with
+  `--format=json`, banner suppression with `JARVY_QUIET=1`, verify-
+  only must not overwrite an existing `state.json`.
+- Cross-module env-isolation via `#[serial_test::serial(ci_sandbox_env)]`
+  on every `ci::tests` and `sandbox::tests` function so the two
+  suites cannot race on shared env vars (`CI`, `GITHUB_ACTIONS`,
+  `CODESPACES`).
+
 ## [v0.1.0] — First feature-complete milestone (2026-05-10)
 
 First feature-complete stable. Closes the round-2 hardening review
