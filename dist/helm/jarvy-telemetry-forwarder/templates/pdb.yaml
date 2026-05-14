@@ -1,4 +1,7 @@
 {{- if .Values.pdb.enabled }}
+{{- if and (ne (toString (.Values.pdb.minAvailable | default "")) "") (ne (toString (.Values.pdb.maxUnavailable | default "")) "") }}
+{{- fail "pdb.minAvailable and pdb.maxUnavailable are mutually exclusive; set one and leave the other null/empty." }}
+{{- end }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -11,7 +14,13 @@ metadata:
     {{- . | nindent 4 }}
   {{- end }}
 spec:
+  {{- if ne (toString (.Values.pdb.maxUnavailable | default "")) "" }}
+  maxUnavailable: {{ .Values.pdb.maxUnavailable }}
+  {{- else if ne (toString (.Values.pdb.minAvailable | default "")) "" }}
   minAvailable: {{ .Values.pdb.minAvailable }}
+  {{- else }}
+  {{- fail "pdb.enabled=true requires exactly one of pdb.maxUnavailable or pdb.minAvailable." }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "jarvy-telemetry-forwarder.selectorLabels" . | nindent 6 }}

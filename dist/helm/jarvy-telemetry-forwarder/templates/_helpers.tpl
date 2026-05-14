@@ -30,17 +30,25 @@ Chart label.
 
 {{/*
 Common labels.
+
+Order is load-bearing: operator-supplied `commonLabels` are emitted
+FIRST so the chart-managed labels (chart, name, instance, version,
+managed-by) take precedence and cannot be overwritten by hostile
+or accidentally-conflicting commonLabels values. Inverting the order
+(commonLabels LAST) would let an operator clobber
+`app.kubernetes.io/name` and steer the NetworkPolicy / ServiceMonitor
+selectors away from real pods. See security review F5.
 */}}
 {{- define "jarvy-telemetry-forwarder.labels" -}}
+{{- with .Values.commonLabels }}
+{{ toYaml . }}
+{{- end }}
 helm.sh/chart: {{ include "jarvy-telemetry-forwarder.chart" . }}
 {{ include "jarvy-telemetry-forwarder.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
-{{- with .Values.commonLabels }}
-{{ toYaml . }}
-{{- end }}
 {{- end -}}
 
 {{/*
@@ -143,6 +151,10 @@ receivers:
         # case the ingress-side body cap is misconfigured on a
         # non-Traefik GatewayClass).
         max_request_body_size: 4194304  # 4 MiB
+        {{- if and .Values.collector.receiverAuth .Values.collector.receiverAuth.enabled }}
+        auth:
+          authenticator: bearertokenauth/receiver
+        {{- end }}
 
 processors:
   transform/anonymize:
@@ -222,11 +234,29 @@ extensions:
   bearertokenauth/backend:
     scheme: {{ .Values.exporter.authScheme | quote }}
     token: ${env:BACKEND_OTLP_TOKEN}
+  {{- if and .Values.collector.receiverAuth .Values.collector.receiverAuth.enabled }}
+  bearertokenauth/receiver:
+    scheme: {{ .Values.collector.receiverAuth.scheme | quote }}
+    token: ${env:OTLP_RECEIVER_TOKEN}
+  {{- end }}
   health_check:
     endpoint: 0.0.0.0:13133
+    # Pipeline-aware health: returns 503 on `/` when an exporter has
+    # been failing repeatedly. Readiness probe sees the 503 and
+    # sheds load via the LB; liveness has a longer failureThreshold
+    # so backpressure doesn't trigger restart. See deployment.yaml.
+    check_collector_pipeline:
+      enabled: true
+      interval: 5s
+      exporter_failure_threshold: 5
 
 service:
-  extensions: [bearertokenauth/backend, health_check]
+  extensions:
+    - bearertokenauth/backend
+    {{- if and .Values.collector.receiverAuth .Values.collector.receiverAuth.enabled }}
+    - bearertokenauth/receiver
+    {{- end }}
+    - health_check
   telemetry:
     logs:
       level: {{ .Values.collector.logLevel | quote }}

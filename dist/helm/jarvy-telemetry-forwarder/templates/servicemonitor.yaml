@@ -17,9 +17,20 @@ spec:
   selector:
     matchLabels:
       {{- include "jarvy-telemetry-forwarder.selectorLabels" . | nindent 6 }}
+      # Differentiates the metrics Service from the OTLP Service when
+      # split-Service is configured. When using the legacy single
+      # Service, this label is also stamped — harmless.
+      app.kubernetes.io/component: metrics
   endpoints:
+    # path + scheme set explicitly so a future port-change or
+    # sidecar that flips port 8888 to HTTPS doesn't silently break
+    # scrape. honorLabels MUST stay false — see values.yaml comment.
     - port: self-metrics
+      path: /metrics
+      scheme: http
+      honorLabels: {{ .Values.serviceMonitor.honorLabels }}
       interval: {{ .Values.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout | default "10s" }}
       {{- with .Values.serviceMonitor.metricRelabelings }}
       metricRelabelings:
         {{- toYaml . | nindent 8 }}

@@ -1,11 +1,12 @@
 {{- if .Values.networkPolicy.enabled }}
 {{- /*
-  Standard NetworkPolicy: ingress restricted to the cluster's ingress
-  controller namespace + (optionally) the Prometheus scrape namespace;
-  egress allows DNS + HTTPS (broad). For tighter egress restricting to
-  the parsed exporter hostname, also enable
-  networkPolicy.cilium.enabled (requires Cilium CNI).
+  Egress shape selection: legacy `cilium.enabled: true` is honored as
+  shorthand for `egressMode: fqdn`. Anything else uses `egressMode`
+  directly (default `wide-except-rfc1918`). See values.yaml for
+  rationale + tradeoffs.
 */ -}}
+{{- $egressMode := .Values.networkPolicy.egressMode | default "wide-except-rfc1918" -}}
+{{- if .Values.networkPolicy.cilium.enabled }}{{- $egressMode = "fqdn" -}}{{- end -}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -45,12 +46,24 @@ spec:
               k8s-app: kube-dns
       ports:
         - { protocol: UDP, port: 53 }
-    {{- if not .Values.networkPolicy.cilium.enabled }}
+    {{- if eq $egressMode "wide-except-rfc1918" }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+      ports:
+        - { protocol: TCP, port: 443 }
+    {{- else if eq $egressMode "wide" }}
     - to: []
       ports:
         - { protocol: TCP, port: 443 }
     {{- end }}
-{{- if .Values.networkPolicy.cilium.enabled }}
+    {{- /* `fqdn` egressMode handled by CiliumNetworkPolicy below */ -}}
+{{- if eq $egressMode "fqdn" }}
 ---
 {{- /*
   CiliumNetworkPolicy: FQDN-based egress restriction. Only allows
@@ -62,13 +75,6 @@ spec:
   or `:`. This is brittle if the endpoint includes a port; document
   override via `networkPolicy.cilium.fqdn` if needed.
 */ -}}
-{{- /*
-  FQDN resolution: prefer the explicit `networkPolicy.cilium.fqdn`
-  override; fall back to parsing `exporter.endpoint`. The parser
-  strips scheme, userinfo (`user@host`), port, and path — but
-  unusual endpoint shapes (split-horizon DNS, custom domains)
-  should set fqdn explicitly to avoid relying on the regex.
-*/ -}}
 {{- $fqdn := .Values.networkPolicy.cilium.fqdn -}}
 {{- if not $fqdn -}}
 {{- $endpoint := .Values.exporter.endpoint -}}
@@ -77,7 +83,13 @@ spec:
 {{- $fqdn = regexReplaceAll "[/:].*$" $noUserinfo "" -}}
 {{- end -}}
 {{- if not $fqdn -}}
-{{- fail "networkPolicy.cilium.enabled=true requires either a parseable exporter.endpoint or an explicit networkPolicy.cilium.fqdn override." -}}
+{{- fail "networkPolicy.egressMode=fqdn requires either a parseable exporter.endpoint or an explicit networkPolicy.cilium.fqdn override." -}}
+{{- end -}}
+{{- /* Defense in depth: ensure derived FQDN is fully-qualified
+       (≥1 dot, lowercase, non-empty). Single-label hostnames like
+       `grafana` would render a useless allow rule silently. */ -}}
+{{- if not (regexMatch "^[a-z0-9.-]+\\.[a-z]{2,}$" $fqdn) -}}
+{{- fail (printf "Derived FQDN %q must be a fully-qualified hostname (e.g. otlp-gateway-prod-us-east-0.grafana.net). Set networkPolicy.cilium.fqdn explicitly." $fqdn) -}}
 {{- end -}}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy

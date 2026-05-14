@@ -29,7 +29,125 @@ for divergences from generic release skills.
 
 ## [Unreleased]
 
-### Added
+### Added — `jarvy-telemetry-forwarder` Helm chart
+
+A multi-perspective review (perf, security, QA, observability,
+maintainability) produced a 27-item enhancement plan; all 27 items
+shipped together. Chart version bump pending.
+
+- **Probe split + pipeline-aware health.** Liveness no longer flips
+  on `memory_limiter` backpressure (which would cascade-restart all
+  replicas during burst — defeating the design). Readiness still
+  flips so the LB sheds load. `health_check_v2`'s
+  `check_collector_pipeline` exposes pipeline status on `/`;
+  liveness gets a longer failureThreshold (6), readiness shorter
+  periodSeconds (5). New `startupProbe` covers cold-pull on fresh
+  nodes.
+- **Graceful shutdown.** `terminationGracePeriodSeconds: 60` +
+  `preStop: sleep 15` so the LB drains and the
+  batch/exporter flushes in-flight records before SIGKILL.
+- **Exporter queue saturation alert** — leading indicator that fires
+  before `JarvyForwarderExporterFailing` starts dropping records.
+  Backed by a recording rule (`jarvy_forwarder:exporter_queue_utilization:ratio`).
+- **Pod restart alert** — closes the loop when pipeline alerts can't
+  fire (pod never gets healthy enough to emit metrics).
+- **Grafana dashboard** ConfigMap shipped via `grafana_dashboard=1`
+  sidecar label. 10 panels: receiver rate, queue utilization,
+  exporter rate, memory/CPU, tail-sampling decisions, allowlist
+  drops, batch throughput, pod restarts, cert expiry.
+- **Receiver auth** (`collector.receiverAuth.enabled`, opt-in)
+  fronts the OTLP receiver with `bearertokenauth/receiver`. Multi-
+  tenant deployments should enable.
+- **Recording rules.** Repeated `rate(...)` over 5-10m windows
+  hoisted into named recording rules; alerts + dashboard share one
+  computation instead of recomputing per evaluation.
+- **`networkPolicy.egressMode`**. Three modes: `wide` (legacy
+  `to: []` on 443), `wide-except-rfc1918` (new default — excludes
+  private IP ranges), `fqdn` (requires Cilium — restricts to the
+  parsed exporter hostname).
+- **DoS-protection gate**: non-Traefik GatewayClasses must supply
+  `httpRoute.extraFilters` OR set `dosProtection.acceptUnprotected:
+  true` — fails install otherwise. Closes the "I installed on Envoy
+  and forgot the rate limit" exposure.
+- **Split Service**: public OTLP Service (port 4318) +
+  in-cluster metrics Service (port 8888). In-cluster scrapers
+  cannot accidentally reach the OTLP receiver and self-metrics no
+  longer mix with public ingress traffic.
+- **Production-overlay digest pinning**: chart ships with
+  `collector.image.digest` set to a real `sha256:` digest by
+  default; CI scenario `production-overlay` asserts the rendered
+  image string carries the digest.
+- **Grafana dashboard's `runbook_url` anchors** all exist in
+  `docs/operations/telemetry-forwarder.md` (11 new
+  `{#alert-*}`-anchored subsections with diagnosis steps).
+- **CI**: kind install + upgrade smoke test (k8s 1.31); helm
+  3.14/3.16/3.18 render matrix; promtool PromRule validation;
+  README ↔ schema drift check; runbook-anchor grep.
+
+### Changed — `jarvy-telemetry-forwarder` Helm chart
+
+- **CPU limit removed** from `collector.resources.limits`. CFS-quota
+  throttling on an I/O-bound forwarder adds 10-100ms p99 latency on
+  burst with no upside. Floor preserved via `requests.cpu: 100m`.
+- **HPA `scaleDown` policy** is now explicit (`drop 1 pod / 60s`)
+  instead of the K8s default (halve replicas per 15s) which causes
+  replica thrash near `memory_limiter` pressure.
+- **PDB uses `maxUnavailable: 1`** (not `minAvailable: 1`) so node
+  drains proceed one pod at a time without stalling forever waiting
+  for real-Ready. Mutually exclusive with `minAvailable` —
+  template-time `fail()` catches both-set misconfiguration.
+- **`pdb.minAvailable` + `pdb.maxUnavailable`** mutually exclusive
+  (template `fail`). **`tls.certManager.enabled=true` +
+  `tls.existingSecretName`** mutually exclusive (template `fail`).
+- **`_helpers.tpl` labels order**: chart-managed labels are emitted
+  LAST so `commonLabels` cannot overwrite `app.kubernetes.io/name`
+  and steer NetworkPolicy / ServiceMonitor away from real pods.
+- **`automountServiceAccountToken: false`** stays hardcoded in both
+  ServiceAccount and Pod spec (no values knob); render-time CI
+  asserts catch regressions.
+- **`enableServiceLinks: false`** on the pod — saves env-var bloat
+  on busy namespaces; speeds cold start.
+- **ServiceMonitor**: `honorLabels` is now actually rendered (was a
+  ghost setting). `path: /metrics`, `scheme: http`, and
+  `scrapeTimeout` explicit so a future port change doesn't break
+  scrape silently. ServiceMonitor selector now matches the new
+  metrics-only Service (`app.kubernetes.io/component: metrics`).
+- **ServiceMonitor `metricRelabelings`**: tightened keep-list. Drops
+  high-cardinality `otelcol_processor_transform_*_modified` series
+  (none of which exist — see Fixed below) and keeps the operational
+  subset.
+- **`saltStale` alert** rebuilt: now reads
+  `external_secrets_sync_calls_total` (the only series that exists
+  for "salt content was refreshed"). The old query referenced a
+  non-existent `kube_secret_created` metric and would have stayed
+  silent forever.
+- **`allowlistDroppingKeys` alert** rebuilt: compares
+  `otelcol_processor_incoming_items` vs `outgoing_items` on the
+  `transform/keep_allowlist_attrs` processor. The old query
+  referenced non-existent `*_modified` counters.
+- **`bearertokenauth` extension** for the backend exporter, plus
+  optional `bearertokenauth/receiver` for inbound auth.
+- **Container `securityContext`** explicitly sets
+  `runAsNonRoot: true` and `seccompProfile: RuntimeDefault`
+  (belt-and-suspenders over the pod-level setting). Schema rejects
+  flipping `privileged`, `allowPrivilegeEscalation`,
+  `readOnlyRootFilesystem`, or dropping `capabilities.drop: ALL`.
+- **`exporterFailing` alert threshold units** documented as
+  records/sec; docs/values comments aligned (was previously
+  conflicting on per-second vs per-minute).
+- **Gateway listener TLS `options:`** rendered through as-is so
+  operators can pass GatewayClass-specific knobs (e.g.
+  `gateway.envoyproxy.io/min-tls-version`).
+- **README** updated: salt-rotation wording, accurate schema
+  invariants list, new ConfigMap/dashboard/PrometheusRule entries
+  in "What gets installed", egressMode and DoS-protection notes.
+
+### Removed — `jarvy-telemetry-forwarder` Helm chart
+
+- The `cilium.enabled` values knob is still accepted but is now a
+  synonym for `egressMode: fqdn`; future versions may remove.
+
+### Sandbox auto-detection (PRD-053)
 
 - **Sandbox auto-detection (PRD-053).** New `src/sandbox/` module
   detects AI agent sandboxes (Claude Code, Cursor, e2b, Modal,

@@ -57,10 +57,13 @@ helm install jarvy-telemetry \
 | `Gateway` (optional) + `HTTPRoute` | Gateway API ingress; routes POST to `/v1/{logs,metrics,traces}` to the Collector |
 | `Middleware` × 2 (Traefik only) | Rate limit + body cap, attached via `HTTPRoute.filters[].extensionRef` |
 | `Certificate` | cert-manager issues TLS for the hostname |
-| `NetworkPolicy` | Locks ingress to your ingress controller's namespace, egress to DNS + 443 |
-| `HorizontalPodAutoscaler` (optional) | CPU 70%, 2–6 replicas |
-| `ServiceMonitor` (optional) | Prometheus Operator scrape of the Collector's self-metrics |
-| `PodDisruptionBudget` | minAvailable: 1 during voluntary disruptions |
+| `NetworkPolicy` | Default-deny + ingress from your ingress controller's namespace; egress to DNS + 443. Default mode `wide-except-rfc1918` excludes private IP ranges; switch to `fqdn` (requires Cilium) for hostname-restricted egress |
+| `CiliumNetworkPolicy` (optional) | When `networkPolicy.egressMode: fqdn` or legacy `cilium.enabled: true` — restricts egress to the parsed exporter hostname |
+| `HorizontalPodAutoscaler` (optional) | Memory 70% + optional queue-depth custom metric; 2–6 replicas. CPU-based scaling is insufficient (memory_limiter trips before CPU climbs) |
+| `ServiceMonitor` (optional) | Prometheus Operator scrape of the metrics-only Service |
+| `PrometheusRule` (optional) | Recording rules + alerts (refused records, exporter failing/queue-saturated, memory pressure, salt staleness, tail-sampling rate, allowlist drops, pod restarts, reloader missing, debug exporter on, cert lifecycle) |
+| `ConfigMap` (Grafana dashboard) | Auto-imported by the Grafana sidecar via the `grafana_dashboard=1` label |
+| `PodDisruptionBudget` | `maxUnavailable: 1` during voluntary disruptions (lets node drains proceed) |
 
 ## Customizing the ingress
 
@@ -125,8 +128,12 @@ other is incomplete.
 `secrets.externalSecrets.piiSalt.remoteRef` quarterly. The
 ExternalSecret's `refreshInterval` (1h) propagates the new salt to
 the Kubernetes Secret; the Collector picks it up on next pod
-restart (use stakater/reloader or set `collector.podAnnotations.salt-version`
-to force a roll).
+restart. The chart defaults to stakater/reloader (off-by-default
+upstream — see `JarvyForwarderReloaderMissing` alert) for automatic
+rolling. Without Reloader, add any annotation under
+`collector.podAnnotations` (e.g. `--set
+collector.podAnnotations.salt-version=2026-05-13`) to force a roll
+on the next `helm upgrade`.
 
 ## Parent-config correlation
 
@@ -223,10 +230,25 @@ chart CI time, see `.github/workflows/helm-chart-ci.yml`):
 
 - `pii.passThroughAttributes` and `pii.hashedAttributes` are disjoint
 - `collector.image.digest` must be `sha256:` + 64 hex chars or empty
-- `exporter.endpoint` is `^https?://.+`
+- `exporter.endpoint` matches `^https://[a-z0-9.-]+(?::[0-9]+)?(?:/[^\s]*)?$`
+  — **https only** (http rejected), no userinfo (`user@host` rejected),
+  no uppercase host (rejected). The strictness is deliberate: the
+  CiliumNetworkPolicy FQDN parser would silently strip userinfo, and
+  uppercase hostnames defeat lowercase-only FQDN matching.
+- `collector.containerSecurityContext` rejects flipping
+  `privileged`, `allowPrivilegeEscalation`, `readOnlyRootFilesystem`,
+  or dropping `capabilities.drop: ALL` — the chart's Restricted-PSS
+  posture is enforced at schema time, not just rendered.
 - `collector.logLevel ∈ {debug,info,warn,error}`,
   `collector.logFormat ∈ {json,text,console}`
 - `secrets.strategy ∈ {externalSecrets,existing,inline}`
+- `networkPolicy.egressMode ∈ {wide, wide-except-rfc1918, fqdn}`
+- `tls.certManager.enabled=true` and `tls.existingSecretName` are
+  mutually exclusive (template-time `fail()`).
+- `pdb.minAvailable` and `pdb.maxUnavailable` are mutually exclusive.
+- On non-Traefik GatewayClasses, install fails when neither
+  `httpRoute.extraFilters` nor `dosProtection.acceptUnprotected:true`
+  is set — public OTLP receiver requires explicit DoS protection.
 - All required sections present; no unknown top-level keys
   (`additionalProperties: false` at every level)
 

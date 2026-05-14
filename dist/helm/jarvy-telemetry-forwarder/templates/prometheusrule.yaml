@@ -18,7 +18,44 @@ metadata:
   {{- end }}
 spec:
   groups:
-    - name: jarvy-telemetry-forwarder
+    # ---------------------------------------------------------------
+    # Recording rules. Hoist the repeated 5m-rate calculations once
+    # so alerts + dashboards share a single computation. Recording-
+    # rule name shape: `jarvy_forwarder:<metric>:<window>` per
+    # Prometheus best practice.
+    # ---------------------------------------------------------------
+    - name: jarvy-telemetry-forwarder.recording
+      interval: 30s
+      rules:
+        - record: jarvy_forwarder:receiver_refused:rate5m
+          expr: |
+            sum by (instance) (
+              rate(otelcol_receiver_refused_log_records{ {{ $selector }} }[5m])
+              + rate(otelcol_receiver_refused_metric_points{ {{ $selector }} }[5m])
+              + rate(otelcol_receiver_refused_spans{ {{ $selector }} }[5m])
+            )
+        - record: jarvy_forwarder:exporter_send_failed:rate5m
+          expr: |
+            sum by (instance, exporter) (
+              rate(otelcol_exporter_send_failed_log_records{ {{ $selector }} }[5m])
+              + rate(otelcol_exporter_send_failed_metric_points{ {{ $selector }} }[5m])
+              + rate(otelcol_exporter_send_failed_spans{ {{ $selector }} }[5m])
+            )
+        - record: jarvy_forwarder:exporter_queue_utilization:ratio
+          expr: |
+            otelcol_exporter_queue_size{ {{ $selector }} }
+            / clamp_min(otelcol_exporter_queue_capacity{ {{ $selector }} }, 1)
+        - record: jarvy_forwarder:transform_allowlist_dropped:rate10m
+          expr: |
+            sum by (instance) (
+              clamp_min(
+                rate(otelcol_processor_incoming_items{ {{ $selector }},processor="transform/keep_allowlist_attrs"}[10m])
+                - rate(otelcol_processor_outgoing_items{ {{ $selector }},processor="transform/keep_allowlist_attrs"}[10m]),
+                0
+              )
+            )
+
+    - name: jarvy-telemetry-forwarder.alerts
       rules:
         {{- /*
           All alerts use selector labels (app_kubernetes_io_name +
@@ -29,15 +66,11 @@ spec:
         */ -}}
         {{- if .Values.prometheusRule.alerts.refusedRecords.enabled }}
         - alert: JarvyForwarderRefusedRecords
-          expr: |
-            sum by (instance) (
-              rate(otelcol_receiver_refused_log_records{ {{ $selector }} }[5m])
-              + rate(otelcol_receiver_refused_metric_points{ {{ $selector }} }[5m])
-              + rate(otelcol_receiver_refused_spans{ {{ $selector }} }[5m])
-            ) > 0
+          expr: jarvy_forwarder:receiver_refused:rate5m > 0
           for: {{ .Values.prometheusRule.alerts.refusedRecords.for }}
           labels:
             severity: warning
+            namespace: {{ .Release.Namespace }}
             {{- with .Values.prometheusRule.alertLabels }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -48,15 +81,11 @@ spec:
         {{- end }}
         {{- if .Values.prometheusRule.alerts.exporterFailing.enabled }}
         - alert: JarvyForwarderExporterFailing
-          expr: |
-            sum by (instance, exporter) (
-              rate(otelcol_exporter_send_failed_log_records{ {{ $selector }} }[5m])
-              + rate(otelcol_exporter_send_failed_metric_points{ {{ $selector }} }[5m])
-              + rate(otelcol_exporter_send_failed_spans{ {{ $selector }} }[5m])
-            ) > {{ .Values.prometheusRule.alerts.exporterFailing.threshold }}
+          expr: jarvy_forwarder:exporter_send_failed:rate5m > {{ .Values.prometheusRule.alerts.exporterFailing.threshold }}
           for: {{ .Values.prometheusRule.alerts.exporterFailing.for }}
           labels:
             severity: critical
+            namespace: {{ .Release.Namespace }}
             {{- with .Values.prometheusRule.alertLabels }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -65,12 +94,28 @@ spec:
             description: "Exporter {{ "{{ $labels.exporter }}" }} on pod {{ "{{ $labels.instance }}" }} is failing > {{ .Values.prometheusRule.alerts.exporterFailing.threshold }} records/sec. Check backend endpoint health and the Grafana write token validity."
             runbook_url: "{{ $runbook }}#alert-exporter-failing"
         {{- end }}
+        {{- if .Values.prometheusRule.alerts.exporterQueueSaturated.enabled }}
+        - alert: JarvyForwarderExporterQueueSaturated
+          expr: jarvy_forwarder:exporter_queue_utilization:ratio > {{ .Values.prometheusRule.alerts.exporterQueueSaturated.threshold }}
+          for: {{ .Values.prometheusRule.alerts.exporterQueueSaturated.for }}
+          labels:
+            severity: warning
+            namespace: {{ .Release.Namespace }}
+            {{- with .Values.prometheusRule.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "Forwarder exporter queue saturating (leading indicator before drops)"
+            description: "Exporter {{ "{{ $labels.exporter }}" }} on pod {{ "{{ $labels.instance }}" }} is at >{{ .Values.prometheusRule.alerts.exporterQueueSaturated.threshold }} of queue capacity. The persistent queue is filling because downstream is slow or failing. Act before `JarvyForwarderExporterFailing` fires: check backend health, network egress."
+            runbook_url: "{{ $runbook }}#alert-exporter-queue-saturated"
+        {{- end }}
         {{- if .Values.prometheusRule.alerts.memoryPressure.enabled }}
         - alert: JarvyForwarderMemoryPressure
           expr: process_resident_memory_bytes{ {{ $selector }} } > {{ .Values.prometheusRule.alerts.memoryPressure.thresholdBytes }}
           for: {{ .Values.prometheusRule.alerts.memoryPressure.for }}
           labels:
             severity: warning
+            namespace: {{ .Release.Namespace }}
             {{- with .Values.prometheusRule.alertLabels }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -81,20 +126,23 @@ spec:
         {{- end }}
         {{- if .Values.prometheusRule.alerts.saltStale.enabled }}
         - alert: JarvyForwarderSaltStale
+          # Drives age from the ExternalSecrets sync timestamp — the
+          # only reliable signal for "salt content was refreshed."
+          # Requires external-secrets-operator's metrics endpoint to
+          # be scraped by the same Prometheus.
           expr: |
-            (time() - kube_secret_info{namespace="{{ .Release.Namespace }}",secret="{{ .Values.secrets.piiSaltSecretName }}"}
-              * on(namespace, secret) group_left()
-              kube_secret_created{namespace="{{ .Release.Namespace }}",secret="{{ .Values.secrets.piiSaltSecretName }}"}
-            ) > ({{ .Values.prometheusRule.alerts.saltStale.thresholdDays }} * 86400)
+            (time() - external_secrets_sync_calls_total{secret_name="{{ .Values.secrets.piiSaltSecretName }}",secret_namespace="{{ .Release.Namespace }}"})
+              > ({{ .Values.prometheusRule.alerts.saltStale.thresholdDays }} * 86400)
           for: 1h
           labels:
             severity: warning
+            namespace: {{ .Release.Namespace }}
             {{- with .Values.prometheusRule.alertLabels }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           annotations:
             summary: "PII salt has not been rotated in > {{ .Values.prometheusRule.alerts.saltStale.thresholdDays }} days"
-            description: "Salt Secret {{ .Values.secrets.piiSaltSecretName }} in {{ .Release.Namespace }} hasn't been recreated for over {{ .Values.prometheusRule.alerts.saltStale.thresholdDays }} days. Rotate in your secret backend; ExternalSecret will refresh the K8s Secret; Reloader rolls the pods (verify Reloader running: see JarvyForwarderReloaderMissing alert)."
+            description: "Salt Secret {{ .Values.secrets.piiSaltSecretName }} in {{ .Release.Namespace }} has not been refreshed by ExternalSecrets for over {{ .Values.prometheusRule.alerts.saltStale.thresholdDays }} days. Rotate in your secret backend; ExternalSecret will refresh the K8s Secret; Reloader rolls the pods (verify Reloader running: see JarvyForwarderReloaderMissing alert)."
             runbook_url: "{{ $runbook }}#alert-salt-stale"
         {{- end }}
         {{- if .Values.prometheusRule.alerts.tailSamplingLow.enabled }}
@@ -109,6 +157,7 @@ spec:
           for: 30m
           labels:
             severity: info
+            namespace: {{ .Release.Namespace }}
             {{- with .Values.prometheusRule.alertLabels }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -119,15 +168,15 @@ spec:
         {{- end }}
         {{- if .Values.prometheusRule.alerts.allowlistDroppingKeys.enabled }}
         - alert: JarvyForwarderAllowlistDroppingKeys
-          expr: |
-            sum by (instance, processor) (
-              rate(otelcol_processor_transform_logs_modified{ {{ $selector }},processor=~"transform/keep_allowlist_attrs"}[10m])
-              + rate(otelcol_processor_transform_metrics_modified{ {{ $selector }},processor=~"transform/keep_allowlist_attrs"}[10m])
-              + rate(otelcol_processor_transform_spans_modified{ {{ $selector }},processor=~"transform/keep_allowlist_attrs"}[10m])
-            ) > 0
+          # Drives off the recording rule that compares the transform
+          # processor's incoming vs. outgoing item counts. The original
+          # `*_modified` metrics did not exist; this is the correct
+          # surface for keep_keys-induced attribute drops.
+          expr: jarvy_forwarder:transform_allowlist_dropped:rate10m > 0
           for: {{ .Values.prometheusRule.alerts.allowlistDroppingKeys.for }}
           labels:
             severity: warning
+            namespace: {{ .Release.Namespace }}
             {{- with .Values.prometheusRule.alertLabels }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -136,12 +185,31 @@ spec:
             description: "Either an attacker is sending OTLP records with attribute keys outside the allowlist, OR a recent Jarvy CLI release introduced a new resource attribute that needs to be added to pii.passThroughAttributes (if public-safe) or pii.hashedAttributes (if identifying)."
             runbook_url: "{{ $runbook }}#alert-allowlist-dropping-keys"
         {{- end }}
+        {{- if .Values.prometheusRule.alerts.podRestarting.enabled }}
+        - alert: JarvyForwarderPodRestarting
+          expr: |
+            increase(kube_pod_container_status_restarts_total{
+              namespace="{{ .Release.Namespace }}",
+              container="otelcol"}[15m]) > {{ .Values.prometheusRule.alerts.podRestarting.thresholdRestarts }}
+          for: {{ .Values.prometheusRule.alerts.podRestarting.for }}
+          labels:
+            severity: warning
+            namespace: {{ .Release.Namespace }}
+            {{- with .Values.prometheusRule.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "Forwarder pod is restarting repeatedly"
+            description: "Container `otelcol` in pod {{ "{{ $labels.pod }}" }} has restarted > {{ .Values.prometheusRule.alerts.podRestarting.thresholdRestarts }} times in 15m. Closes the loop when other alerts can't fire (pipeline never starts). Check `kubectl describe pod` and recent logs."
+            runbook_url: "{{ $runbook }}#alert-pod-restarting"
+        {{- end }}
         {{- if .Values.prometheusRule.alerts.reloaderMissing.enabled }}
         - alert: JarvyForwarderReloaderMissing
           expr: absent(reloader_reloader_reload_executed_total)
           for: {{ .Values.prometheusRule.alerts.reloaderMissing.for }}
           labels:
             severity: warning
+            namespace: {{ .Release.Namespace }}
             {{- with .Values.prometheusRule.alertLabels }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -157,6 +225,7 @@ spec:
           for: {{ .Values.prometheusRule.alerts.debugExporterEnabled.for }}
           labels:
             severity: warning
+            namespace: {{ .Release.Namespace }}
             {{- with .Values.prometheusRule.alertLabels }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -171,6 +240,7 @@ spec:
           for: {{ .Values.prometheusRule.alerts.certNotReady.for }}
           labels:
             severity: critical
+            namespace: {{ .Release.Namespace }}
             {{- with .Values.prometheusRule.alertLabels }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -185,6 +255,7 @@ spec:
           for: 1h
           labels:
             severity: warning
+            namespace: {{ .Release.Namespace }}
             {{- with .Values.prometheusRule.alertLabels }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

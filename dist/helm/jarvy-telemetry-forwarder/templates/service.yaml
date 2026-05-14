@@ -1,3 +1,13 @@
+{{/*
+Two Services:
+  1. `<fullname>` (otlp): public-facing port 4318, targeted by the
+     HTTPRoute backend. Carries `app.kubernetes.io/component: otlp`.
+  2. `<fullname>-metrics`: in-cluster port 8888, targeted by the
+     ServiceMonitor. Carries `app.kubernetes.io/component: metrics`.
+Splitting prevents in-cluster workloads with reach to the OTLP
+Service from also scraping the collector's self-metrics (which leak
+the live allowlist), and lets NetworkPolicy rules pin per-Service.
+*/}}
 apiVersion: v1
 kind: Service
 metadata:
@@ -5,6 +15,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "jarvy-telemetry-forwarder.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otlp
   {{- with (include "jarvy-telemetry-forwarder.annotations" .) }}
   annotations:
     {{- . | nindent 4 }}
@@ -15,4 +26,26 @@ spec:
     {{- include "jarvy-telemetry-forwarder.selectorLabels" . | nindent 4 }}
   ports:
     - { name: otlp-http, port: 4318, targetPort: otlp-http }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "jarvy-telemetry-forwarder.fullname" . }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "jarvy-telemetry-forwarder.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+  {{- with (include "jarvy-telemetry-forwarder.annotations" .) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  # `internalTrafficPolicy: Cluster` (the default) is correct — we
+  # want any cluster-internal scraper to reach any replica. If you
+  # ever care about cross-AZ scrape cost on multi-AZ clusters, see
+  # values.yaml notes on topology-aware routing.
+  selector:
+    {{- include "jarvy-telemetry-forwarder.selectorLabels" . | nindent 4 }}
+  ports:
     - { name: self-metrics, port: 8888, targetPort: self-metrics }

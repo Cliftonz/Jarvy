@@ -1,0 +1,138 @@
+{{- if and .Values.grafanaDashboard.enabled .Values.serviceMonitor.enabled }}
+{{/*
+Grafana dashboard for the forwarder pipeline. Imported automatically
+by the Grafana sidecar via the `<sidecarLabel>=<sidecarLabelValue>`
+label on this ConfigMap. The dashboard JSON below is intentionally
+compact — ~10 panels covering the operational surface called out in
+the chart's PrometheusRule (queue saturation, receiver/exporter
+rates, memory pressure, tail-sampling decisions, pod restarts).
+Operators should treat it as a starting point and clone into a
+managed dashboards-as-code pipeline (e.g. grafana-operator) once
+they want changes to survive helm upgrades.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "jarvy-telemetry-forwarder.fullname" . }}-dashboard
+  namespace: {{ .Values.grafanaDashboard.namespaceOverride | default .Release.Namespace }}
+  labels:
+    {{- include "jarvy-telemetry-forwarder.labels" . | nindent 4 }}
+    {{ .Values.grafanaDashboard.sidecarLabel }}: {{ .Values.grafanaDashboard.sidecarLabelValue | quote }}
+  annotations:
+    grafana_folder: {{ .Values.grafanaDashboard.folder | quote }}
+    {{- with (include "jarvy-telemetry-forwarder.annotations" .) }}
+    {{- . | nindent 4 }}
+    {{- end }}
+data:
+  jarvy-telemetry-forwarder.json: |-
+    {
+      "title": "Jarvy Telemetry Forwarder",
+      "uid": "jarvy-telemetry-forwarder",
+      "tags": ["jarvy", "otlp", "forwarder"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": { "from": "now-1h", "to": "now" },
+      "templating": {
+        "list": [
+          {
+            "name": "instance",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+            "query": "label_values(otelcol_process_uptime{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\"}, instance)",
+            "multi": true,
+            "includeAll": true,
+            "current": { "selected": false, "text": "All", "value": "$__all" }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "title": "OTLP receiver: accepted vs refused (records/sec)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "targets": [
+            { "expr": "sum(rate(otelcol_receiver_accepted_log_records{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"}[5m]) + rate(otelcol_receiver_accepted_metric_points{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"}[5m]) + rate(otelcol_receiver_accepted_spans{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"}[5m]))", "legendFormat": "accepted" },
+            { "expr": "sum(rate(otelcol_receiver_refused_log_records{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"}[5m]) + rate(otelcol_receiver_refused_metric_points{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"}[5m]) + rate(otelcol_receiver_refused_spans{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"}[5m]))", "legendFormat": "refused" }
+          ]
+        },
+        {
+          "title": "Exporter queue utilization (%)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [
+            { "expr": "(otelcol_exporter_queue_size{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"} / clamp_min(otelcol_exporter_queue_capacity{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"}, 1)) * 100", "legendFormat": "{{ "{{instance}}" }}/{{ "{{exporter}}" }}" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "percent", "max": 100 } }
+        },
+        {
+          "title": "Exporter sent vs send_failed (records/sec)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "targets": [
+            { "expr": "sum by (exporter) (rate(otelcol_exporter_sent_log_records{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"}[5m]) + rate(otelcol_exporter_sent_metric_points{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"}[5m]) + rate(otelcol_exporter_sent_spans{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"}[5m]))", "legendFormat": "sent {{ "{{exporter}}" }}" },
+            { "expr": "sum by (exporter) (rate(otelcol_exporter_send_failed_log_records{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"}[5m]) + rate(otelcol_exporter_send_failed_metric_points{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"}[5m]) + rate(otelcol_exporter_send_failed_spans{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"}[5m]))", "legendFormat": "failed {{ "{{exporter}}" }}" }
+          ]
+        },
+        {
+          "title": "Pod memory (RSS bytes)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [
+            { "expr": "process_resident_memory_bytes{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"}", "legendFormat": "{{ "{{instance}}" }}" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "bytes" } }
+        },
+        {
+          "title": "Pod CPU (seconds/sec)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+          "targets": [
+            { "expr": "rate(process_cpu_seconds_total{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"}[5m])", "legendFormat": "{{ "{{instance}}" }}" }
+          ]
+        },
+        {
+          "title": "Tail sampling: decisions by policy (decisions/sec)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+          "targets": [
+            { "expr": "sum by (policy) (rate(otelcol_processor_tail_sampling_count_traces_sampled{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"}[5m]))", "legendFormat": "{{ "{{policy}}" }}" }
+          ]
+        },
+        {
+          "title": "Allowlist drops (attributes/sec)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+          "targets": [
+            { "expr": "jarvy_forwarder:transform_allowlist_dropped:rate10m{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\"}", "legendFormat": "{{ "{{instance}}" }}" }
+          ]
+        },
+        {
+          "title": "Batch processor: outgoing items/sec",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+          "targets": [
+            { "expr": "sum by (processor) (rate(otelcol_processor_outgoing_items{app_kubernetes_io_name=\"{{ include "jarvy-telemetry-forwarder.name" . }}\",instance=~\"$instance\",processor=~\"batch\"}[5m]))", "legendFormat": "{{ "{{processor}}" }}" }
+          ]
+        },
+        {
+          "title": "Pod restarts (15m window)",
+          "type": "timeseries",
+          "gridPos": { "h": 6, "w": 12, "x": 0, "y": 32 },
+          "targets": [
+            { "expr": "increase(kube_pod_container_status_restarts_total{namespace=\"{{ .Release.Namespace }}\",container=\"otelcol\"}[15m])", "legendFormat": "{{ "{{pod}}" }}" }
+          ]
+        },
+        {
+          "title": "Cert expiry (days)",
+          "type": "stat",
+          "gridPos": { "h": 6, "w": 12, "x": 12, "y": 32 },
+          "targets": [
+            { "expr": "(certmanager_certificate_expiration_timestamp_seconds{namespace=\"{{ .Release.Namespace }}\",name=~\".*-tls\"} - time()) / 86400", "legendFormat": "{{ "{{name}}" }}" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "d", "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 14 }, { "color": "green", "value": 30 } ] } } }
+        }
+      ]
+    }
+{{- end }}

@@ -50,6 +50,13 @@ spec:
     spec:
       serviceAccountName: {{ include "jarvy-telemetry-forwarder.fullname" . }}
       automountServiceAccountToken: false
+      # Suppress per-Service env-var injection (default true injects
+      # `${SVC}_PORT_*` for every Service in the namespace, bloating
+      # pod env on busy namespaces and slowing cold start).
+      enableServiceLinks: false
+      {{- with .Values.collector.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
       securityContext:
         {{- toYaml .Values.collector.podSecurityContext | nindent 8 }}
       containers:
@@ -82,8 +89,23 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.piiSaltSecretName }}
                   key: {{ .Values.secrets.piiSaltSecretKey }}
+            {{- if and .Values.collector.receiverAuth .Values.collector.receiverAuth.enabled }}
+            - name: OTLP_RECEIVER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "collector.receiverAuth.secretName is required when receiverAuth.enabled=true" .Values.collector.receiverAuth.secretName }}
+                  key: {{ .Values.collector.receiverAuth.secretKey }}
+            {{- end }}
           resources:
             {{- toYaml .Values.collector.resources | nindent 12 }}
+          {{- with .Values.collector.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.collector.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           livenessProbe:
             {{- toYaml .Values.collector.livenessProbe | nindent 12 }}
           readinessProbe:

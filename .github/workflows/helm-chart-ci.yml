@@ -78,11 +78,70 @@ jobs:
               # `--` terminates grep options; the pattern begins with `-` so
               # without it grep treats `- debug` as a flag and bails.
               grep -cF -e '- debug' /tmp/debug-exporter.yaml | grep -qE '^3$'
+          # Production-overlay: simulates the on-release default (a
+          # real sha256 digest). Asserts the rendered image string
+          # uses digest pinning, not the mutable tag.
+          - name: production-overlay
+            args: --set collector.image.digest=sha256:b65527791431d76d058b2813748a3f4a8912540d7b23beac2f6b4e02c872f5b7
+            asserts: |
+              grep -F '@sha256:b65527791431d76d058b2813748a3f4a8912540d7b23beac2f6b4e02c872f5b7' /tmp/production-overlay.yaml
+          # Common-annotations fanout regression test. The v0.1.0
+          # chart only stamped commonAnnotations onto Namespace +
+          # ServiceAccount; v0.2.0 fixed it. This test guards every
+          # rendered metadata block carries the annotation.
+          - name: common-annotations-fanout
+            args: --set commonAnnotations.regression-test-key=test-val
+            asserts: |
+              # Every rendered Kind with a metadata block must carry the annotation.
+              EXPECTED=$(yq 'select(.kind != null) | .kind' /tmp/common-annotations-fanout.yaml | wc -l)
+              WITH_ANN=$(yq 'select(.metadata.annotations."regression-test-key" == "test-val") | .kind' /tmp/common-annotations-fanout.yaml | wc -l)
+              if [[ "${EXPECTED}" -ne "${WITH_ANN}" ]]; then
+                echo "::error::common annotation drop: ${WITH_ANN}/${EXPECTED} resources carry it"
+                exit 1
+              fi
+          # NetworkPolicy egress-mode scenarios. `wide` (legacy),
+          # `wide-except-rfc1918` (default), `fqdn` (Cilium).
+          - name: networkpolicy-fqdn
+            args: --set networkPolicy.egressMode=fqdn
+            asserts: |
+              grep -F 'CiliumNetworkPolicy' /tmp/networkpolicy-fqdn.yaml
+              grep -F 'toFQDNs' /tmp/networkpolicy-fqdn.yaml
+          - name: networkpolicy-wide-except-rfc1918
+            args: ""
+            asserts: |
+              grep -F '10.0.0.0/8' /tmp/networkpolicy-wide-except-rfc1918.yaml
+              grep -F '192.168.0.0/16' /tmp/networkpolicy-wide-except-rfc1918.yaml
+          # Receiver auth opt-in: bearertokenauth/receiver extension
+          # is wired and OTLP_RECEIVER_TOKEN env is present.
+          - name: receiver-auth
+            args: >-
+              --set collector.receiverAuth.enabled=true
+              --set collector.receiverAuth.secretName=test-secret
+            asserts: |
+              grep -F 'bearertokenauth/receiver' /tmp/receiver-auth.yaml
+              grep -F 'OTLP_RECEIVER_TOKEN' /tmp/receiver-auth.yaml
+              grep -F 'name: test-secret' /tmp/receiver-auth.yaml
+          # Non-Traefik with explicit unprotected acknowledgement —
+          # install proceeds, DoS gate didn't fire.
+          - name: gatewayclass-envoy-accepted
+            args: >-
+              --set gatewayApi.gateway.gatewayClassName=envoy
+              --set gatewayApi.traefikMiddlewares.enabled=false
+              --set gatewayApi.dosProtection.acceptUnprotected=true
+            asserts: |
+              grep -F 'kind: HTTPRoute' /tmp/gatewayclass-envoy-accepted.yaml
+              # No Middleware should render
+              ! grep -F 'kind: Middleware' /tmp/gatewayclass-envoy-accepted.yaml
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
         with: { version: v3.18.0 }
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
 
       - name: helm lint --strict
         run: helm lint "${CHART_DIR}" --strict
@@ -102,6 +161,36 @@ jobs:
         run: |
           set -euo pipefail
           ${{ matrix.scenario.asserts }}
+
+      # Universal security-context assertions on every rendered
+      # manifest. These survive a values override that tries to
+      # weaken the chart's PSS-Restricted posture — the schema
+      # rejects most of these too, but render-side belt-and-suspenders
+      # catches a template-edit regression even if schema didn't.
+      - name: Security-context regression guards (every scenario)
+        run: |
+          set -euo pipefail
+          OUT="/tmp/${{ matrix.scenario.name }}.yaml"
+          # Pod-level securityContext
+          yq -e 'select(.kind=="Deployment").spec.template.spec.securityContext.runAsNonRoot == true' "${OUT}" >/dev/null \
+            || { echo "::error::Deployment pod securityContext.runAsNonRoot != true in ${OUT}"; exit 1; }
+          # Container-level securityContext
+          yq -e 'select(.kind=="Deployment").spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation == false' "${OUT}" >/dev/null \
+            || { echo "::error::container allowPrivilegeEscalation != false in ${OUT}"; exit 1; }
+          yq -e 'select(.kind=="Deployment").spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem == true' "${OUT}" >/dev/null \
+            || { echo "::error::container readOnlyRootFilesystem != true in ${OUT}"; exit 1; }
+          yq -e 'select(.kind=="Deployment").spec.template.spec.containers[0].securityContext.capabilities.drop[] | select(. == "ALL")' "${OUT}" >/dev/null \
+            || { echo "::error::container capabilities.drop missing ALL in ${OUT}"; exit 1; }
+          # ServiceAccount + pod-level automount
+          yq -e 'select(.kind=="ServiceAccount").automountServiceAccountToken == false' "${OUT}" >/dev/null \
+            || { echo "::error::ServiceAccount automountServiceAccountToken != false in ${OUT}"; exit 1; }
+          yq -e 'select(.kind=="Deployment").spec.template.spec.automountServiceAccountToken == false' "${OUT}" >/dev/null \
+            || { echo "::error::Deployment pod automountServiceAccountToken != false in ${OUT}"; exit 1; }
+          # ServiceMonitor honorLabels MUST stay false
+          if yq -e 'select(.kind=="ServiceMonitor")' "${OUT}" >/dev/null 2>&1; then
+            yq -e 'select(.kind=="ServiceMonitor").spec.endpoints[0].honorLabels == false' "${OUT}" >/dev/null \
+              || { echo "::error::ServiceMonitor honorLabels != false in ${OUT}"; exit 1; }
+          fi
 
       - uses: ./.github/actions/install-kubeconform
 
@@ -207,8 +296,11 @@ jobs:
             cat /tmp/out
             exit 1
           fi
-          if ! grep -iE "extraenv|schema|'not'|does not match" /tmp/out; then
-            echo "::error::helm exited non-zero but the output does not name the expected schema reason:"
+          # Precise reason check: the rejection must cite BOTH
+          # `extraEnv` AND `PII_SALT`. Looser greps (e.g. just
+          # "schema") have false-positived on unrelated helm banners.
+          if ! grep -F 'extraEnv' /tmp/out >/dev/null || ! grep -F 'PII_SALT' /tmp/out >/dev/null; then
+            echo "::error::reject did not name extraEnv+PII_SALT; output:"
             cat /tmp/out
             exit 1
           fi
@@ -253,6 +345,52 @@ jobs:
             cat /tmp/out
             exit 1
           fi
+
+      - name: PDB minAvailable + maxUnavailable both set must fail
+        run: |
+          if helm template ci "${CHART_DIR}" --namespace jarvy-telemetry \
+            --set pdb.minAvailable=1 --set pdb.maxUnavailable=1 2>/tmp/out; then
+            echo "::error::render unexpectedly succeeded"
+            cat /tmp/out
+            exit 1
+          fi
+          grep -F "mutually exclusive" /tmp/out
+
+      - name: tls.certManager.enabled + existingSecretName must fail
+        run: |
+          if helm template ci "${CHART_DIR}" --namespace jarvy-telemetry \
+            --set tls.certManager.enabled=true --set tls.existingSecretName=mine 2>/tmp/out; then
+            echo "::error::render unexpectedly succeeded"
+            cat /tmp/out
+            exit 1
+          fi
+          grep -F "mutually exclusive" /tmp/out
+
+      - name: non-Traefik GatewayClass without DoS-protection acknowledgement must fail
+        run: |
+          if helm template ci "${CHART_DIR}" --namespace jarvy-telemetry \
+            --set gatewayApi.gateway.gatewayClassName=envoy \
+            --set gatewayApi.traefikMiddlewares.enabled=false 2>/tmp/out; then
+            echo "::error::render unexpectedly succeeded (DoS gate didn't fire)"
+            cat /tmp/out
+            exit 1
+          fi
+          grep -F "unprotected" /tmp/out
+
+      - name: containerSecurityContext flipping privileged must fail (schema-enforced)
+        run: |
+          cat > /tmp/bad-sec.yaml <<'EOF'
+          collector:
+            containerSecurityContext:
+              privileged: true
+          EOF
+          if helm template ci "${CHART_DIR}" --namespace jarvy-telemetry \
+            --values /tmp/bad-sec.yaml >/tmp/out 2>&1; then
+            echo "::error::render unexpectedly succeeded with privileged=true"
+            cat /tmp/out
+            exit 1
+          fi
+          grep -iE "does not match|schema|privileged|const" /tmp/out
 
   values-schema:
     name: values.schema.json invariants
@@ -506,3 +644,211 @@ jobs:
 
       - name: actionlint
         run: actionlint -color .github/workflows/helm-release.yml .github/workflows/helm-chart-ci.yml .github/workflows/release.yml
+
+  runbook-anchors:
+    name: Every alert runbook_url anchor exists in the ops doc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with: { version: v3.18.0 }
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Render default and extract runbook anchors
+        run: |
+          set -euo pipefail
+          helm template ci "${CHART_DIR}" --namespace jarvy-telemetry > /tmp/render.yaml
+          yq -r 'select(.kind=="PrometheusRule").spec.groups[].rules[]?.annotations.runbook_url' /tmp/render.yaml \
+            | grep -v '^null$' \
+            | grep -oE '#alert-[a-z0-9-]+' \
+            | sort -u > /tmp/anchors.txt
+          test -s /tmp/anchors.txt
+          echo "Anchors referenced by alerts:"; cat /tmp/anchors.txt
+
+      - name: Every referenced anchor exists in docs/operations/telemetry-forwarder.md
+        run: |
+          set -euo pipefail
+          MISSING=0
+          while IFS= read -r anchor; do
+            slug="${anchor#\#}"
+            if ! grep -F "{${anchor}}" docs/operations/telemetry-forwarder.md > /dev/null \
+                && ! grep -F "{#${slug}}" docs/operations/telemetry-forwarder.md > /dev/null; then
+              echo "::error::runbook anchor ${anchor} not found in docs/operations/telemetry-forwarder.md"
+              MISSING=1
+            fi
+          done < /tmp/anchors.txt
+          if [[ ${MISSING} -ne 0 ]]; then exit 1; fi
+
+  readme-schema-drift:
+    name: README ↔ values.schema.json invariants must agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: README must NOT advertise the old `^https?://.+` exporter pattern
+        run: |
+          # The schema enforces ^https://... ; the README must not
+          # claim the weaker ^https?:// permits http or userinfo.
+          if grep -F '^https?://' "${CHART_DIR}/README.md"; then
+            echo "::error::README.md advertises the old ^https?:// pattern; schema actually enforces ^https://"
+            exit 1
+          fi
+
+      - name: README references the real schema pattern
+        run: grep -F "^https://" "${CHART_DIR}/README.md"
+
+      - name: README acknowledges PDB mutual exclusion
+        run: grep -F "minAvailable" "${CHART_DIR}/README.md" | grep -F "maxUnavailable" >/dev/null || \
+             grep -F "mutually exclusive" "${CHART_DIR}/README.md" >/dev/null
+
+      - name: README mentions egressMode + DoS protection gate
+        run: |
+          grep -F "egressMode" "${CHART_DIR}/README.md"
+          grep -F "DoS protection" "${CHART_DIR}/README.md"
+
+  multi-helm-version:
+    name: helm 3.14 / 3.16 / 3.18 render smoke
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        helm-version: [v3.14.4, v3.16.4, v3.18.0]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with: { version: "${{ matrix.helm-version }}" }
+
+      - name: helm lint
+        run: helm lint "${CHART_DIR}"
+
+      - name: helm template default
+        run: helm template ci "${CHART_DIR}" --namespace jarvy-telemetry > /dev/null
+
+  kind-install-upgrade:
+    name: Live install + upgrade on kind (k8s 1.31)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with: { fetch-depth: 0, fetch-tags: true }
+
+      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with: { version: v3.18.0 }
+
+      - name: Create kind cluster
+        uses: helm/kind-action@a1b0e391336a6ee6e6b1cd3c1f59c11dba8c1c70 # v1.10.0
+        with:
+          version: v0.24.0
+          node_image: kindest/node:v1.31.0
+          cluster_name: jarvy-helm-ci
+
+      - name: Install Gateway API CRDs (minimal — chart references them)
+        run: |
+          kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.1.0/standard-install.yaml
+
+      - name: Determine previous chart version (if any)
+        id: prev
+        run: |
+          set -euo pipefail
+          # Use the prior in-tree chart version if accessible; otherwise
+          # skip the upgrade leg and only do a fresh install.
+          CURRENT=$(yq -r .version "${CHART_DIR}/Chart.yaml")
+          # Find the last `helm-vX.Y.Z` tag strictly less than CURRENT.
+          # Heuristic: sort -V and pick the largest tag whose version
+          # is < CURRENT. For first-version PRs there will be no prior
+          # tag — that's a clean "fresh install only" leg.
+          PREV_TAG=$(git tag --list 'helm-v*' --sort=-v:refname | head -10 | grep -v "^helm-v${CURRENT}$" | head -1 || true)
+          echo "previous_tag=${PREV_TAG}" >> "$GITHUB_OUTPUT"
+          echo "current_version=${CURRENT}" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Install required CRDs (cert-manager, ExternalSecrets, Traefik, Prometheus Operator)
+        run: |
+          # Minimal CRD subset — chart references types in these groups.
+          # We install only the CRDs (not the controllers) since the
+          # smoke test just validates Helm can install the manifests
+          # without controller reconciliation.
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.0/cert-manager.crds.yaml
+          kubectl apply -f https://raw.githubusercontent.com/external-secrets/external-secrets/v0.10.0/config/crds/bases/external-secrets.io_externalsecrets.yaml
+          kubectl apply -f https://raw.githubusercontent.com/external-secrets/external-secrets/v0.10.0/config/crds/bases/external-secrets.io_clustersecretstores.yaml
+          kubectl apply -f https://raw.githubusercontent.com/prometheus-community/helm-charts/main/charts/kube-prometheus-stack/charts/crds/crds/crd-servicemonitors.yaml
+          kubectl apply -f https://raw.githubusercontent.com/prometheus-community/helm-charts/main/charts/kube-prometheus-stack/charts/crds/crds/crd-prometheusrules.yaml
+
+      - name: Fresh install (current chart)
+        run: |
+          set -euo pipefail
+          kubectl create namespace jarvy-telemetry
+          # Provide stub Secrets so the Deployment can mount them.
+          kubectl -n jarvy-telemetry create secret generic grafana-otlp-token --from-literal=token=stub
+          kubectl -n jarvy-telemetry create secret generic pii-salt --from-literal=salt=000000000000000000000000000000000000000000000000000000000000fake
+          helm install jarvy-telemetry "${CHART_DIR}" \
+            --namespace jarvy-telemetry \
+            --set secrets.strategy=existing \
+            --wait --timeout 5m
+          kubectl rollout status deploy/jarvy-telemetry-jarvy-telemetry-forwarder -n jarvy-telemetry --timeout=5m
+
+      - name: Upgrade leg — only if a prior tag exists
+        if: steps.prev.outputs.previous_tag != ''
+        run: |
+          set -euo pipefail
+          PREV_TAG="${{ steps.prev.outputs.previous_tag }}"
+          PREV_VERSION="${PREV_TAG#helm-v}"
+          echo "Testing upgrade from ${PREV_VERSION} → ${{ steps.prev.outputs.current_version }}"
+          # Check out the prior chart version
+          git stash
+          git checkout "${PREV_TAG}" -- "${CHART_DIR}" || { echo "no prior chart in tag ${PREV_TAG}; skipping"; git stash pop; exit 0; }
+          helm uninstall jarvy-telemetry -n jarvy-telemetry --wait
+          helm install jarvy-telemetry "${CHART_DIR}" --namespace jarvy-telemetry --set secrets.strategy=existing --wait --timeout 5m
+          # Restore current chart
+          git checkout HEAD -- "${CHART_DIR}"
+          git stash pop || true
+          helm upgrade jarvy-telemetry "${CHART_DIR}" --namespace jarvy-telemetry --set secrets.strategy=existing --wait --timeout 5m
+          kubectl rollout status deploy -l app.kubernetes.io/name=jarvy-telemetry-forwarder -n jarvy-telemetry --timeout=5m
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl describe deploy -n jarvy-telemetry || true
+          kubectl get events -n jarvy-telemetry --sort-by=.lastTimestamp || true
+          kubectl logs -n jarvy-telemetry -l app.kubernetes.io/name=jarvy-telemetry-forwarder --tail=200 || true
+
+  promtool-check:
+    name: PromQL alerts validate under promtool
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with: { version: v3.18.0 }
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Install promtool
+        run: |
+          set -euo pipefail
+          PROMVER=2.54.1
+          curl -sSfL -o /tmp/prom.tgz \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROMVER}/prometheus-${PROMVER}.linux-amd64.tar.gz"
+          tar -xzf /tmp/prom.tgz -C /tmp
+          sudo install "/tmp/prometheus-${PROMVER}.linux-amd64/promtool" /usr/local/bin/
+
+      - name: Default PrometheusRule passes promtool
+        run: |
+          set -euo pipefail
+          helm template ci "${CHART_DIR}" --namespace jarvy-telemetry > /tmp/render.yaml
+          yq 'select(.kind=="PrometheusRule")' /tmp/render.yaml > /tmp/promrule.yaml
+          test -s /tmp/promrule.yaml
+          promtool check rules /tmp/promrule.yaml

@@ -94,9 +94,42 @@
           }
         },
         "podSecurityContext": { "type": "object" },
-        "containerSecurityContext": { "type": "object" },
+        "containerSecurityContext": {
+          "type": "object",
+          "description": "Pinned-security-knob constraints: privileged=false, allowPrivilegeEscalation=false, readOnlyRootFilesystem=true, capabilities.drop must contain ALL. Operator overrides that flip these are rejected.",
+          "properties": {
+            "privileged": { "const": false },
+            "allowPrivilegeEscalation": { "const": false },
+            "readOnlyRootFilesystem": { "const": true },
+            "runAsNonRoot": { "const": true },
+            "capabilities": {
+              "type": "object",
+              "properties": {
+                "drop": {
+                  "type": "array",
+                  "contains": { "const": "ALL" }
+                }
+              },
+              "required": ["drop"]
+            }
+          }
+        },
         "livenessProbe": { "type": "object" },
         "readinessProbe": { "type": "object" },
+        "startupProbe": { "type": "object" },
+        "lifecycle": { "type": "object" },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
+        "receiverAuth": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "headerName": { "type": "string" },
+            "scheme": { "type": "string" },
+            "secretName": { "type": "string" },
+            "secretKey": { "type": "string" }
+          }
+        },
         "logLevel": { "type": "string", "enum": ["debug", "info", "warn", "error"] },
         "logFormat": { "type": "string", "enum": ["json", "text", "console"] },
         "pipeline": {
@@ -357,6 +390,14 @@
               }
             }
           }
+        },
+        "dosProtection": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "DoS-protection acknowledgement gate. When the install runs on a non-Traefik GatewayClass and httpRoute.extraFilters is empty, set acceptUnprotected=true to explicitly accept an unprotected receiver — only safe behind a trusted private network. See security review F4.",
+          "properties": {
+            "acceptUnprotected": { "type": "boolean" }
+          }
         }
       }
     },
@@ -393,6 +434,11 @@
         "enabled": { "type": "boolean" },
         "ingressNamespace": { "type": "string" },
         "monitoringNamespace": { "type": "string" },
+        "egressMode": {
+          "type": "string",
+          "enum": ["wide", "wide-except-rfc1918", "fqdn"],
+          "description": "Egress shape. `wide` is the legacy `to: []` on 443. `wide-except-rfc1918` excludes private IP ranges (default). `fqdn` renders a CiliumNetworkPolicy restricting to the parsed exporter hostname (requires Cilium)."
+        },
         "cilium": {
           "type": "object",
           "additionalProperties": false,
@@ -455,6 +501,24 @@
               "properties": {
                 "enabled": { "type": "boolean" },
                 "threshold": { "type": "number" },
+                "for": { "type": "string" }
+              }
+            },
+            "exporterQueueSaturated": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+                "for": { "type": "string" }
+              }
+            },
+            "podRestarting": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "thresholdRestarts": { "type": "integer", "minimum": 0 },
                 "for": { "type": "string" }
               }
             },
@@ -522,7 +586,20 @@
       "required": ["enabled"],
       "properties": {
         "enabled": { "type": "boolean" },
-        "minAvailable": { "type": ["integer", "string"] }
+        "minAvailable": { "type": ["integer", "string", "null"] },
+        "maxUnavailable": { "type": ["integer", "string", "null"] }
+      }
+    },
+
+    "grafanaDashboard": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "sidecarLabel": { "type": "string" },
+        "sidecarLabelValue": { "type": "string" },
+        "namespaceOverride": { "type": "string" },
+        "folder": { "type": "string" }
       }
     },
 

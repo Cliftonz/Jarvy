@@ -20,12 +20,16 @@ commonAnnotations: {}
 collector:
   image:
     repository: otel/opentelemetry-collector-contrib
-    # Prefer `digest` over `tag` in production. When `digest` is set,
-    # the deployment renders `repository@digest` and `tag` is decorative.
-    # Tag-only is convenient for first install but allows upstream to
-    # silently re-push under the same tag (supply-chain risk).
+    # Production-default: pinned by sha256 digest. `tag` stays as a
+    # human-readable marker but the deployment renders
+    # `repository@digest`. To bump, run:
+    #   docker pull otel/opentelemetry-collector-contrib:<new-tag>
+    #   docker inspect ... --format '{{.RepoDigests}}'
+    # then update BOTH tag and digest together. Leaving digest empty
+    # is permitted (e.g. for `helm template` development) but the
+    # `production-overlay` CI matrix asserts digest is set on release.
     tag: "0.107.0"
-    digest: ""
+    digest: "sha256:b65527791431d76d058b2813748a3f4a8912540d7b23beac2f6b4e02c872f5b7"
     pullPolicy: IfNotPresent
   replicas: 2
   # -- Pod-level annotations. Useful for stakater/reloader rolling
@@ -41,12 +45,20 @@ collector:
   # `limits.memory`. Default math: 500 MiB limiter / 768 Mi cgroup
   # = 65% — leaves headroom for Go runtime + goroutine stacks + tail
   # sampling LRU. Do not lower without also lowering pipeline.memoryLimiter.
+  #
+  # NOTE: `limits.cpu` is intentionally OMITTED. CFS quota throttling
+  # on an I/O-bound forwarder adds 10-100ms p99 latency on burst with
+  # no upside — the workload bursts above 1 vCPU on batch flush +
+  # SHA-256 anonymize. `requests.cpu` reserves a floor for scheduling;
+  # HPA scales on memory + queue-depth (see autoscaling block). If
+  # you operate in a noisy-neighbor environment and need isolation,
+  # set `limits.cpu` explicitly under `--set` — but understand that
+  # you're trading p99 latency for isolation.
   resources:
     requests:
       cpu: 100m
       memory: 384Mi
     limits:
-      cpu: 1000m
       memory: 768Mi
   # -- Set `autoscaling.enabled: true` to swap fixed `replicas` for an HPA.
   # The Collector workload is memory- and queue-bound, not CPU-bound; HPA
@@ -80,6 +92,13 @@ collector:
         selectPolicy: Max
       scaleDown:
         stabilizationWindowSeconds: 300
+        # Explicit policies: drop at most 1 pod per minute. Without
+        # `policies` k8s falls back to "halve replicas per 15s" which
+        # can over-shoot into memory_limiter pressure and trigger a
+        # re-scale-up — replica thrash.
+        policies:
+          - { type: Pods, value: 1, periodSeconds: 60 }
+        selectPolicy: Min
   # -- Topology spread across nodes; safe default.
   topologySpread:
     enabled: true
@@ -99,16 +118,50 @@ collector:
     capabilities:
       drop: ["ALL"]
     readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    # Belt-and-suspenders: pod-level seccomp is inherited, but
+    # explicit container-level RuntimeDefault prevents the profile
+    # from being dropped on clusters with PSS=baseline.
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Graceful-shutdown window. The Collector's batch processor
+  # holds up to `batch.sendBatchMaxSize` records and the exporter
+  # queue may hold several batches. SIGTERM → 30s default → SIGKILL
+  # would drop those on every voluntary disruption (node drain, HPA
+  # scale-down, rolling upgrade). 60s + a 15s preStop sleep gives
+  # the LB time to drain AND the batch/exporter time to flush.
+  terminationGracePeriodSeconds: 60
+  lifecycle:
+    preStop:
+      exec:
+        command: ["/bin/sh", "-c", "sleep 15"]
   # -- Health probes. The Collector's `health_check` extension binds
-  # to 13133 inside the pod.
+  # to 13133 inside the pod. Critical asymmetry: liveness must NOT
+  # flip on backpressure (memory_limiter graceful refusal) — flipping
+  # it cascade-restarts every replica during burst, defeating the
+  # backpressure design. Readiness CAN flip on backpressure so the
+  # LB sheds load. Achieved by:
+  #   - Enabling `check_collector_pipeline` on the health extension
+  #     (see `_helpers.tpl::collectorConfig`), so `/` returns 503 on
+  #     pipeline failure.
+  #   - Giving liveness a longer failureThreshold so transient
+  #     backpressure doesn't trip restart.
+  # `startupProbe` covers slow-pull cold starts (image not cached on
+  # a fresh node); failureThreshold × periodSeconds = 60s budget.
   livenessProbe:
     httpGet: { path: /, port: health }
-    initialDelaySeconds: 10
+    initialDelaySeconds: 30
     periodSeconds: 30
+    failureThreshold: 6
   readinessProbe:
     httpGet: { path: /, port: health }
     initialDelaySeconds: 5
-    periodSeconds: 10
+    periodSeconds: 5
+    failureThreshold: 2
+  startupProbe:
+    httpGet: { path: /, port: health }
+    failureThreshold: 30
+    periodSeconds: 2
   # -- Self-log level + format. JSON is required for structured Loki
   # queries; INFO is the right default for production (DEBUG floods
   # at scale).
@@ -161,6 +214,27 @@ collector:
     verbosity: normal
     samplingInitial: 5
     samplingThereafter: 200
+  # -- Optional bearer-token authentication on the OTLP receiver.
+  # When `enabled: true`, the receiver requires every inbound HTTP
+  # request to carry a `<headerName>: <scheme> <token>` header where
+  # `<token>` is read from `secretName`/`secretKey`. Tokens are
+  # opaque to the chart — generate per-tenant via your secrets
+  # provider, distribute out-of-band.
+  #
+  # OFF by default to preserve drop-in compatibility with the v0.x
+  # contract; production multi-tenant deployments should turn it on.
+  # See PRD security review F1.
+  receiverAuth:
+    enabled: false
+    # Header to inspect on the inbound request.
+    headerName: "Authorization"
+    # Expected scheme on the header value (e.g. `Bearer foo123`).
+    scheme: "Bearer"
+    # Name of an existing Secret holding the accepted token(s).
+    # Single-token mode: Secret.data.token = "<base64-of-token>".
+    # Multi-token mode: not yet supported (track in PRD followup).
+    secretName: ""
+    secretKey: token
   # -- Extra environment variables for the Collector pod.
   extraEnv: []
   #  - name: SOME_OTHER_TOKEN
@@ -325,7 +399,12 @@ gatewayApi:
     #     "gateway.envoyproxy.io/extension": "..."
     annotations: {}
     labels: {}
-    # -- Listeners on the Gateway. HTTPS only by default.
+    # -- Listeners on the Gateway. HTTPS only by default. Per-listener
+    # `options` map is rendered through as-is — use it to set
+    # GatewayClass-specific TLS knobs (minimum TLS version, cipher
+    # restrictions). The chart can't enforce these uniformly across
+    # GatewayClasses (each implements a different option-key
+    # namespace) but documents the right ones for the major classes.
     listeners:
       - name: https
         port: 443
@@ -333,6 +412,16 @@ gatewayApi:
         tls:
           mode: Terminate
           # Certificate ref filled in from tls.* below by the template.
+          # GatewayClass-specific TLS hardening. The chart renders
+          # whatever keys are present here — operator's choice which
+          # apply to their GatewayClass.
+          # Envoy Gateway:
+          #   gateway.envoyproxy.io/min-tls-version: "1.3"
+          # Traefik (via Middleware-level TLS option, not listener):
+          #   set on the chart-rendered Middleware not the Gateway
+          # Istio:
+          #   set via VirtualService.tls.minProtocolVersion
+          options: {}
         allowedRoutes:
           namespaces:
             from: Same
@@ -412,14 +501,35 @@ gatewayApi:
       # so large requests spill to disk rather than pinning RAM.
       memRequestBodyBytes: 8192
 
+  # -- DoS-protection acknowledgement gate. When the install runs on
+  # a non-Traefik GatewayClass (`traefikMiddlewares.enabled=false`),
+  # the chart cannot render the rate-limit + body-cap Middlewares
+  # that protect the OTLP receiver. The operator MUST supply
+  # equivalent filters via `httpRoute.extraFilters` — and confirm by
+  # setting `acceptUnprotected: true` if they intentionally want to
+  # run unprotected (e.g. behind a trusted private network).
+  #
+  # The template fails install when:
+  #   traefikMiddlewares.enabled = false
+  #   httpRoute.extraFilters = []
+  #   dosProtection.acceptUnprotected = false
+  #
+  # This is the canonical exposure for "I installed on Envoy Gateway
+  # and forgot the rate limit" — security review F4.
+  dosProtection:
+    acceptUnprotected: false
+
 # -----------------------------------------------------------------------------
 # TLS via cert-manager
 # -----------------------------------------------------------------------------
 tls:
-  # -- When true, a cert-manager `Certificate` resource is created
-  # and referenced from the Gateway listener. When false, you are
-  # expected to manage the cert externally and supply the Secret
-  # name via `tls.existingSecretName`.
+  # -- Mutually exclusive: either let cert-manager produce the cert
+  # (`certManager.enabled: true`) OR supply an existing Secret name
+  # (`existingSecretName: "my-secret"`). Setting both is rejected at
+  # template time. `existingSecretName` is only consumed when
+  # `gatewayApi.enabled=true` and `gateway.create=true` — if you
+  # disable the chart's Gateway, you also manage cert wiring outside
+  # the chart and this field has no effect.
   certManager:
     enabled: true
     issuerRef:
@@ -438,10 +548,19 @@ networkPolicy:
   ingressNamespace: traefik
   # -- Namespace of the Prometheus scraper (for ServiceMonitor).
   monitoringNamespace: monitoring
+  # -- Egress shape. `wide` is the legacy default — `to: []` on 443
+  # to any IP. `wide-except-rfc1918` keeps the standard
+  # NetworkPolicy but excludes RFC1918 private ranges from the
+  # egress allowlist, shrinking blast radius if the collector pod is
+  # ever compromised. `fqdn` requires Cilium and renders a
+  # CiliumNetworkPolicy restricting egress to the parsed
+  # `exporter.endpoint` hostname only (best — recommended).
+  #
+  # Legacy `cilium.enabled: true` is equivalent to
+  # `egressMode: fqdn` and is honored for backwards compatibility.
+  egressMode: wide-except-rfc1918
   # -- CiliumNetworkPolicy with FQDN-based egress restriction.
-  # When enabled, replaces the wide `to: []` egress on 443 with a
-  # CiliumNetworkPolicy that restricts egress to the parsed hostname
-  # of `exporter.endpoint` only. Requires Cilium as the CNI.
+  # Equivalent to `egressMode: fqdn`; kept for backwards-compat.
   #
   # `fqdn`: explicit override of the auto-parsed FQDN. The auto-parse
   # is best-effort (strips scheme, port, path, and userinfo); set
@@ -469,9 +588,37 @@ serviceMonitor:
   # in the operational doc + PrometheusRule, including the new
   # `transform`-processor metrics that surface allowlist drops.
   metricRelabelings:
+    # Keep-list is intentionally narrow: receiver acceptance/refusal,
+    # exporter send/queue, batch processor essentials (incoming/
+    # outgoing items + size), tail-sampling decisions, process-level
+    # RSS/CPU. Drops the per-processor `*_dropped`, generic
+    # `transform_*` metric expansion (3 processors × signals adds
+    # ~30 series per pod with no operational use), and noisy
+    # internal counters. See observability review F10.
     - sourceLabels: [__name__]
-      regex: "otelcol_receiver_(accepted|refused)_.*|otelcol_exporter_(sent|send_failed|queue_size).*|otelcol_processor_(dropped|tail_sampling_count|transform).*|process_resident_memory_bytes|process_cpu_seconds_total|otelcol_process_uptime"
+      regex: "otelcol_receiver_(accepted|refused)_.*|otelcol_exporter_(sent|send_failed|queue_size|queue_capacity).*|otelcol_processor_(batch_(batch_send_size|batch_send_size_trigger_send_count)|incoming_items|outgoing_items|tail_sampling_count_traces_sampled)|process_resident_memory_bytes|process_cpu_seconds_total|otelcol_process_uptime"
       action: keep
+
+# -----------------------------------------------------------------------------
+# Grafana dashboard — operator-facing panels for the forwarder
+# pipeline. Rendered as a ConfigMap with the
+# `grafana_dashboard: "1"` label so the standard Grafana sidecar
+# (`sidecar.dashboards.enabled` in the grafana chart) auto-imports.
+# Disable if you provision dashboards out-of-band.
+# -----------------------------------------------------------------------------
+grafanaDashboard:
+  enabled: true
+  # -- Label key/value the Grafana sidecar matches to discover
+  # ConfigMaps. Match your Grafana sidecar's
+  # `sidecar.dashboards.label` / `labelValue` setting.
+  sidecarLabel: grafana_dashboard
+  sidecarLabelValue: "1"
+  # -- Namespace the dashboard ConfigMap is created in. Default is
+  # the release namespace; override if your Grafana sidecar is
+  # configured to watch only the monitoring namespace.
+  namespaceOverride: ""
+  # -- Folder name shown in Grafana's dashboard list.
+  folder: "Jarvy"
 
 # -----------------------------------------------------------------------------
 # PrometheusRule — ships alerts named in the operational doc as code.
@@ -502,29 +649,52 @@ prometheusRule:
       for: 10m
     exporterFailing:
       enabled: true
+      # `threshold` is records/sec. Default 1/sec for 5 minutes is
+      # the same severity as "sustained backend outage." Pair with
+      # `JarvyForwarderExporterQueueSaturated` for the leading
+      # indicator (see below).
       threshold: 1
+      for: 5m
+    # Leading indicator of exporter trouble — the persistent queue
+    # fills before `send_failed_*` starts incrementing. Alerts at
+    # 80% of queue capacity so on-call has a chance to act before
+    # records are dropped.
+    exporterQueueSaturated:
+      enabled: true
+      threshold: 0.8
       for: 5m
     memoryPressure:
       enabled: true
       thresholdBytes: 629145600  # 600 MiB
       for: 10m
-    # Salt-staleness alert reads kube-state-metrics' `kube_secret_info`
-    # join (no chart-side exporter needed). Default off because the
-    # `kube_secret_created` metric needs kube-state-metrics ≥ v2.5;
-    # enable when you've confirmed the metric exists.
+    # Salt-staleness alert: drives age from the ExternalSecret sync
+    # call timestamp (the only reliable signal for "salt content
+    # was refreshed"). Default off because it requires the
+    # external-secrets-operator's metrics endpoint to be scraped by
+    # the same Prometheus.
     saltStale:
       enabled: false
       thresholdDays: 100  # quarterly rotation +10d grace
     tailSamplingLow:
       enabled: true
       thresholdPercent: 0.005  # alert below 0.5% effective sample rate
-    # Allowlist-drop alert: fires when the keep_keys processor drops
-    # unknown attribute keys. Leading indicator of either an attack
-    # or a Jarvy CLI release shipping a new attribute that needs to
-    # be added to pii.passThroughAttributes / pii.hashedAttributes.
+    # Allowlist-drop alert: fires when the keep_keys processor
+    # actually drops attributes from records. Compares the transform
+    # processor's incoming-attribute count to the outgoing count.
+    # Leading indicator of either an attack or a Jarvy CLI release
+    # shipping a new attribute that needs to be added to
+    # pii.passThroughAttributes / pii.hashedAttributes.
     allowlistDroppingKeys:
       enabled: true
       for: 15m
+    # Pod-restart alert: fires when the collector pod is restarting
+    # repeatedly. The most common "is it broken" signal — fires
+    # when the existing pipeline alerts can't (pod never gets
+    # healthy enough to emit metrics).
+    podRestarting:
+      enabled: true
+      thresholdRestarts: 2
+      for: 5m
     # Reloader-missing alert: fires when stakater/reloader is absent,
     # making salt rotation silently no-op. The chart relies on
     # Reloader picking up Secret content changes via the
@@ -549,12 +719,21 @@ prometheusRule:
       daysBeforeExpiry: 14
 
 # -----------------------------------------------------------------------------
-# Pod Disruption Budget — keep at least one replica during voluntary
-# disruptions (node drains, cluster upgrades).
+# Pod Disruption Budget — limit voluntary disruption to one replica
+# at a time. `maxUnavailable: 1` lets the cluster autoscaler / node
+# drain proceed one pod at a time without stalling forever waiting
+# for replacement pods to become Ready (which can take 20-40s with
+# Gateway/HTTPRoute attach + cert checks). `minAvailable` is mutually
+# exclusive — set one or the other, not both.
 # -----------------------------------------------------------------------------
 pdb:
   enabled: true
-  minAvailable: 1
+  # Exactly one of `minAvailable` / `maxUnavailable`. Default uses
+  # `maxUnavailable: 1` which is the right answer for ~all 2+ replica
+  # deployments. Set `minAvailable` (and clear `maxUnavailable`) if
+  # you specifically need a floor.
+  maxUnavailable: 1
+  minAvailable: null
 
 # -----------------------------------------------------------------------------
 # Namespace

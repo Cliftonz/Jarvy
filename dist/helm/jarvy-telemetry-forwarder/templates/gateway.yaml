@@ -1,4 +1,11 @@
 {{- if and .Values.gatewayApi.enabled .Values.gatewayApi.gateway.create }}
+{{- /* Mutual exclusion: certManager.enabled=true AND
+       existingSecretName != "" both supply a cert ref; if both are
+       set the chart silently prefers cert-manager and the operator's
+       existingSecretName is ignored. Fail loudly. */ -}}
+{{- if and .Values.tls.certManager.enabled (ne (toString (.Values.tls.existingSecretName | default "")) "") }}
+{{- fail "tls.certManager.enabled=true and tls.existingSecretName are mutually exclusive. Set exactly one." }}
+{{- end }}
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -9,13 +16,17 @@ metadata:
     {{- with .Values.gatewayApi.gateway.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+  {{- $commonAnn := include "jarvy-telemetry-forwarder.annotations" . -}}
+  {{- $gwAnn := .Values.gatewayApi.gateway.annotations | default dict -}}
+  {{- if or $commonAnn (gt (len $gwAnn) 0) }}
   annotations:
-    {{- with (include "jarvy-telemetry-forwarder.annotations" .) }}
+    {{- with $commonAnn }}
     {{- . | nindent 4 }}
     {{- end }}
-    {{- with .Values.gatewayApi.gateway.annotations }}
+    {{- with $gwAnn }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+  {{- end }}
 spec:
   gatewayClassName: {{ .Values.gatewayApi.gateway.gatewayClassName }}
   listeners:
@@ -26,6 +37,10 @@ spec:
       {{- if .tls }}
       tls:
         mode: {{ .tls.mode | default "Terminate" }}
+        {{- with .tls.options }}
+        options:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         {{- if $.Values.tls.certManager.enabled }}
         certificateRefs:
           - kind: Secret

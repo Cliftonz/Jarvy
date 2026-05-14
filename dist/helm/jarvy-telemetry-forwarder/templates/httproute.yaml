@@ -10,6 +10,21 @@
 {{- if and .Values.gatewayApi.traefikMiddlewares.enabled (ne .Values.gatewayApi.gateway.gatewayClassName "traefik") }}
 {{- fail (printf "gatewayApi.traefikMiddlewares.enabled=true requires gatewayApi.gateway.gatewayClassName=traefik (got %q). For non-Traefik GatewayClasses, set traefikMiddlewares.enabled=false and supply equivalent filters via gatewayApi.httpRoute.extraFilters." .Values.gatewayApi.gateway.gatewayClassName) }}
 {{- end }}
+{{- /*
+  DoS-protection acknowledgement gate (security review F4). When
+  traefikMiddlewares.enabled=false (i.e. non-Traefik GatewayClass)
+  AND extraFilters is empty AND the operator has not explicitly
+  acknowledged the lack of rate-limit / body-cap via
+  dosProtection.acceptUnprotected=true, fail install. The public
+  OTLP receiver should not be exposed to the internet without
+  ingress-side rate limiting.
+*/ -}}
+{{- $hasExtraFilters := and .Values.gatewayApi.httpRoute.extraFilters (gt (len .Values.gatewayApi.httpRoute.extraFilters) 0) -}}
+{{- $accepted := false -}}
+{{- with .Values.gatewayApi.dosProtection }}{{- $accepted = .acceptUnprotected | default false -}}{{- end }}
+{{- if and (not .Values.gatewayApi.traefikMiddlewares.enabled) (not $hasExtraFilters) (not $accepted) }}
+{{- fail "gatewayApi.traefikMiddlewares.enabled=false leaves the OTLP receiver unprotected by ingress-side rate limit + body cap. Supply equivalent filters via gatewayApi.httpRoute.extraFilters (e.g. Envoy Gateway ClientTrafficPolicy + RateLimit), OR set gatewayApi.dosProtection.acceptUnprotected=true to explicitly accept an unprotected receiver (only safe behind a trusted private network)." }}
+{{- end }}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -20,13 +35,17 @@ metadata:
     {{- with .Values.gatewayApi.httpRoute.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+  {{- $commonAnn := include "jarvy-telemetry-forwarder.annotations" . -}}
+  {{- $rtAnn := .Values.gatewayApi.httpRoute.annotations | default dict -}}
+  {{- if or $commonAnn (gt (len $rtAnn) 0) }}
   annotations:
-    {{- with (include "jarvy-telemetry-forwarder.annotations" .) }}
+    {{- with $commonAnn }}
     {{- . | nindent 4 }}
     {{- end }}
-    {{- with .Values.gatewayApi.httpRoute.annotations }}
+    {{- with $rtAnn }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+  {{- end }}
 spec:
   parentRefs:
     {{- if .Values.gatewayApi.gateway.create }}

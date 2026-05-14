@@ -936,7 +936,7 @@ Key alerts:
 
 - `otelcol_receiver_refused_log_records` > 0 (rate limiter is
   hitting valid traffic — investigate or raise the limit)
-- `otelcol_exporter_send_failed_log_records` rate > 1/min (Grafana
+- `otelcol_exporter_send_failed_log_records` rate > 1/sec (Grafana
   endpoint unhealthy or token invalid)
 - `process_resident_memory_bytes{namespace="jarvy-telemetry"}` > 350
   MiB sustained (memory limiter is about to kick in; investigate
@@ -946,6 +946,145 @@ Key alerts:
 - ExternalSecret reconciliation failures (Vault/backend is down or
   the path is wrong — the Collector keeps running on the cached
   Secret, but the next salt rotation won't take effect)
+
+### Alert runbooks
+
+Each subsection below corresponds to one alert shipped in the chart's
+`PrometheusRule`. The `runbook_url` on every alert anchors here.
+
+#### Alert: JarvyForwarderRefusedRecords {#alert-refused-records}
+
+**Trigger**: receiver is refusing inbound records (`memory_limiter`
+engaged OR rate-limit hit). **Action**:
+
+1. `kubectl logs -n jarvy-telemetry -l app.kubernetes.io/name=jarvy-telemetry-forwarder --tail=200`
+   — look for `RefusedDataSource` / `data refused` events.
+2. Check `otelcol_exporter_queue_size` — if also high, this is
+   backpressure from a slow backend (see
+   `JarvyForwarderExporterQueueSaturated`).
+3. Check Traefik / Envoy rate-limit middleware metrics — if the
+   limiter is rejecting legitimate traffic, raise
+   `gatewayApi.traefikMiddlewares.rateLimit.average` and re-apply.
+4. If neither: scale up (`kubectl scale deploy ... --replicas=4`)
+   to give memory headroom while you investigate.
+
+#### Alert: JarvyForwarderExporterFailing {#alert-exporter-failing}
+
+**Trigger**: exporter `send_failed_*` rate > 1/sec for 5m. **Action**:
+
+1. Verify the backend endpoint URL in `values.exporter.endpoint` is
+   reachable: `kubectl exec -it deploy/... -- curl -v
+   $BACKEND_OTLP_ENDPOINT/v1/logs` (expect 401 without a token).
+2. Verify the Grafana write token: `kubectl exec -it deploy/... --
+   curl -v -H "Authorization: Basic $BACKEND_OTLP_TOKEN"
+   $BACKEND_OTLP_ENDPOINT/v1/logs`. Expect 200/204.
+3. Check Grafana Cloud status page; check token TTL.
+4. If token is rotated, ensure the K8s Secret was updated and
+   Reloader rolled the pods.
+
+#### Alert: JarvyForwarderExporterQueueSaturated {#alert-exporter-queue-saturated}
+
+**Trigger**: exporter persistent queue >80% full. **Leading
+indicator** before `ExporterFailing` fires. **Action**:
+
+1. Check downstream (Grafana Cloud) latency dashboards — if the
+   backend is slow, the queue fills before drops start.
+2. Check `JarvyForwarderRefusedRecords` — if both fire,
+   `memory_limiter` is shedding inbound load to relieve queue
+   pressure.
+3. If queue stays >80% for >15m, scale up replicas to add queue
+   capacity, OR increase `collector.pipeline.batch.timeout` to
+   batch more aggressively.
+
+#### Alert: JarvyForwarderMemoryPressure {#alert-memory-pressure}
+
+**Trigger**: pod RSS > 600 MiB sustained 10m. **Action**:
+
+1. Check `tail_sampling.num_traces` — sized for ~500 traces/sec
+   arrival. If you've outgrown that, bump up.
+2. Check `otelcol_processor_batch_*` — large batches buffered
+   pending flush is a common cause.
+3. If genuine traffic growth, raise `collector.resources.limits.memory`
+   AND `collector.pipeline.memoryLimiter.limitMib` together (keep
+   the ~65% ratio).
+
+#### Alert: JarvyForwarderSaltStale {#alert-salt-stale}
+
+**Trigger**: PII salt Secret hasn't been refreshed by ExternalSecrets
+for >100 days. **Action**: rotate the salt value at your secret
+backend (Vault, AWS Secrets Manager, etc.). ExternalSecrets will
+detect the change on next refresh (1h default); Reloader rolls the
+collector pods. Verify with `kubectl get pod -n jarvy-telemetry -w`
+and check the new salt is in effect.
+
+#### Alert: JarvyForwarderTailSamplingRateLow {#alert-tail-sampling-low}
+
+**Trigger**: effective probabilistic sample rate <0.5% for 30m.
+Either `probabilisticSamplingPercentage` is too low for current
+traffic, OR the `num_traces` LRU is overflowing. **Action**:
+1. Check `otelcol_processor_tail_sampling_count_traces_sampled`
+   labels for evictions.
+2. Raise `numTraces` (memory cost: roughly `numTraces × avg_span_size`).
+3. If sample rate is intentionally low for cost reasons, raise the
+   alert threshold instead.
+
+#### Alert: JarvyForwarderAllowlistDroppingKeys {#alert-allowlist-dropping-keys}
+
+**Trigger**: `keep_keys` processor is dropping inbound attributes
+for 15m. **Action**:
+1. Inspect collector logs for the dropped key names: `kubectl logs ...
+   | grep "keep_keys"`.
+2. If a legitimate Jarvy CLI release introduced a new attribute,
+   add it to `pii.passThroughAttributes` (if non-identifying) or
+   `pii.hashedAttributes` (if identifying) in your values overlay.
+3. If the key name looks adversarial (e.g. `__proto__`, `<script>`,
+   long-random), treat as an exploitation attempt. File a
+   security-incident issue and review Traefik access logs for the
+   source IPs.
+
+#### Alert: JarvyForwarderPodRestarting {#alert-pod-restarting}
+
+**Trigger**: collector container restarted >2 times in 15m.
+**Action**:
+1. `kubectl describe pod` — look for `Last State: Terminated`
+   reasons (OOMKilled, Error, etc.).
+2. `kubectl logs ... --previous` for the prior pod's last words.
+3. Common causes: bad config (post-helm-upgrade), OOM (raise
+   memory limit), backend connectivity loss (will resolve when
+   downstream recovers).
+
+#### Alert: JarvyForwarderReloaderMissing {#alert-reloader-missing}
+
+**Trigger**: `reloader_reloader_reload_executed_total` is absent
+from Prometheus for 30m. **Action**: install stakater/reloader, OR
+acknowledge that salt rotation requires manual `kubectl rollout
+restart` after each ExternalSecret refresh.
+
+#### Alert: JarvyForwarderDebugExporterEnabled {#alert-debug-exporter-enabled}
+
+**Trigger**: `collector.debugExporter.enabled=true` annotation
+present on a pod for >1h. **Action**: set
+`collector.debugExporter.enabled=false` and `helm upgrade`. Audit
+who has `pods/log` RBAC in the namespace — anyone there could have
+read post-anonymize record summaries during the window.
+
+#### Alert: JarvyForwarderCertNotReady {#alert-cert-not-ready}
+
+**Trigger**: cert-manager Certificate is in `Ready=False` for 30m.
+**Action**:
+1. `kubectl describe certificate -n jarvy-telemetry`.
+2. Check ClusterIssuer health: `kubectl describe clusterissuer
+   letsencrypt-prod`.
+3. Typical causes: ACME rate limit, DNS-01 record drift, hosted
+   zone permission change.
+
+#### Alert: JarvyForwarderCertExpiringSoon {#alert-cert-expiring-soon}
+
+**Trigger**: TLS Certificate expires within 14 days. **Action**:
+cert-manager has not renewed automatically. Investigate same as
+`CertNotReady`; force renewal with `kubectl annotate certificate
+... cert-manager.io/issue-temporary-certificate=true --overwrite`
+then delete + recreate the Certificate.
 
 ---
 
