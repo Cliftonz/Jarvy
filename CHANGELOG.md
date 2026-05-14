@@ -29,6 +29,21 @@ for divergences from generic release skills.
 
 ## [Unreleased]
 
+## [helm-v0.4.0] — Chart enhancement plan v3 (2026-05-14)
+
+Multi-perspective parallel review (perf, security, QA, observability,
+maintainability) produced a 27-item enhancement plan; all 27 items
+ship together. Probe semantics, graceful shutdown, queue-saturation
+alert, dashboard, recording rules, image-digest default, FQDN egress
+mode, DoS-protection gate, split Service, container security context
+schema constraints, runbook anchors in the ops doc, and 5 new CI
+guards (kind install/upgrade, helm 3.14/3.16/3.18 matrix, promtool,
+README↔schema drift, runbook-anchor check). 13 render scenarios pass,
+8 template-time guards fire, `helm lint --strict` clean. **Backward
+compatible**: defaults harden but no required-field renames; legacy
+`networkPolicy.cilium.enabled=true` still works (now a synonym for
+`egressMode: fqdn`).
+
 ### Added — `jarvy-telemetry-forwarder` Helm chart
 
 A multi-perspective review (perf, security, QA, observability,
@@ -146,6 +161,14 @@ shipped together. Chart version bump pending.
 
 - The `cilium.enabled` values knob is still accepted but is now a
   synonym for `egressMode: fqdn`; future versions may remove.
+
+[helm-v0.4.0]: https://github.com/bearbinary/Jarvy/releases/tag/helm-v0.4.0
+
+---
+
+The entries below belong to the Jarvy CLI's pending `[Unreleased]`
+section; they ship with the next CLI tag, NOT with `helm-v0.4.0`.
+Listed here so the helm-v0.4.0 release notes do not absorb them.
 
 ### Sandbox auto-detection (PRD-053)
 
