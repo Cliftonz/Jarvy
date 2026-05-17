@@ -24,12 +24,23 @@
 //!
 //! ## Env knobs
 //!
-//! | Var                  | Default  | Effect                                      |
-//! |----------------------|----------|---------------------------------------------|
-//! | `JARVY_E2E_INSTALL`  | unset    | Master switch (opt-in)                      |
-//! | `JARVY_TEST_BIN`     | cargo-built | Override mounted binary (cross-builds)   |
-//! | `JARVY_BIN_LIBC`     | `glibc`  | Selects Alpine green/red path (`glibc`/`musl`) |
-//! | `JARVY_E2E_THREADS`  | 4        | Makefile-only knob; see Makefile            |
+//! | Var                       | Default     | Effect                                          |
+//! |---------------------------|-------------|-------------------------------------------------|
+//! | `JARVY_E2E_INSTALL`       | unset       | Master switch (opt-in)                          |
+//! | `JARVY_TEST_BIN_AARCH64`  | unset       | aarch64-linux jarvy (mounted for arm64 images)  |
+//! | `JARVY_TEST_BIN_X86_64`   | unset       | x86_64-linux jarvy (mounted for amd64 images)   |
+//! | `JARVY_TEST_BIN`          | cargo-built | Legacy single-arch override (host-arch only)    |
+//! | `JARVY_BIN_LIBC`          | `glibc`     | Selects Alpine green/red path (`glibc`/`musl`)  |
+//! | `JARVY_E2E_THREADS`       | 4           | Makefile-only knob; see Makefile                |
+//!
+//! ## Multi-arch resolution
+//!
+//! Each spec inspects its image's manifest list (`docker manifest
+//! inspect`) and picks a target arch via [`pick_target_arch`]: host
+//! arch first (no emulation), then x86_64 (universal), then whatever
+//! the image ships. The matching binary is mounted and the container
+//! is started with `--platform linux/<arch>`. Tests skip cleanly if
+//! the cross-build for the picked arch isn't present.
 //!
 //! ## Distro matrix
 //!
@@ -59,13 +70,14 @@
 
 mod common;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::OnceLock;
 use std::time::Instant;
 
 use common::{
     CONTAINER_HOME, CONTAINER_JARVY_BIN, CONTAINER_JARVY_HOME, CONTAINER_LIFETIME_SECS,
-    docker_available, host_jarvy_path, is_linux_elf, scrub_for_panic, short_sha256,
+    docker_available, is_linux_elf, scrub_for_panic, short_sha256,
 };
 use testcontainers::core::{AccessMode, CmdWaitFor, ExecCommand, Mount};
 use testcontainers::runners::SyncRunner;
@@ -133,20 +145,11 @@ fn compute_skip_reason() -> Option<String> {
     if !docker_available() {
         return Some("docker daemon not reachable".into());
     }
-    let bin = host_jarvy_path();
-    if !bin.exists() {
-        return Some(format!("jarvy binary not found at {}", bin.display()));
-    }
-    if !is_linux_elf(&bin) {
-        return Some(format!(
-            "binary at {} is not a Linux ELF — set JARVY_TEST_BIN to a \
-             cross-built linux jarvy (try `make test-install-pipeline`)",
-            bin.display()
-        ));
-    }
-    if let Err(why) = validate_host_bin(&bin) {
-        return Some(why);
-    }
+    // Per-arch binary validation moved into `exec_smoke` — with the
+    // dual-arch cross-build (Makefile builds both aarch64-gnu and
+    // x86_64-gnu) each spec picks a binary matching the image's
+    // selected platform, so there's no single "host bin" to validate
+    // up front.
     None
 }
 
@@ -172,6 +175,118 @@ fn validate_host_bin(bin: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Normalize an arch identifier — docker uses `amd64`/`arm64`, rust
+/// uses `x86_64`/`aarch64`, and the rest of this module standardizes
+/// on the rust form so we can index env vars and ELF magic against
+/// one set of strings.
+fn normalize_arch(s: &str) -> &str {
+    match s.trim() {
+        "amd64" | "x86_64" => "x86_64",
+        "arm64" | "aarch64" => "aarch64",
+        other => other,
+    }
+}
+
+/// Reverse: rust-form arch → docker `linux/<form>`. Used in
+/// `with_platform` to deterministically select the manifest when an
+/// image is multi-arch *and* to force x86_64-only images to pull
+/// under emulation on an aarch64 host (rather than 404 on no manifest).
+fn arch_to_docker_platform(arch: &str) -> &'static str {
+    match arch {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        _ => "amd64",
+    }
+}
+
+/// Resolve the jarvy binary built for a particular arch.
+///
+/// Lookup order:
+/// 1. `JARVY_TEST_BIN_AARCH64` / `JARVY_TEST_BIN_X86_64` — set by the
+///    Makefile after the dual-arch cross-build.
+/// 2. `JARVY_TEST_BIN` (legacy single-arch override) — accepted **only**
+///    when the requested arch matches the host arch, since the legacy
+///    convention was "matches the host". This preserves the single-bin
+///    workflow for Linux CI.
+fn bin_for_arch(arch: &str) -> Option<PathBuf> {
+    let primary = match arch {
+        "aarch64" => "JARVY_TEST_BIN_AARCH64",
+        "x86_64" => "JARVY_TEST_BIN_X86_64",
+        _ => return None,
+    };
+    if let Ok(p) = std::env::var(primary) {
+        return Some(PathBuf::from(p));
+    }
+    if normalize_arch(std::env::consts::ARCH) == arch
+        && let Ok(p) = std::env::var("JARVY_TEST_BIN")
+    {
+        return Some(PathBuf::from(p));
+    }
+    None
+}
+
+/// Architectures the registry serves for `image:tag@digest`.
+/// Returns the rust-form arch names, filtering out the OCI
+/// `attestation manifest` rows (`platform.architecture == "unknown"`).
+/// Empty vec = manifest inspection failed (no docker, no network, no
+/// permission, or a transient cloudflare reset on the blob fetch);
+/// caller treats that as "unknown — try the universal x86_64 path".
+///
+/// Retries once on transient failure — `docker manifest inspect` goes
+/// through a CDN that occasionally returns RST during fetch on flaky
+/// networks; the retry costs a second but turns a Fail into a Pass.
+fn image_archs(image: &str, tag: &str, digest: &str) -> Vec<String> {
+    let reference = format!("{image}:{tag}@{digest}");
+    for attempt in 0..2 {
+        let out = Command::new("docker")
+            .args(["manifest", "inspect", &reference])
+            .output();
+        match out {
+            Ok(o) if o.status.success() => {
+                let Ok(v): Result<serde_json::Value, _> = serde_json::from_slice(&o.stdout) else {
+                    return vec![];
+                };
+                return v
+                    .get("manifests")
+                    .and_then(|m| m.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|m| m.get("platform")?.get("architecture")?.as_str())
+                            .filter(|a| *a != "unknown")
+                            .map(|a| normalize_arch(a).to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+            }
+            _ if attempt == 0 => std::thread::sleep(std::time::Duration::from_secs(1)),
+            _ => return vec![],
+        }
+    }
+    vec![]
+}
+
+/// Pick the arch we'll actually run the container as. Preference:
+/// 1. Host arch if image supports it (no emulation).
+/// 2. x86_64 if image supports it (universal fallback, well-emulated
+///    by Rosetta-for-Linux on Apple Silicon Docker Desktop).
+/// 3. First arch the image lists.
+/// 4. x86_64 last-resort when manifest inspection failed — every
+///    image we exercise ships an amd64 manifest in practice, and a
+///    wrong guess surfaces as a clean "platform not provided"
+///    container-start error which `exec_smoke` converts to Skip.
+fn pick_target_arch(image_archs: &[String], host: &str) -> String {
+    if image_archs.iter().any(|a| a == host) {
+        return host.to_string();
+    }
+    if image_archs.iter().any(|a| a == "x86_64") {
+        return "x86_64".to_string();
+    }
+    if let Some(first) = image_archs.first() {
+        return first.clone();
+    }
+    "x86_64".to_string()
 }
 
 /// Which libc family a distro image expects from the mounted binary.
@@ -249,18 +364,54 @@ enum SmokeResult {
 /// without panicking, and so infra flakes become Skips not Fails.
 fn exec_smoke(spec: &SmokeSpec) -> SmokeResult {
     let started = Instant::now();
-    let jarvy = host_jarvy_path();
-    let bin_sha = short_sha256(&jarvy);
-    let host_arch = std::env::consts::ARCH;
+    let host_arch = normalize_arch(std::env::consts::ARCH);
     let pinned_tag = format!("{}@{}", spec.tag, spec.digest);
 
+    // Resolve target arch via the image's manifest list. Lets the
+    // x86_64-only images (e.g. archlinux:latest) run an x86_64 jarvy
+    // under emulation instead of crashing the aarch64 host bin on
+    // its missing dynamic loader.
+    let archs = image_archs(spec.image, spec.tag, spec.digest);
+    let target_arch = pick_target_arch(&archs, host_arch);
+    let docker_platform = arch_to_docker_platform(&target_arch);
+
+    let jarvy = match bin_for_arch(&target_arch) {
+        Some(p) => p,
+        None => {
+            return SmokeResult::Skip(format!(
+                "no jarvy binary for arch {target_arch} (image supports {archs:?}); \
+                 set JARVY_TEST_BIN_{} or run `make test-install-pipeline`",
+                target_arch.to_uppercase()
+            ));
+        }
+    };
+    if !jarvy.exists() {
+        return SmokeResult::Skip(format!(
+            "jarvy binary for {target_arch} not found at {}",
+            jarvy.display()
+        ));
+    }
+    if !is_linux_elf(&jarvy) {
+        return SmokeResult::Skip(format!(
+            "binary at {} is not a Linux ELF — JARVY_TEST_BIN_{} points at the wrong file",
+            jarvy.display(),
+            target_arch.to_uppercase()
+        ));
+    }
+    if let Err(why) = validate_host_bin(&jarvy) {
+        return SmokeResult::Skip(why);
+    }
+    let bin_sha = short_sha256(&jarvy);
+
     eprintln!(
-        "[{}] starting (image={}:{} digest={} host_arch={} bin={} bin_sha={})",
+        "[{}] starting (image={}:{} digest={} host_arch={} target_arch={} platform=linux/{} bin={} bin_sha={})",
         spec.label,
         spec.image,
         spec.tag,
         spec.digest,
         host_arch,
+        target_arch,
+        docker_platform,
         jarvy.display(),
         bin_sha
     );
@@ -271,11 +422,13 @@ fn exec_smoke(spec: &SmokeSpec) -> SmokeResult {
     // No `with_wait_for` — `CmdWaitFor::exit()` on the subsequent exec
     // already blocks on completion; a wall-clock sleep would burn time
     // for no signal (PRD-054 perf review F1).
+    let jarvy_path = jarvy.clone();
     let build_request = || {
         GenericImage::new(spec.image, pinned_tag.as_str())
+            .with_platform(format!("linux/{docker_platform}"))
             .with_cmd(vec!["sleep", CONTAINER_LIFETIME_SECS])
             .with_mount(
-                Mount::bind_mount(jarvy.to_string_lossy().into_owned(), CONTAINER_JARVY_BIN)
+                Mount::bind_mount(jarvy_path.to_string_lossy().into_owned(), CONTAINER_JARVY_BIN)
                     .with_access_mode(AccessMode::ReadOnly),
             )
             .with_env_var("JARVY_HOME", CONTAINER_JARVY_HOME)
@@ -297,11 +450,26 @@ fn exec_smoke(spec: &SmokeSpec) -> SmokeResult {
     // Docker Hub rate cap.
     let container = match build_request().start() {
         Ok(c) => c,
+        Err(e) if is_platform_mismatch_error(&e.to_string()) => {
+            return SmokeResult::Skip(format!(
+                "image {}:{} has no manifest for linux/{docker_platform} \
+                 (host_arch={host_arch}, picked target_arch={target_arch}, \
+                 image archs={archs:?}) — set JARVY_TEST_BIN_X86_64 to get \
+                 coverage of x86_64-only distros on this host",
+                spec.image, spec.tag
+            ));
+        }
         Err(e) if is_transient_pull_error(&e.to_string()) => {
             eprintln!("[{}] transient pull error, retrying in 5s: {e}", spec.label);
             std::thread::sleep(std::time::Duration::from_secs(5));
             match build_request().start() {
                 Ok(c) => c,
+                Err(e2) if is_platform_mismatch_error(&e2.to_string()) => {
+                    return SmokeResult::Skip(format!(
+                        "image {}:{} has no manifest for linux/{docker_platform} after retry",
+                        spec.image, spec.tag
+                    ));
+                }
                 Err(e2) if is_transient_pull_error(&e2.to_string()) => {
                     return SmokeResult::Skip(format!(
                         "transient docker-hub error after retry ({e2}) — likely unauthenticated pull rate limit"
@@ -429,6 +597,18 @@ fn is_transient_pull_error(msg: &str) -> bool {
         || lc.contains("status code 503")
         || lc.contains("status code 504"))
         && !lc.contains("no matching manifest")
+}
+
+/// True when the start error means "this image doesn't have a
+/// manifest for the platform we asked for". That's an image-vs-host
+/// arch skew (e.g. `archlinux:latest` ships amd64-only and we're on
+/// aarch64 with no x86_64 jarvy built) — not a jarvy regression, so
+/// the caller converts it to a Skip rather than a Fail.
+fn is_platform_mismatch_error(msg: &str) -> bool {
+    let lc = msg.to_lowercase();
+    lc.contains("does not provide the specified platform")
+        || lc.contains("no matching manifest")
+        || lc.contains("no match for platform in manifest")
 }
 
 /// `^jarvy X.Y[.Z...]$` — matches the clap-rendered version line

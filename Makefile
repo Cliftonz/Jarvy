@@ -63,32 +63,54 @@ test:  ## Run the test suite
 test-sandbox: $(LINUX_TEST_BIN)  ## Cross-build linux jarvy + run sandbox integration tests against Docker
 	JARVY_TEST_BIN=$(abspath $(LINUX_TEST_BIN)) cargo test --test sandbox_integration -- --nocapture
 
+# Dual-arch cross-build targets. The install-pipeline test inspects
+# each image's manifest list and mounts the matching binary — so
+# archlinux:latest (x86_64-only) runs an x86_64 jarvy under emulation
+# on an aarch64 host, while ubuntu (multi-arch) runs native. Without
+# the dual build, x86_64-only images failed with `exec ...: no such
+# file or directory` (ENOENT on the missing aarch64 dynamic loader).
+LINUX_TEST_BIN_AARCH64 := target/aarch64-unknown-linux-gnu/debug/jarvy
+LINUX_TEST_BIN_X86_64  := target/x86_64-unknown-linux-gnu/debug/jarvy
+
 # `--test-threads` is overridable: 8 parallel container spins swamp
 # Docker Desktop's default 4-8 GB cgroup on laptops, but fatter CI
 # runners can use the full matrix. Default 4 trades CI wall-clock for
 # laptop survivability — bump with `JARVY_E2E_THREADS=8 make ...`.
-test-install-pipeline: $(LINUX_TEST_BIN) e2e-pull-images  ## Smoke-test the locally built jarvy against every supported Linux distro in Docker
+test-install-pipeline: $(LINUX_TEST_BIN_AARCH64) $(LINUX_TEST_BIN_X86_64) e2e-pull-images  ## Smoke-test the locally built jarvy against every supported Linux distro in Docker
 	JARVY_E2E_INSTALL=1 \
-	JARVY_TEST_BIN=$(abspath $(LINUX_TEST_BIN)) \
+	JARVY_TEST_BIN_AARCH64=$(abspath $(LINUX_TEST_BIN_AARCH64)) \
+	JARVY_TEST_BIN_X86_64=$(abspath $(LINUX_TEST_BIN_X86_64)) \
 	JARVY_BIN_LIBC=$(JARVY_BIN_LIBC) \
 		cargo test --test e2e_install_pipeline -- --nocapture --test-threads=$${JARVY_E2E_THREADS:-4}
 
 # Pull all distro images in parallel with a one-shot retry. Pre-pull is
-# best-effort — some images (e.g. archlinux) ship x86_64-only manifests
-# and will fail on Apple Silicon. The per-distro test panics with a
-# clear breadcrumb if its image is unavailable, so this target never
-# fails the whole make invocation.
+# best-effort — x86_64-only images (e.g. archlinux) need an explicit
+# `--platform linux/amd64` on aarch64 hosts, which the test harness
+# does at run-time; the bare `docker pull` here may skip them, and
+# that's fine.
 e2e-pull-images:  ## Pre-pull the install-pipeline image set (best-effort, parallel)
 	@printf '%s\n' $(E2E_IMAGES) | xargs -P 8 -I{} sh -c \
 		'docker pull {} >/dev/null 2>&1 || (sleep 5 && docker pull {} >/dev/null 2>&1) \
-		|| echo "  (skipped — no manifest for current arch?) {}" >&2' || true
+		|| echo "  (skipped — no native manifest, will retry at run-time) {}" >&2' || true
 
-$(LINUX_TEST_BIN):
+$(LINUX_TEST_BIN_AARCH64): cross-required
+	cross build --target aarch64-unknown-linux-gnu --bin jarvy
+
+$(LINUX_TEST_BIN_X86_64): cross-required
+	cross build --target x86_64-unknown-linux-gnu --bin jarvy
+
+.PHONY: cross-required
+cross-required:
 	@command -v cross >/dev/null 2>&1 || { \
 		echo "cross not found. Install with:"; \
 		echo "  cargo install cross --git https://github.com/cross-rs/cross"; \
 		exit 1; \
 	}
+
+# Legacy single-arch target used by test-sandbox. PRD-053 only cared
+# about the aarch64 path; install-pipeline (above) is the multi-arch
+# replacement going forward.
+$(LINUX_TEST_BIN): cross-required
 	cross build --target $(LINUX_TEST_TARGET) --bin jarvy
 
 build:  ## Release build
