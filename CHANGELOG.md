@@ -29,6 +29,28 @@ for divergences from generic release skills.
 
 ## [Unreleased]
 
+## [helm-v0.5.1] — HTTPRoute `filters: null` lint fix (2026-05-17)
+
+### Fixed — `jarvy-telemetry-forwarder` Helm chart
+
+- HTTPRoute template no longer emits an empty `filters:` key (which
+  YAML-parses as `null`) when traefik middlewares are disabled and no
+  `extraFilters` are supplied. Surfaced by the `helm-chart-ci`
+  matrix's `gatewayclass-envoy-accepted` scenario, which has been
+  failing kubeconform-strict since the field was added — the Gateway
+  API HTTPRoute schema types `filters` as `array`, not
+  `array | null`. The fix wraps the key in an `or` guard so it is
+  omitted entirely when no filters apply, which is the
+  spec-compliant equivalent and produces no Argo CD drift.
+
+### Migration
+
+No action needed. Behavior at runtime is unchanged — a missing
+`filters` key and an empty `filters` list both mean "no filters
+applied". The diff visible on `helm diff upgrade` is purely the
+removal of an `null`-valued field from the rendered HTTPRoute when
+running without traefik middlewares.
+
 ## [helm-v0.5.0] — ExternalSecret Argo CD drift fix (2026-05-17)
 
 Rendered ExternalSecrets now emit the two server-side defaults the ESO

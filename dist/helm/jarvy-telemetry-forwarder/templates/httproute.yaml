@@ -88,6 +88,17 @@ spec:
           method: {{ .method }}
           {{- end }}
         {{- end }}
+      {{- /*
+        `filters:` key is only emitted when at least one filter would
+        be appended. Rendering an empty `filters:` becomes YAML `null`,
+        which kubeconform's strict HTTPRoute schema rejects (the
+        field's spec'd type is `array`, not `array | null`). Omitting
+        the key entirely is the spec-compliant equivalent of "no
+        filters" — that case is reachable when traefikMiddlewares is
+        disabled AND no extraFilters were supplied, e.g. on Envoy
+        Gateway with `dosProtection.acceptUnprotected=true`.
+      */ -}}
+      {{- if or $.Values.gatewayApi.traefikMiddlewares.enabled $.Values.gatewayApi.httpRoute.extraFilters }}
       filters:
         {{- /*
           Order matters: rate-limit BEFORE body-cap. Abusive clients
@@ -112,6 +123,7 @@ spec:
         {{- with $.Values.gatewayApi.httpRoute.extraFilters }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      {{- end }}
       backendRefs:
         - name: {{ include "jarvy-telemetry-forwarder.fullname" $ }}
           port: 4318
