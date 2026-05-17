@@ -30,10 +30,11 @@
 //! resolved binary is not a Linux ELF (so a stray `cargo test` on
 //! macOS without the cross-build setup doesn't paint the suite red).
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
+mod common;
+
 use std::time::Duration;
 
+use common::{docker_available, host_jarvy_path, is_linux_elf};
 use testcontainers::core::{AccessMode, CmdWaitFor, ExecCommand, Mount, WaitFor};
 use testcontainers::runners::SyncRunner;
 use testcontainers::{GenericImage, ImageExt};
@@ -49,41 +50,12 @@ const DEBIAN_BOOKWORM_SLIM_DIGEST: &str =
 const BUILDPACK_DEPS_BOOKWORM_SCM_DIGEST: &str =
     "sha256:2c2f3c4c9796456a30812a9b1276615878d5f3a31f982a319b0ef3c6234ea6c0";
 
-/// Docker reachable? If not, the whole module silently skips. Keeps
-/// the test usable on dev laptops without a daemon and on CI runners
-/// that disable Docker for some matrices.
-fn docker_available() -> bool {
-    Command::new("docker")
-        .arg("info")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
-/// Resolve the jarvy binary to mount into the container.
-///
-/// Order: `JARVY_TEST_BIN` env override, then Cargo's
-/// `CARGO_BIN_EXE_jarvy` fallback. The env override is how macOS
-/// devs point at a cross-compiled Linux binary; CI on Linux uses
-/// the fallback transparently.
-fn host_jarvy_path() -> PathBuf {
-    std::env::var("JARVY_TEST_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_BIN_EXE_jarvy")))
-}
-
-/// True if the resolved jarvy binary is an ELF (Linux/BSD) image.
-/// Used to skip tests cleanly on hosts that don't have a Linux
-/// binary staged — running tests with a mach-o or PE binary would
-/// fail container exec immediately with a noisy error.
-fn is_linux_elf(path: &Path) -> bool {
-    use std::io::Read;
-    let mut buf = [0u8; 4];
-    match std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut buf)) {
-        Ok(()) => buf == [0x7f, b'E', b'L', b'F'],
-        Err(_) => false,
-    }
-}
+// `docker_available`, `host_jarvy_path`, `is_linux_elf` live in
+// `tests/common/mod.rs` — shared with `e2e_install_pipeline.rs`.
+// `skip_reason` is **intentionally not extracted** (counterweight per
+// the PRD-054 maintainability review F2): the install-pipeline file's
+// skip rules add a CI loud-fail and a libc check that don't belong in
+// the sandbox flow.
 
 /// Skip if Docker is unreachable OR the resolved binary is not a
 /// Linux ELF. Returns a short reason string for the skip log so

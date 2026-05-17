@@ -747,6 +747,20 @@ pub fn run_setup(
         let _ = mark_initialized();
     }
 
+    // Post-install PATH hint: when something was newly installed,
+    // remind the user that new binaries / PATH updates dropped by
+    // package-manager postscripts only land in *future* shells. The
+    // running shell still has the pre-setup PATH. Previously the
+    // legacy `refresh_shell()` tried to source `~/.zprofile` and
+    // `exec` the user's shell mid-setup; that aborted the whole
+    // flow when the user's dotfiles had any syntax incompatibility
+    // with `/bin/sh`, and on success replaced the jarvy process so
+    // post-install hooks never ran. Plain hint instead.
+    if !dry_run && !successfully_installed.is_empty() {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "$SHELL".to_string());
+        println!("\nTip: open a new terminal or run `exec {shell}` to pick up new PATH entries.");
+    }
+
     // Second chance to surface the telemetry opt-in. The first-run
     // boxed notice in `src/init.rs` is the primary ask, but it only
     // fires when `~/.jarvy/` is created. A user can blow past it
