@@ -11,7 +11,17 @@
   isolates ingress/middleware as the suspect.
 
   Skip with `--set tests.enabled=false`.
+
+  Nested `if` (not `if .Values.tests.enabled` directly) so the
+  template stays nil-safe when the chart files from main are
+  checked out against a prior-tag values.yaml that doesn't yet
+  have a `tests:` block. The CI upgrade-leg step exposed this:
+  `git checkout helm-vX.Y.Z -- CHART_DIR` overlays old files but
+  leaves new untracked files like this one — and a direct
+  `.Values.tests.enabled` would nil-deref. The outer `if
+  .Values.tests` short-circuits before the inner check.
 */ -}}
+{{- if .Values.tests }}
 {{- if .Values.tests.enabled }}
 apiVersion: v1
 kind: Pod
@@ -87,4 +97,5 @@ spec:
         {{- toYaml .Values.tests.securityContext | nindent 8 }}
       resources:
         {{- toYaml .Values.tests.resources | nindent 8 }}
+{{- end }}
 {{- end }}
