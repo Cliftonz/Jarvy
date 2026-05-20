@@ -12,7 +12,7 @@ use super::subcommands::*;
 #[derive(Parser)]
 #[clap(
     name = "jarvy",
-    version = "0.2",
+    version = env!("CARGO_PKG_VERSION"),
     author = "Zac Clifton",
     about = "Jarvy: a helper to configure and verify your computer",
     long_about = "Jarvy helps you set up and verify your computer based on a jarvy.toml configuration.\n\nUSAGE:\n    jarvy <COMMAND> [OPTIONS]\n\nEXAMPLES:\n    jarvy --help\n    jarvy configure\n    jarvy setup --file ./jarvy.toml\n    jarvy get --format json --output report.json\n\nRun without a subcommand to use the interactive menu."
