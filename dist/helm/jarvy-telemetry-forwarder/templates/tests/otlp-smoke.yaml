@@ -23,7 +23,14 @@ metadata:
     app.kubernetes.io/component: chart-test
   annotations:
     "helm.sh/hook": test
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    # `before-hook-creation` only — explicitly NOT `hook-succeeded`.
+    # `helm test --logs` fetches the test pod's logs AFTER the test
+    # completes; if `hook-succeeded` deletes the pod first, the log
+    # fetch fails with `pods ... not found` and the whole `helm test`
+    # invocation exits non-zero despite the test passing. Leaving the
+    # pod around lets `--logs` work; the next `helm test` cleans it
+    # up via `before-hook-creation`.
+    "helm.sh/hook-delete-policy": before-hook-creation
     {{- with (include "jarvy-telemetry-forwarder.annotations" .) }}
     {{- . | nindent 4 }}
     {{- end }}
