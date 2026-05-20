@@ -814,6 +814,7 @@ jobs:
           kubectl rollout status deploy/jarvy-telemetry-jarvy-telemetry-forwarder -n jarvy-telemetry --timeout=5m
 
       - name: helm test smoke (OTLP /v1/{logs,metrics,traces})
+        id: helm_test_smoke
         run: |
           set -euo pipefail
           # Exercises the receiver pipeline in-cluster via the chart's
@@ -822,6 +823,27 @@ jobs:
           # answering OTLP/HTTP — most often a config-pipeline wiring
           # bug or a NetworkPolicy regression.
           helm test jarvy-telemetry -n jarvy-telemetry --logs --timeout 2m
+
+      - name: Diagnostics on helm test failure
+        if: failure() && steps.helm_test_smoke.conclusion == 'failure'
+        run: |
+          set +e
+          echo "::group::pods"; kubectl get pods -n jarvy-telemetry -o wide; echo "::endgroup::"
+          echo "::group::services"; kubectl get svc -n jarvy-telemetry -o wide; echo "::endgroup::"
+          echo "::group::endpoints"; kubectl get endpoints -n jarvy-telemetry -o yaml; echo "::endgroup::"
+          echo "::group::networkpolicy"; kubectl get networkpolicy -n jarvy-telemetry -o yaml; echo "::endgroup::"
+          echo "::group::collector describe"
+          kubectl describe deploy/jarvy-telemetry-jarvy-telemetry-forwarder -n jarvy-telemetry
+          echo "::endgroup::"
+          echo "::group::collector logs (last 200 lines)"
+          kubectl logs -n jarvy-telemetry -l app.kubernetes.io/name=jarvy-telemetry-forwarder --tail=200 || true
+          echo "::endgroup::"
+          echo "::group::test pod describe"
+          kubectl describe pod/jarvy-telemetry-jarvy-telemetry-forwarder-test-otlp-smoke -n jarvy-telemetry || true
+          echo "::endgroup::"
+          echo "::group::test pod logs"
+          kubectl logs pod/jarvy-telemetry-jarvy-telemetry-forwarder-test-otlp-smoke -n jarvy-telemetry || true
+          echo "::endgroup::"
 
       - name: Upgrade leg — only if a prior tag exists
         if: steps.prev.outputs.previous_tag != ''
