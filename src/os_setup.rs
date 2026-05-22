@@ -123,10 +123,10 @@ pub fn set_up_os(platform: &str) {
             ensure_rosetta_installed();
             ensure_xcode_clt_installed();
         }
-        "Linux" => {
+        "linux" => {
             debug!("No OS-level configuration required on Linux");
         }
-        "Windows" => {
+        "windows" => {
             println!("Set Windows system configurations");
 
             let output = match std::process::Command::new("powershell")
