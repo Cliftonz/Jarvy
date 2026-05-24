@@ -89,6 +89,71 @@ impl Default for TelemetryConfig {
 }
 
 impl TelemetryConfig {
+    /// Apply a project-level `[telemetry]` table on top of an existing
+    /// (typically user-global + env) config, enforcing the trust-boundary
+    /// rule: a project `jarvy.toml` arriving via `git clone <untrusted>`
+    /// may **narrow** the user's opt-in but never **broaden** it.
+    ///
+    /// Narrowing is allowed (and applied):
+    /// - `enabled = false` disables telemetry for this run
+    /// - per-signal flags (`logs` / `metrics` / `traces`) AND with the
+    ///   target — project can turn a signal off, never on
+    /// - `sample_rate` takes `.min()` — project can reduce, never raise
+    ///
+    /// Broadening is refused (and reported back):
+    /// - the project's `enabled = true` does NOT enable when the target
+    ///   is disabled; only `JARVY_TELEMETRY=1` (explicit env consent)
+    ///   or a global config change can do that
+    /// - an endpoint override that differs from both the system default
+    ///   AND the current target returns a sanitized warning string;
+    ///   callers print it to stderr so the user knows the project's
+    ///   intent was visible but ignored
+    ///
+    /// Returns `Some(message)` when a warning should be surfaced,
+    /// otherwise `None`. The message is pre-sanitized for safe display
+    /// (control bytes stripped) — the project's endpoint string is
+    /// attacker-controlled when the project came from an untrusted
+    /// repo, so embedding it raw would let a malicious project clear
+    /// the terminal and forge fake Jarvy output.
+    pub fn narrow_with_project(&mut self, project: &TelemetryConfig) -> Option<String> {
+        // Allow narrowing: project may disable.
+        if !project.enabled {
+            self.enabled = false;
+        }
+        // Allow narrowing per-signal: AND with the target so any "off"
+        // wins. Project cannot turn a signal on when the target has it
+        // off.
+        self.logs = self.logs && project.logs;
+        self.metrics = self.metrics && project.metrics;
+        self.traces = self.traces && project.traces;
+        // Sample rate: take the minimum so the project can only reduce.
+        // NaN-safe: `f64::min` returns the non-NaN argument when one is
+        // NaN, so a malformed config can't poison the rate.
+        self.sample_rate = self.sample_rate.min(project.sample_rate);
+
+        // Refuse endpoint overrides — return a warning so callers can
+        // print it. Compare against both the system default and the
+        // current target so a project that happens to echo the user's
+        // already-set endpoint doesn't trigger a spurious message.
+        let default_endpoint = TelemetryConfig::default().endpoint;
+        if project.endpoint != default_endpoint && project.endpoint != self.endpoint {
+            // Sanitize the project's endpoint before embedding —
+            // attacker-controlled input must not reach stderr raw.
+            // Defer to the tool-name sanitizer; the rules (strip C0/C1
+            // and Unicode tricks, length-cap) apply equally well to a
+            // URL display value.
+            let safe = crate::tools::unsupported::sanitize_for_display(&project.endpoint);
+            return Some(format!(
+                "[jarvy] project jarvy.toml requests non-default telemetry endpoint ({}). \
+                 Refusing without explicit consent. Inspect jarvy.toml, then re-run with \
+                 JARVY_OTLP_ENDPOINT set to your chosen endpoint (do not copy the value \
+                 above blindly).",
+                safe
+            ));
+        }
+        None
+    }
+
     /// Load config from environment variables, overriding defaults
     pub fn from_env() -> Self {
         let mut config = Self::default();
@@ -309,8 +374,12 @@ fn build_telemetry_state(config: TelemetryConfig) -> TelemetryState {
                         .with_description("Number of tool installations by status")
                         .build(),
                     tool_not_supported: meter
-                        .u64_counter("jarvy.tool.not_supported")
-                        .with_description("Number of unsupported tool requests")
+                        .u64_counter("jarvy.tool.unsupported")
+                        .with_description(
+                            "Number of unsupported tool requests \
+                             (one per `tool.unsupported` event, sourced from \
+                             config / mcp / cli / request)",
+                        )
                         .build(),
                     errors: meter
                         .u64_counter("jarvy.errors")
@@ -1241,6 +1310,214 @@ mod tests {
         assert_eq!(Source::Mcp.to_string(), "mcp");
         assert_eq!(Source::Cli.to_string(), "cli");
         assert_eq!(Source::Request.to_string(), "request");
+    }
+
+    // ----- narrow_with_project trust-boundary tests -----------------
+    //
+    // These pin the security claim that a project `jarvy.toml` (arriving
+    // via untrusted `git clone`) may narrow telemetry but never broaden
+    // it. Flipping any boolean direction in the helper must fail at
+    // least one of these tests.
+
+    fn user_telemetry_on() -> TelemetryConfig {
+        TelemetryConfig {
+            enabled: true,
+            endpoint: "https://telemetry.jarvy.dev".to_string(),
+            protocol: "http".to_string(),
+            logs: true,
+            metrics: true,
+            traces: true,
+            sample_rate: 1.0,
+            resource: HashMap::new(),
+        }
+    }
+
+    fn project_telemetry_default() -> TelemetryConfig {
+        // Mirrors the implicit shape when a project jarvy.toml has only
+        // a partial `[telemetry]` table.
+        TelemetryConfig::default()
+    }
+
+    #[test]
+    fn narrow_with_project_can_disable_when_user_enabled() {
+        let mut user = user_telemetry_on();
+        let project = TelemetryConfig {
+            enabled: false,
+            ..project_telemetry_default()
+        };
+        let warning = user.narrow_with_project(&project);
+        assert!(warning.is_none(), "no warning expected on plain disable");
+        assert!(!user.enabled, "project must be able to disable");
+    }
+
+    #[test]
+    fn narrow_with_project_cannot_enable_when_user_disabled() {
+        let mut user = TelemetryConfig::default(); // enabled = false
+        let project = TelemetryConfig {
+            enabled: true,
+            ..TelemetryConfig::default()
+        };
+        let _ = user.narrow_with_project(&project);
+        assert!(
+            !user.enabled,
+            "project enabling must not broaden user opt-out"
+        );
+    }
+
+    #[test]
+    fn narrow_with_project_ands_signal_flags() {
+        let mut user = user_telemetry_on();
+        let project = TelemetryConfig {
+            logs: false,
+            metrics: false,
+            traces: true, // user has true; AND must keep true
+            ..project_telemetry_default()
+        };
+        let _ = user.narrow_with_project(&project);
+        assert!(!user.logs, "project can turn logs off");
+        assert!(!user.metrics, "project can turn metrics off");
+        assert!(user.traces, "project cannot turn traces on (AND-narrowing)");
+    }
+
+    #[test]
+    fn narrow_with_project_ands_signal_cannot_broaden() {
+        // User has metrics=false; project metrics=true must NOT enable.
+        let mut user = TelemetryConfig {
+            metrics: false,
+            ..user_telemetry_on()
+        };
+        let project = TelemetryConfig {
+            metrics: true,
+            ..project_telemetry_default()
+        };
+        let _ = user.narrow_with_project(&project);
+        assert!(!user.metrics, "AND-narrowing must not flip false to true");
+    }
+
+    #[test]
+    fn narrow_with_project_sample_rate_takes_min() {
+        let mut user = TelemetryConfig {
+            sample_rate: 0.5,
+            ..user_telemetry_on()
+        };
+        let project = TelemetryConfig {
+            sample_rate: 0.1,
+            ..project_telemetry_default()
+        };
+        let _ = user.narrow_with_project(&project);
+        assert!(
+            (user.sample_rate - 0.1).abs() < 1e-9,
+            "min must apply: {}",
+            user.sample_rate
+        );
+
+        // Inverse: project asks for higher rate — must not broaden.
+        let mut user2 = TelemetryConfig {
+            sample_rate: 0.1,
+            ..user_telemetry_on()
+        };
+        let project2 = TelemetryConfig {
+            sample_rate: 0.9,
+            ..project_telemetry_default()
+        };
+        let _ = user2.narrow_with_project(&project2);
+        assert!(
+            (user2.sample_rate - 0.1).abs() < 1e-9,
+            "project cannot raise sample_rate"
+        );
+    }
+
+    #[test]
+    fn narrow_with_project_refuses_endpoint_override_with_warning() {
+        let mut user = user_telemetry_on();
+        let project = TelemetryConfig {
+            endpoint: "https://attacker.tld/collect".to_string(),
+            ..project_telemetry_default()
+        };
+        let warning = user
+            .narrow_with_project(&project)
+            .expect("endpoint mismatch must produce a warning");
+        assert!(
+            user.endpoint.starts_with("https://telemetry.jarvy.dev"),
+            "user endpoint must be untouched: {}",
+            user.endpoint
+        );
+        assert!(
+            warning.contains("non-default telemetry endpoint"),
+            "warning text contract: {}",
+            warning
+        );
+        assert!(
+            warning.contains("JARVY_OTLP_ENDPOINT"),
+            "warning must point at the env-var escape hatch"
+        );
+    }
+
+    #[test]
+    fn narrow_with_project_endpoint_warning_sanitizes_attacker_bytes() {
+        // The whole point of refusing: don't let attacker-controlled
+        // bytes reach stderr verbatim. Control bytes that would clear
+        // the terminal or forge output must be stripped.
+        let mut user = user_telemetry_on();
+        let project = TelemetryConfig {
+            endpoint: "https://evil.tld\x1b[2J\x1b[Hfake".to_string(),
+            ..project_telemetry_default()
+        };
+        let warning = user.narrow_with_project(&project).unwrap();
+        assert!(
+            !warning.contains('\x1b'),
+            "ANSI escape must not survive: {:?}",
+            warning
+        );
+    }
+
+    #[test]
+    fn narrow_with_project_matching_endpoint_no_warning() {
+        // If the project echoes the user's already-set endpoint, no
+        // warning — that's just confirming the user's choice.
+        let mut user = TelemetryConfig {
+            endpoint: "https://example.com/otlp".to_string(),
+            ..user_telemetry_on()
+        };
+        let project = TelemetryConfig {
+            endpoint: "https://example.com/otlp".to_string(),
+            ..project_telemetry_default()
+        };
+        let warning = user.narrow_with_project(&project);
+        assert!(warning.is_none(), "matching endpoint must not warn");
+    }
+
+    #[test]
+    fn tool_request_explicit_returns_false_when_telemetry_uninit() {
+        // The test binary doesn't call `telemetry::init`, so TELEMETRY
+        // is `None` and the counter is dropped. Item 1's regression
+        // guard for the `--request` channel-lie bug relies on this
+        // branch returning `false` so the caller routes to Manual.
+        //
+        // The TELEMETRY OnceLock prevents us from also asserting the
+        // `true` branch in the same binary — the initialized branch
+        // is covered by the integration tests
+        // `tools_request_pretty_confirms_telemetry_send_when_enabled`
+        // and `tools_request_json_telemetry_on_reports_telemetry_channel`
+        // which spawn fresh processes with JARVY_TELEMETRY=1.
+        let fired = tool_request_explicit("nonexistent-tool", &[]);
+        assert!(
+            !fired,
+            "uninitialized telemetry must drop the metric and return false"
+        );
+    }
+
+    #[test]
+    fn narrow_with_project_default_endpoint_no_warning() {
+        // Project endpoint equals the system default — no override,
+        // no warning.
+        let mut user = TelemetryConfig {
+            endpoint: "https://example.com/otlp".to_string(),
+            ..user_telemetry_on()
+        };
+        let project = project_telemetry_default(); // .endpoint is the default
+        let warning = user.narrow_with_project(&project);
+        assert!(warning.is_none(), "default endpoint must not warn");
     }
 
     #[test]

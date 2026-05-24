@@ -11,7 +11,13 @@
 #![allow(dead_code)] // Public API consumed across the crate.
 
 /// `org/repo` slug used in GitHub URLs (issues, PRs, releases).
-pub const REPO_SLUG: &str = "bearbinary/Jarvy";
+///
+/// **Case matters.** GitHub redirects on the org segment but the path
+/// segment is case-sensitive in some downstream contexts (e.g., raw
+/// content URLs, Sigstore Fulcio certificate SAN matching). The rest
+/// of the repo uses lowercase `bearbinary/jarvy` — keep this constant
+/// aligned with that convention.
+pub const REPO_SLUG: &str = "bearbinary/jarvy";
 
 /// Base repo URL — `https://github.com/<slug>`.
-pub const REPO_URL: &str = "https://github.com/bearbinary/Jarvy";
+pub const REPO_URL: &str = "https://github.com/bearbinary/jarvy";

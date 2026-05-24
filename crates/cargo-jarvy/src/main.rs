@@ -34,12 +34,12 @@ fn new_tool(name: String, bin: Option<String>) -> Result<()> {
     // Validate the name before any filesystem effects — same gate the
     // `jarvy tools --request` path uses. Rejects shapes that would
     // produce broken Rust source (spaces, quotes, control chars, etc.).
-    jarvy::tools::unsupported::validate_tool_name(&name).map_err(|reason| {
+    jarvy_templates::validate_tool_name(&name).map_err(|reason| {
         anyhow::anyhow!(
             "invalid tool name `{}`: {}. Must match [A-Za-z0-9._-] and be 1-{} bytes.",
             name,
             reason,
-            jarvy::tools::unsupported::MAX_TOOL_NAME_LEN
+            jarvy_templates::MAX_TOOL_NAME_LEN
         )
     })?;
 
@@ -63,14 +63,14 @@ fn new_tool(name: String, bin: Option<String>) -> Result<()> {
     // truth shared with `jarvy tools --request <name>`. Previously
     // this code re-implemented the substitution and had drifted (the
     // `__PKG_BSD__` placeholder was missing here).
-    let contents = jarvy::tools::spec::render_tool_template(&name, bin.as_deref());
+    let contents = jarvy_templates::render_tool_template(&name, bin.as_deref());
 
     // Write the new tool module
     fs::write(&target_rs, &contents)
         .with_context(|| format!("failed writing {}", target_rs.display()))?;
 
     // Create mod.rs for the tool subdirectory
-    let mod_contents = format!("pub use {}::*;\n", &tool_mod);
+    let mod_contents = format!("pub use {}::*;\n", &name);
     fs::write(&mod_rs_subdir, &mod_contents)
         .with_context(|| format!("failed writing {}", mod_rs_subdir.display()))?;
 
@@ -78,17 +78,17 @@ fn new_tool(name: String, bin: Option<String>) -> Result<()> {
     let parent_mod_rs = tools_dir.join("mod.rs");
     if parent_mod_rs.exists() {
         let mut mod_body = fs::read_to_string(&parent_mod_rs).unwrap_or_else(|_| String::from(""));
-        let decl = format!("pub mod {};", &tool_mod);
+        let decl = format!("pub mod {};", &name);
         if !mod_body.contains(&decl) {
             // Insert before the last line or at end
-            mod_body.push_str(&format!("\npub mod {};\n", &tool_mod));
+            mod_body.push_str(&format!("\npub mod {};\n", &name));
             fs::write(&parent_mod_rs, mod_body)
                 .with_context(|| format!("failed updating {}", parent_mod_rs.display()))?;
         }
     } else {
         eprintln!(
             "note: src/tools/mod.rs not found; skipped module declaration. Wire `pub mod {}` manually.",
-            &tool_mod
+            &name
         );
     }
 

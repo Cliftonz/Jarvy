@@ -471,7 +471,20 @@ fallback_issue_url, scaffold_cmd, exit_code, opt_in_bypassed
   `fallback_issue_url` because telemetry is disabled
 - `opt_in_bypassed`: `true` only on the `--request` path (the user
   typed the command, so consent is implicit and the OTEL counter
-  fires regardless of the global opt-in)
+  fires regardless of the global opt-in). The `--request` path also
+  emits `counter_fired` indicating whether the metric provider was
+  initialized — when `false`, the channel falls back to `manual`
+  and the GitHub URL is surfaced as the only remaining signal.
+- `fallback_issue_url`: present only when `channel = "manual"`. The
+  telemetry-on path omits it to keep log lines short.
+- `exit_code`: always `8` (TOOL_UNSUPPORTED — see Exit Codes
+  below). The setup-path emits one event per unknown tool, but the
+  process only exits `8` when ALL configured tools are unknown;
+  mixed runs return `0`.
+- **Metric counter**: `jarvy.tool.unsupported` (one increment per
+  event). Renamed from `jarvy.tool.not_supported` to match the event
+  name — operators querying by event can find the counter without
+  knowing the old name.
 
 **Project-config trust boundary**: a `jarvy.toml` shipped with a cloned
 repo can NARROW telemetry (disable, lower sample rate, drop signals)

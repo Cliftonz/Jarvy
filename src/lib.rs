@@ -4,7 +4,10 @@ pub mod drift;
 pub mod error_codes;
 pub mod git;
 pub mod logging;
-pub mod meta;
+// Internal — `REPO_SLUG` / `REPO_URL` are crate-private. If a future
+// workspace consumer (cargo-jarvy, sub-crates) needs them, promote to
+// `pub mod meta`. Today only `tools::unsupported` reads them.
+pub(crate) mod meta;
 pub mod net;
 pub mod network;
 pub mod observability;

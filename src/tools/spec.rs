@@ -818,26 +818,32 @@ pub fn generate_tool_index_json() -> String {
     serde_json::to_string_pretty(&index).unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
 }
 
-/// Borrowed iteration over every registered tool name, sorted.
+/// Borrowed iteration over every registered tool name, sorted and
+/// canonical-lowercase.
 ///
-/// The underlying `Vec<String>` is built once via `OnceLock` and reused
-/// for every call — replacing the per-call rebuild in `list_tool_names`
-/// for hot paths like `unsupported::fuzzy_suggest`. Names are returned
-/// in their canonical (lowercased) form; the tool-naming convention
-/// across this crate is ASCII-lowercase, so the cache stores the
-/// inventory names as-is plus `MANUAL_TOOLS`.
+/// The underlying `Vec<String>` is built once via `LazyLock` and reused
+/// for every call — replacing the per-call rebuild in
+/// `list_tool_names` for hot paths like `unsupported::fuzzy_suggest`.
+///
+/// Names are lowercased at cache-build time so the inventory can
+/// include conventionally-uppercase entries (e.g. acronyms like
+/// `kMCP`) without breaking case-insensitive lookups downstream. The
+/// cost is ~150 small `String` allocations exactly once per process,
+/// amortized across every subsequent call.
 pub fn iter_tool_names() -> impl Iterator<Item = &'static str> {
-    static SORTED_NAMES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-    let names = SORTED_NAMES.get_or_init(|| {
-        let mut v: Vec<String> = iter_tools().map(|e| e.spec.name.to_lowercase()).collect();
-        for (name, _) in MANUAL_TOOLS {
-            v.push((*name).to_string());
-        }
+    static SORTED_NAMES: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
+        let mut v: Vec<String> = iter_tools()
+            .map(|e| e.spec.name.to_ascii_lowercase())
+            .collect();
+        v.extend(MANUAL_TOOLS.iter().map(|(n, _)| (*n).to_ascii_lowercase()));
         v.sort();
         v.dedup();
         v
     });
-    names.iter().map(String::as_str)
+    // `SORTED_NAMES` has `'static` storage via `LazyLock`, so the
+    // `&String` it yields is `&'static String` and `as_str()` is
+    // therefore `&'static str` — no lifetime bound to a borrow scope.
+    SORTED_NAMES.iter().map(String::as_str)
 }
 
 /// Get a list of all supported tool names (lowercase). Owned-string
@@ -847,33 +853,12 @@ pub fn list_tool_names() -> Vec<String> {
     iter_tool_names().map(str::to_string).collect()
 }
 
-/// Render the `src/tools/_template.rs` source with placeholder
-/// substitution for a new tool. Single source of truth so that
-/// `cargo-jarvy new-tool` and `jarvy tools --request` produce
-/// identical files — previously these were two separate copies of
-/// the substitution logic that had already drifted (the cargo-jarvy
-/// copy was missing the `__PKG_BSD__` placeholder).
-///
-/// `bin` defaults to `name`. The tool name must already be validated
-/// (`[A-Za-z0-9._-]{1,64}`) — callers should reject invalid input
-/// before reaching this point so the rendered file is safe to write
-/// to disk.
-pub fn render_tool_template(name: &str, bin: Option<&str>) -> String {
-    const TEMPLATE: &str = include_str!("_template.rs");
-    let bin = bin.unwrap_or(name);
-    let upper = name.to_ascii_uppercase().replace('-', "_");
-    let desc = format!("{} tool", name);
-    let winget_id = format!("Publisher.{}", name);
-    TEMPLATE
-        .replace("__TOOL_MOD__", name)
-        .replace("__TOOL_BIN__", bin)
-        .replace("__TOOL_UPPER__", &upper)
-        .replace("__TOOL_DESC__", &desc)
-        .replace("__PKG_BREW__", name)
-        .replace("__PKG_LINUX__", name)
-        .replace("__PKG_WINGET_ID__", &winget_id)
-        .replace("__PKG_BSD__", name)
-}
+/// Render the canonical `define_tool!` template — re-exported from
+/// the dep-free `jarvy-templates` crate. Both `cargo-jarvy new-tool`
+/// and `jarvy tools --request` call the same implementation, so the
+/// drift that motivated this consolidation (missing `__PKG_BSD__`)
+/// cannot recur.
+pub use jarvy_templates::render_tool_template;
 
 /// Look up a ToolSpec by name (case-insensitive).
 /// Returns None if the tool is not found or is a manually registered tool.
@@ -1547,6 +1532,128 @@ pub fn tool_has_any_dependencies(tool_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ----- render_tool_template direct coverage -----
+    //
+    // The previous test (`scaffold_snippet_matches_canonical_template`)
+    // only asserted no `__PKG_BSD__` survived in the output — a
+    // regression where BSD got replaced with empty string would have
+    // passed. These tests pin the actual substituted values plus the
+    // bin-override branch which had zero coverage.
+
+    #[test]
+    fn render_tool_template_substitutes_all_placeholders() {
+        let out = render_tool_template("mytool", None);
+        // No leftover placeholder must survive — generic check that
+        // catches any future renamed/added placeholder we missed.
+        assert!(
+            !out.contains("__TOOL_") && !out.contains("__PKG_"),
+            "unsubstituted placeholder leaked through: {}",
+            out
+        );
+    }
+
+    #[test]
+    fn render_tool_template_substitutes_bsd_pkg_to_tool_name() {
+        // The drift fix that motivated the consolidation. The previous
+        // cargo-jarvy code missed `__PKG_BSD__` entirely.
+        let out = render_tool_template("mytool", None);
+        assert!(
+            out.contains(r#"bsd: { pkg: "mytool" }"#),
+            "BSD pkg placeholder not substituted to tool name: {}",
+            out
+        );
+    }
+
+    #[test]
+    fn render_tool_template_some_bin_differs_from_none() {
+        // When `bin` is provided, the `command:` field should reflect
+        // it (not the tool name). When `None`, the bin defaults to the
+        // tool name.
+        let with_bin = render_tool_template("mytool", Some("mt"));
+        assert!(
+            with_bin.contains(r#"command: "mt""#),
+            "explicit bin should be used as command: {}",
+            with_bin
+        );
+        let without_bin = render_tool_template("mytool", None);
+        assert!(
+            without_bin.contains(r#"command: "mytool""#),
+            "default bin should equal tool name: {}",
+            without_bin
+        );
+        assert_ne!(
+            with_bin, without_bin,
+            "Some(bin) and None must produce different output"
+        );
+    }
+
+    #[test]
+    fn render_tool_template_upper_case_replaces_hyphens() {
+        // `__TOOL_UPPER__` substitution: uppercase + hyphen→underscore
+        // so the resulting Rust identifier is valid.
+        let out = render_tool_template("docker-compose", None);
+        assert!(
+            out.contains("define_tool!(DOCKER_COMPOSE,"),
+            "upper-with-underscore not applied: {}",
+            out
+        );
+    }
+
+    #[test]
+    fn render_tool_template_winget_id_is_publisher_dot_name() {
+        let out = render_tool_template("mytool", None);
+        assert!(
+            out.contains(r#"winget: "Publisher.mytool""#),
+            "winget id should be Publisher.<tool>: {}",
+            out
+        );
+    }
+
+    // ----- iter_tool_names cache -----
+
+    #[test]
+    fn iter_tool_names_is_sorted() {
+        let names: Vec<&str> = iter_tool_names().collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(names, sorted, "iter_tool_names must yield sorted output");
+    }
+
+    #[test]
+    fn iter_tool_names_includes_manual_tools() {
+        let names: Vec<&str> = iter_tool_names().collect();
+        // MANUAL_TOOLS are nvm/rust/brew — must appear regardless of
+        // the inventory's `define_tool!` collection.
+        for required in &["nvm", "rust", "brew"] {
+            assert!(
+                names.contains(required),
+                "{} missing from iter_tool_names: {:?}",
+                required,
+                names
+            );
+        }
+    }
+
+    #[test]
+    fn iter_tool_names_has_no_duplicates() {
+        let names: Vec<&str> = iter_tool_names().collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(
+            names.len(),
+            sorted.len(),
+            "iter_tool_names must dedup on cache build"
+        );
+    }
+
+    #[test]
+    fn iter_tool_names_two_calls_yield_same_data() {
+        let a: Vec<&str> = iter_tool_names().collect();
+        let b: Vec<&str> = iter_tool_names().collect();
+        assert_eq!(a, b, "cache must yield identical content on repeat calls");
+    }
 
     // Test ToolSpec with all fields
     static TEST_TOOL: ToolSpec = ToolSpec {

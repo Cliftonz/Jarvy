@@ -22,9 +22,9 @@ pub fn inject_credentials(proxy_url: &str, auth: &ProxyAuth) -> Result<String, S
         let protocol = &proxy_url[..proto_end + 3];
         let rest = &proxy_url[proto_end + 3..];
 
-        // URL-encode username and password
-        let encoded_user = urlencoding::encode(&auth.username);
-        let encoded_pass = urlencoding::encode(&password);
+        // URL-encode username and password via the shared encoder.
+        let encoded_user = crate::net::url_encode::encode_unreserved(&auth.username);
+        let encoded_pass = crate::net::url_encode::encode_unreserved(&password);
 
         Ok(format!(
             "{}{}:{}@{}",
@@ -92,16 +92,9 @@ impl AuthenticatedProxies {
     }
 }
 
-// Shared URL encoder lives in `crate::net::url_encode`. Thin wrapper
-// keeps the existing call sites (`urlencoding::encode(...)`) compiling
-// unchanged — the re-export form runs afoul of the inner-module
-// visibility rules, so this delegates instead.
-mod urlencoding {
-    #[allow(dead_code)] // Called by inject_credentials below.
-    pub fn encode(input: &str) -> String {
-        crate::net::url_encode::encode_unreserved(input)
-    }
-}
+// URL encoder lives in `crate::net::url_encode`. The `urlencoding`
+// inner-module wrapper is gone; call sites use the shared helper
+// directly (search for `encode_unreserved`).
 
 #[cfg(test)]
 mod tests {
@@ -133,9 +126,10 @@ mod tests {
 
     #[test]
     fn test_url_encoding() {
-        assert_eq!(urlencoding::encode("user"), "user");
-        assert_eq!(urlencoding::encode("user@corp"), "user%40corp");
-        assert_eq!(urlencoding::encode("p@ss:word"), "p%40ss%3Aword");
+        use crate::net::url_encode::encode_unreserved as encode;
+        assert_eq!(encode("user"), "user");
+        assert_eq!(encode("user@corp"), "user%40corp");
+        assert_eq!(encode("p@ss:word"), "p%40ss%3Aword");
     }
 
     #[test]

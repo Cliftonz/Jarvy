@@ -139,6 +139,7 @@ pub fn run_telemetry(action: &TelemetryAction, global_config: &init::CliConfig) 
             println!("Metrics:");
             println!("  - jarvy.tool.requests      (counter)");
             println!("  - jarvy.tool.installs      (counter by status)");
+            println!("  - jarvy.tool.unsupported   (counter — fires per `tool.unsupported` event)");
             println!("  - jarvy.install.duration   (histogram in seconds)");
             println!("  - jarvy.setup.duration     (histogram in seconds)");
             println!();

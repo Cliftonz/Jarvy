@@ -6,8 +6,8 @@ edition = "2021"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
-# Re-use the canonical template substitution from the jarvy crate so
-# `cargo-jarvy new-tool` and `jarvy tools --request` produce identical
-# files. The path-only dep keeps cargo-jarvy a workspace-local tool;
-# no version bumps required when this internal API changes.
-jarvy = { path = "../.." }
+# Depend ONLY on the dep-free jarvy-templates crate — keeps cargo-jarvy
+# a sub-second compile. Previously this depended on the full jarvy
+# crate, which dragged in tokio/serde/OTEL just to call two pure
+# functions.
+jarvy-templates = { path = "../jarvy-templates" }

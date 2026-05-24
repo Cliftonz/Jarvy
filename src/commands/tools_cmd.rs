@@ -168,6 +168,15 @@ pub fn run_tools(
 /// scaffolding: pre-filled issue URL, fuzzy suggestions for typos, the
 /// `cargo-jarvy new-tool` command, and a `define_tool!` snippet.
 fn run_request(name: &str, open: bool, output_format: OutputFormat, output: Option<&str>) -> i32 {
+    // Per-invocation correlation ID so the `tool.unsupported` event
+    // emitted by this path can be stitched against any other Jarvy
+    // log records the operator is debugging alongside. Mirrors the
+    // `setup` span at `setup_cmd.rs:99` — without it, --request
+    // events appear orphaned in the trace view.
+    let run_id = uuid::Uuid::now_v7();
+    let req_span = tracing::info_span!("tools.request", run_id = %run_id);
+    let _req_span_guard = req_span.enter();
+
     // Normalize before lookup so `--request "GIT "` (trailing space,
     // case mismatch) hits the already-supported branch instead of
     // routing to the request path for a tool that exists.
@@ -199,28 +208,65 @@ fn run_request(name: &str, open: bool, output_format: OutputFormat, output: Opti
     // Explicit user action — fire telemetry regardless of opt-in.
     // `--request` IS the request mechanism. Telemetry is the canonical
     // channel because it requires no GitHub account from user or agent
-    // and zero triage work from the maintainer. The fallback URL stays
-    // in the payload for users who explicitly want a public record.
-    let channel = tools::unsupported::RequestChannel::Sent;
+    // and zero triage work from the maintainer.
+    //
+    // Branching on `counter_fired` is load-bearing: when telemetry was
+    // never initialized (`JARVY_TELEMETRY=0` or never opted in), the
+    // metric drops silently. Hardcoding `RequestChannel::Sent` in that
+    // case would make the renderer print "Reported via telemetry" and
+    // hide the GitHub URL — the same lie pattern the setup-path bug
+    // fixed in the previous round. The fallback URL must be visible
+    // when nothing actually went out.
+    //
+    // We build the report once with a placeholder channel, fire
+    // telemetry, then rebuild with the truthful channel. The double-
+    // build is acceptable on this one-shot user-typed path.
+    let initial_report =
+        tools::unsupported::build_report(name, None, tools::unsupported::RequestChannel::Sent);
+    let counter_fired = telemetry::tool_request_explicit(name, &initial_report.suggestions);
+    let channel = if counter_fired {
+        tools::unsupported::RequestChannel::Sent
+    } else {
+        tools::unsupported::RequestChannel::Manual
+    };
     let report = tools::unsupported::build_report(name, None, channel);
-    let counter_fired = telemetry::tool_request_explicit(name, &report.suggestions);
 
     // Emit the canonical `tool.unsupported` event with the same field
     // shape as the setup-path warn — single query covers both call sites.
-    tracing::warn!(
-        event = "tool.unsupported",
-        tool = %report.tool,
-        source = %telemetry::Source::Request,
-        platform = %std::env::consts::OS,
-        suggestions = ?report.suggestions,
-        channel = %report.channel,
-        fallback_issue_url = %report.fallback_issue_url,
-        scaffold_cmd = %report.scaffold_cmd,
-        exit_code = report.exit_code,
-        opt_in_bypassed = true,
-        counter_fired = counter_fired,
-        "explicit tool request"
-    );
+    // `fallback_issue_url` is included only when the channel is manual
+    // (the URL is the only remaining signal in that case); when
+    // telemetry covered the request, the URL bloats the log line for
+    // no operator benefit.
+    if matches!(channel, tools::unsupported::RequestChannel::Manual) {
+        tracing::warn!(
+            event = "tool.unsupported",
+            tool = %report.tool,
+            source = %telemetry::Source::Request,
+            platform = %std::env::consts::OS,
+            suggestions = %report.suggestions.join(","),
+            channel = %report.channel,
+            fallback_issue_url = %report.fallback_issue_url,
+            scaffold_cmd = %report.scaffold_cmd,
+            exit_code = report.exit_code,
+            opt_in_bypassed = true,
+            counter_fired = counter_fired,
+            "explicit tool request"
+        );
+    } else {
+        tracing::warn!(
+            event = "tool.unsupported",
+            tool = %report.tool,
+            source = %telemetry::Source::Request,
+            platform = %std::env::consts::OS,
+            suggestions = %report.suggestions.join(","),
+            channel = %report.channel,
+            scaffold_cmd = %report.scaffold_cmd,
+            exit_code = report.exit_code,
+            opt_in_bypassed = true,
+            counter_fired = counter_fired,
+            "explicit tool request"
+        );
+    }
 
     let snippet = tools::unsupported::scaffold_snippet(name);
 
@@ -363,6 +409,47 @@ mod tests {
         assert!(
             args.iter().any(|a| a == url),
             "URL must appear verbatim as a separate argv element: {:?}",
+            args
+        );
+    }
+
+    /// The URL must be the LAST argv element — guards against a future
+    /// refactor that adds an arg between program and URL (where
+    /// attacker-controlled bytes in `--new-window=<x>` could land in
+    /// the in-between slot). The order matters because tools like
+    /// `xdg-open` and `open` accept flags before the URL.
+    #[test]
+    fn browser_command_url_is_last_argv_element() {
+        let url = "https://example.com/?a=1&b=2";
+        let cmd = browser_command(url);
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert_eq!(
+            args.last().map(String::as_str),
+            Some(url),
+            "URL must be the last argv element: {:?}",
+            args
+        );
+    }
+
+    /// Negative assertion — guards against a future change reintroducing
+    /// the cmd.exe path on Windows that broke for URLs containing `&`.
+    /// If `rundll32` ever fails-over to `cmd /C start` the test fails.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn browser_command_never_references_cmd_exe() {
+        let cmd = browser_command("https://a?b=1&c=2");
+        let program = cmd.get_program().to_string_lossy().to_string();
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert_ne!(program, "cmd", "must not invoke cmd.exe");
+        assert!(
+            !args.iter().any(|a| a == "/C" || a == "start"),
+            "must not pass cmd.exe-style argv: {:?}",
             args
         );
     }
