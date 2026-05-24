@@ -508,19 +508,18 @@ pub fn tool_failed(tool: &str, version: &str, error: &str) {
     }
 }
 
-/// Record an unsupported tool request (critical for MCP feedback)
-pub fn tool_not_supported(tool: &str, version: Option<&str>, source: Source) {
+/// Record an unsupported tool request (counter only).
+///
+/// The structured `tool.unsupported` event is emitted by the caller
+/// directly (`setup_cmd` and `tools_cmd`) so the event field set lives
+/// in one place — see [Event Taxonomy in `CLAUDE.md`]. This function
+/// just bumps the OTEL counter so dashboards can graph request volume.
+///
+/// Respects the opt-in guard: no-op if telemetry is disabled.
+pub fn tool_not_supported(tool: &str, _version: Option<&str>, source: Source) {
     if !is_enabled() {
         return;
     }
-
-    tracing::warn!(
-        event = "tool.not_supported",
-        tool = %tool,
-        version = %version.unwrap_or("*"),
-        source = %source,
-        platform = %env::consts::OS,
-    );
 
     if let Some(state) = TELEMETRY.get() {
         if let Some(ref metrics) = state.metrics {
@@ -538,23 +537,19 @@ pub fn tool_not_supported(tool: &str, version: Option<&str>, source: Source) {
 
 /// Record an explicit user request via `jarvy tools --request <name>`.
 ///
-/// Unlike [`tool_not_supported`], this bypasses the [`is_enabled`]
-/// opt-in guard: the user typed the command, so consent is implicit.
-/// The GitHub issue URL printed by the caller remains the canonical
-/// channel — telemetry here is best-effort signal aggregation. If no
-/// OTLP endpoint is configured the metric increment is a no-op, but
-/// the `tracing::warn!` event still lands in `~/.jarvy/logs/jarvy.log`
-/// for local debugging.
-pub fn tool_request_explicit(tool: &str, suggestions: &[String]) {
-    tracing::warn!(
-        event = "tool.request_explicit",
-        tool = %tool,
-        suggestions = ?suggestions,
-        source = %Source::Request,
-        platform = %env::consts::OS,
-        opt_in_bypassed = true,
-    );
-
+/// Bypasses the [`is_enabled`] opt-in guard because the user typed the
+/// command — consent is implicit. The metric increment is still gated
+/// on `TELEMETRY` having been initialized with a metrics provider, so
+/// users who explicitly disabled telemetry for the run don't get
+/// network traffic; the request is still recorded locally because the
+/// caller emits the `tool.unsupported` tracing event regardless.
+///
+/// Returns `true` when the counter actually fired, `false` when the
+/// metric was dropped (telemetry never initialized). Callers can use
+/// the result to decide whether the request needs the GitHub-URL
+/// fallback — though the structured event always lands in the local
+/// log file.
+pub fn tool_request_explicit(tool: &str, _suggestions: &[String]) -> bool {
     if let Some(state) = TELEMETRY.get() {
         if let Some(ref metrics) = state.metrics {
             metrics.tool_not_supported.add(
@@ -565,8 +560,10 @@ pub fn tool_request_explicit(tool: &str, suggestions: &[String]) {
                     KeyValue::new("platform", env::consts::OS.to_string()),
                 ],
             );
+            return true;
         }
     }
+    false
 }
 
 // ============================================================================

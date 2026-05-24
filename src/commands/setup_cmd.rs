@@ -259,31 +259,33 @@ pub fn run_setup(
     // The fallback URL is shown only when telemetry is off. Seamless
     // mode (PRD-053) suppresses the "enable telemetry" hint because
     // those environments are typically multi-tenant or ephemeral and
-    // the operator can't toggle telemetry per-run.
+    // the operator can't toggle telemetry per-run — but the channel
+    // selection itself depends only on telemetry state, never on
+    // seamless. (Conflating the two led to a real bug where the
+    // renderer claimed "Reported via telemetry" while telemetry was
+    // disabled and nothing was actually sent.)
     let seamless = crate::sandbox::is_seamless();
-    let unsupported_channel = if telemetry::is_enabled() {
-        tools::unsupported::RequestChannel::WillSend
-    } else if seamless {
-        tools::unsupported::RequestChannel::Sent
-    } else {
-        tools::unsupported::RequestChannel::Manual
-    };
+    let unsupported_channel = tools::unsupported::pick_channel(telemetry::is_enabled());
 
     for (name, version) in &version_check.unknown {
         let report = tools::unsupported::build_report(name, Some(version), unsupported_channel);
         // Human-readable block: name, suggestions, channel status,
         // scaffold. The renderer hides the GitHub URL when telemetry
-        // covers the request.
+        // covers the request; in seamless mode the "enable telemetry"
+        // hint is suppressed even on the Manual branch.
         eprint!(
             "{}",
-            tools::unsupported::to_human(&report, unsupported_channel)
+            tools::unsupported::to_human(&report, unsupported_channel, seamless)
         );
-        // Structured event for log pipelines and AI parsers — fires
-        // regardless of channel so jarvy.log always records the ask.
+        // Single canonical `tool.unsupported` event — uniform field
+        // shape across the setup and `--request` paths so log queries
+        // return one consistent table. See CLAUDE.md "Event Taxonomy".
         tracing::warn!(
             event = "tool.unsupported",
             tool = %report.tool,
             version = ?report.version,
+            source = %telemetry::Source::Config,
+            platform = %std::env::consts::OS,
             suggestions = ?report.suggestions,
             channel = %report.channel,
             fallback_issue_url = %report.fallback_issue_url,

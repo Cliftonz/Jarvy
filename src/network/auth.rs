@@ -92,25 +92,14 @@ impl AuthenticatedProxies {
     }
 }
 
-// Simple URL encoding module (to avoid adding urlencoding dependency)
+// Shared URL encoder lives in `crate::net::url_encode`. Thin wrapper
+// keeps the existing call sites (`urlencoding::encode(...)`) compiling
+// unchanged — the re-export form runs afoul of the inner-module
+// visibility rules, so this delegates instead.
 mod urlencoding {
-    /// URL-encode a string for use in proxy URLs
-    #[allow(dead_code)] // Used by inject_credentials
+    #[allow(dead_code)] // Called by inject_credentials below.
     pub fn encode(input: &str) -> String {
-        let mut result = String::new();
-        for c in input.chars() {
-            match c {
-                'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' | '~' => {
-                    result.push(c);
-                }
-                _ => {
-                    for byte in c.to_string().as_bytes() {
-                        result.push_str(&format!("%{:02X}", byte));
-                    }
-                }
-            }
-        }
-        result
+        crate::net::url_encode::encode_unreserved(input)
     }
 }
 

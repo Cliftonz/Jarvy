@@ -31,9 +31,20 @@ fn main() -> Result<()> {
 }
 
 fn new_tool(name: String, bin: Option<String>) -> Result<()> {
+    // Validate the name before any filesystem effects — same gate the
+    // `jarvy tools --request` path uses. Rejects shapes that would
+    // produce broken Rust source (spaces, quotes, control chars, etc.).
+    jarvy::tools::unsupported::validate_tool_name(&name).map_err(|reason| {
+        anyhow::anyhow!(
+            "invalid tool name `{}`: {}. Must match [A-Za-z0-9._-] and be 1-{} bytes.",
+            name,
+            reason,
+            jarvy::tools::unsupported::MAX_TOOL_NAME_LEN
+        )
+    })?;
+
     // Resolve paths relative to repo root (assume run from root)
     let tools_dir = PathBuf::from("src/tools");
-    let template = tools_dir.join("_template.rs");
 
     // Create tool subdirectory (src/tools/<name>/)
     let tool_subdir = tools_dir.join(&name);
@@ -48,24 +59,11 @@ fn new_tool(name: String, bin: Option<String>) -> Result<()> {
     fs::create_dir_all(&tool_subdir)
         .with_context(|| format!("failed creating directory {}", tool_subdir.display()))?;
 
-    // Read template
-    let mut contents = fs::read_to_string(&template)
-        .with_context(|| format!("missing template at {}", template.display()))?;
-
-    // Substitute placeholders
-    let tool_mod = name.to_string(); // snake_case by convention
-    let tool_bin = bin.unwrap_or_else(|| name.clone()); // default probe bin
-    let tool_upper = name.to_uppercase(); // TOOL_NAME for static
-    let tool_desc = format!("{} tool", &name); // default description
-
-    contents = contents
-        .replace("__TOOL_MOD__", &tool_mod)
-        .replace("__TOOL_BIN__", &tool_bin)
-        .replace("__TOOL_UPPER__", &tool_upper)
-        .replace("__TOOL_DESC__", &tool_desc)
-        .replace("__PKG_BREW__", &tool_mod) // sane default
-        .replace("__PKG_LINUX__", &tool_mod)
-        .replace("__PKG_WINGET_ID__", &tool_mod);
+    // Render the template via the shared helper — single source of
+    // truth shared with `jarvy tools --request <name>`. Previously
+    // this code re-implemented the substitution and had drifted (the
+    // `__PKG_BSD__` placeholder was missing here).
+    let contents = jarvy::tools::spec::render_tool_template(&name, bin.as_deref());
 
     // Write the new tool module
     fs::write(&target_rs, &contents)

@@ -22,6 +22,7 @@ pub mod interactive;
 mod lock;
 pub mod logging;
 mod mcp;
+mod meta;
 mod net;
 mod network;
 mod observability;
@@ -91,27 +92,52 @@ fn main() {
         telemetry_config.enabled = false;
     }
 
-    // Apply project-level telemetry config from jarvy.toml (if present)
+    // Apply project-level telemetry config from jarvy.toml (if present).
+    //
+    // Trust boundary: a `jarvy.toml` arrives via `git clone <repo>` —
+    // an untrusted source. A malicious project config previously could
+    // (a) enable telemetry for a user who didn't opt in, and
+    // (b) redirect the OTLP endpoint to attacker.tld, exfiltrating tool
+    //     names and platform identifiers.
+    // Project config is therefore allowed to *narrow* the user's choice
+    // (disable telemetry / reduce signals) but never to *broaden* it.
+    // Endpoint / protocol overrides from a project file are refused with
+    // a stderr warning so the user can re-run with the explicit env var
+    // if they actually want that endpoint.
     let project_config_path = extract_config_path(&cli);
     if let Some(ref path) = project_config_path {
         if let Ok(contents) = fs::read_to_string(path) {
             if let Ok(project_config) = toml::from_str::<Config>(&contents) {
                 if let Some(project_telemetry) = project_config.telemetry {
-                    if project_telemetry.enabled {
-                        telemetry_config.enabled = true;
+                    // Allow narrowing: project may disable telemetry.
+                    if !project_telemetry.enabled {
+                        telemetry_config.enabled = false;
                     }
-                    if project_telemetry.endpoint != telemetry::TelemetryConfig::default().endpoint
+                    // Allow narrowing per-signal: project may turn off
+                    // logs/metrics/traces or lower the sample rate.
+                    telemetry_config.logs = telemetry_config.logs && project_telemetry.logs;
+                    telemetry_config.metrics =
+                        telemetry_config.metrics && project_telemetry.metrics;
+                    telemetry_config.traces = telemetry_config.traces && project_telemetry.traces;
+                    telemetry_config.sample_rate = telemetry_config
+                        .sample_rate
+                        .min(project_telemetry.sample_rate);
+
+                    // Refuse endpoint / protocol overrides from project
+                    // config — those require explicit user consent via
+                    // env var. Warn so a user who *wants* the project
+                    // endpoint knows to re-run with JARVY_OTLP_ENDPOINT.
+                    let default_endpoint = telemetry::TelemetryConfig::default().endpoint;
+                    if project_telemetry.endpoint != default_endpoint
+                        && project_telemetry.endpoint != telemetry_config.endpoint
                     {
-                        telemetry_config.endpoint = project_telemetry.endpoint;
+                        eprintln!(
+                            "[jarvy] project jarvy.toml requests telemetry endpoint {} — \
+                             refusing without explicit consent. Re-run with \
+                             `JARVY_OTLP_ENDPOINT={}` to acknowledge.",
+                            project_telemetry.endpoint, project_telemetry.endpoint
+                        );
                     }
-                    if project_telemetry.protocol != telemetry::TelemetryConfig::default().protocol
-                    {
-                        telemetry_config.protocol = project_telemetry.protocol;
-                    }
-                    telemetry_config.logs = project_telemetry.logs;
-                    telemetry_config.metrics = project_telemetry.metrics;
-                    telemetry_config.traces = project_telemetry.traces;
-                    telemetry_config.sample_rate = project_telemetry.sample_rate;
                 }
             }
         }

@@ -4,6 +4,7 @@ pub mod drift;
 pub mod error_codes;
 pub mod git;
 pub mod logging;
+pub mod meta;
 pub mod net;
 pub mod network;
 pub mod observability;

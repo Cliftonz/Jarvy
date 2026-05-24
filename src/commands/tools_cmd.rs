@@ -168,8 +168,24 @@ pub fn run_tools(
 /// scaffolding: pre-filled issue URL, fuzzy suggestions for typos, the
 /// `cargo-jarvy new-tool` command, and a `define_tool!` snippet.
 fn run_request(name: &str, open: bool, output_format: OutputFormat, output: Option<&str>) -> i32 {
-    // If the tool *is* already supported, say so rather than silently
-    // generating a request URL for it. Saves the user from filing dupes.
+    // Normalize before lookup so `--request "GIT "` (trailing space,
+    // case mismatch) hits the already-supported branch instead of
+    // routing to the request path for a tool that exists.
+    let normalized = name.trim();
+    if let Err(reason) = tools::unsupported::validate_tool_name(normalized) {
+        eprintln!(
+            "[jarvy] refusing to process tool name: {}. \
+             Tool names must match [A-Za-z0-9._-] and be 1–{} bytes.",
+            reason,
+            tools::unsupported::MAX_TOOL_NAME_LEN
+        );
+        return error_codes::CONFIG_ERROR;
+    }
+    let name = normalized;
+
+    // If the tool *is* already supported (inventory OR registry —
+    // covers nvm/rustup/brew custom installs and plugin tools), say
+    // so rather than silently generating a request URL for it.
     if tools::spec::get_tool_spec(name).is_some()
         || crate::tools::registry::get_tool(name).is_some()
     {
@@ -187,7 +203,24 @@ fn run_request(name: &str, open: bool, output_format: OutputFormat, output: Opti
     // in the payload for users who explicitly want a public record.
     let channel = tools::unsupported::RequestChannel::Sent;
     let report = tools::unsupported::build_report(name, None, channel);
-    telemetry::tool_request_explicit(name, &report.suggestions);
+    let counter_fired = telemetry::tool_request_explicit(name, &report.suggestions);
+
+    // Emit the canonical `tool.unsupported` event with the same field
+    // shape as the setup-path warn — single query covers both call sites.
+    tracing::warn!(
+        event = "tool.unsupported",
+        tool = %report.tool,
+        source = %telemetry::Source::Request,
+        platform = %std::env::consts::OS,
+        suggestions = ?report.suggestions,
+        channel = %report.channel,
+        fallback_issue_url = %report.fallback_issue_url,
+        scaffold_cmd = %report.scaffold_cmd,
+        exit_code = report.exit_code,
+        opt_in_bypassed = true,
+        counter_fired = counter_fired,
+        "explicit tool request"
+    );
 
     let snippet = tools::unsupported::scaffold_snippet(name);
 
@@ -219,7 +252,9 @@ fn run_request(name: &str, open: bool, output_format: OutputFormat, output: Opti
         }
         OutputFormat::Pretty => {
             let mut s = String::with_capacity(512);
-            s.push_str(&tools::unsupported::to_human(&report, channel));
+            // run_request is the explicit-consent path, never seamless-
+            // dependent — pass false unconditionally.
+            s.push_str(&tools::unsupported::to_human(&report, channel, false));
             if !report.suggestions.is_empty() {
                 s.push_str("\nIf one of those is the tool you wanted, edit your jarvy.toml.\n");
             }
@@ -246,20 +281,89 @@ fn run_request(name: &str, open: bool, output_format: OutputFormat, output: Opti
     error_codes::EXIT_SUCCESS
 }
 
-/// Best-effort browser opener. Uses platform-native commands and never
-/// fails the parent command — printing the URL is the contract; the
-/// browser launch is a convenience.
-fn open_browser(url: &str) {
-    let result = if cfg!(target_os = "macos") {
-        std::process::Command::new("open").arg(url).status()
+/// Build the platform-native command that opens `url` in the default
+/// browser. Extracted from `open_browser` for testability — the
+/// constructor is pure (no spawn) and unit-testable per-platform.
+///
+/// Windows uses `rundll32 url.dll,FileProtocolHandler` rather than
+/// `cmd /C start "" <url>`. The cmd.exe path is broken for URLs
+/// containing `&` (every URL we build): `std::process::Command` on
+/// Windows does not quote args containing only `&`, so cmd.exe
+/// interprets `&` as a statement separator. `rundll32` invokes the
+/// shell URL handler directly without cmd-style re-parsing.
+fn browser_command(url: &str) -> std::process::Command {
+    if cfg!(target_os = "macos") {
+        let mut cmd = std::process::Command::new("open");
+        cmd.arg(url);
+        cmd
     } else if cfg!(target_os = "windows") {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .status()
+        // `url.dll,FileProtocolHandler` is the Win32 shell entry point
+        // for "open this URL in the default handler". Bypasses cmd.exe
+        // entirely so URL metacharacters (& ? = #) survive intact.
+        let mut cmd = std::process::Command::new("rundll32");
+        cmd.args(["url.dll,FileProtocolHandler", url]);
+        cmd
     } else {
-        std::process::Command::new("xdg-open").arg(url).status()
-    };
-    if result.is_err() {
+        let mut cmd = std::process::Command::new("xdg-open");
+        cmd.arg(url);
+        cmd
+    }
+}
+
+/// Best-effort browser opener. Never fails the parent command —
+/// printing the URL is the contract; the browser launch is a
+/// convenience.
+fn open_browser(url: &str) {
+    if browser_command(url).status().is_err() {
         eprintln!("[jarvy] could not open browser; copy this URL: {}", url);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `browser_command` is a pure constructor — assert each platform
+    /// branch picks the expected program. The synthesis plan flagged
+    /// the Windows branch specifically because the cmd.exe path
+    /// silently broke for URLs containing `&`.
+    #[test]
+    fn browser_command_picks_platform_program() {
+        let cmd = browser_command("https://example.com");
+        let program = cmd.get_program().to_string_lossy().to_string();
+        if cfg!(target_os = "macos") {
+            assert_eq!(program, "open");
+        } else if cfg!(target_os = "windows") {
+            assert_eq!(program, "rundll32");
+            // Must include the shell URL handler entry point.
+            let args: Vec<String> = cmd
+                .get_args()
+                .map(|a| a.to_string_lossy().to_string())
+                .collect();
+            assert_eq!(
+                args.first().map(String::as_str),
+                Some("url.dll,FileProtocolHandler")
+            );
+        } else {
+            assert_eq!(program, "xdg-open");
+        }
+    }
+
+    /// The URL is passed as a separate argv element on every platform
+    /// — guards against any future refactor that interpolates it into
+    /// a shell-string and reintroduces the command-injection vector.
+    #[test]
+    fn browser_command_passes_url_as_separate_arg() {
+        let url = "https://example.com/?a=1&b=2";
+        let cmd = browser_command(url);
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert!(
+            args.iter().any(|a| a == url),
+            "URL must appear verbatim as a separate argv element: {:?}",
+            args
+        );
     }
 }

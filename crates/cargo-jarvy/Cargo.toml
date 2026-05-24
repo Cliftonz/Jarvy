@@ -5,5 +5,9 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-heck = "0.4"     # for case conversions
 anyhow = "1"
+# Re-use the canonical template substitution from the jarvy crate so
+# `cargo-jarvy new-tool` and `jarvy tools --request` produce identical
+# files. The path-only dep keeps cargo-jarvy a workspace-local tool;
+# no version bumps required when this internal API changes.
+jarvy = { path = "../.." }

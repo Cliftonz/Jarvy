@@ -93,6 +93,35 @@ fn tools_request_known_tool_short_circuits() {
 }
 
 #[test]
+fn tools_request_known_custom_install_tool_short_circuits() {
+    // `nvm` is registered via the manual-registration path (not via the
+    // `define_tool!` macro inventory). The short-circuit must check
+    // BOTH the inventory and the registry — testing only `git` left the
+    // registry branch uncovered, so a future refactor dropping the
+    // `||` right side would silently start emitting request URLs for
+    // nvm/rustup/brew.
+    let mut c = jarvy_cmd();
+    c.args(["tools", "--request", "nvm"]);
+
+    c.assert()
+        .success()
+        .stderr(predicate::str::contains("already supported"));
+}
+
+#[test]
+fn tools_request_rejects_malformed_name() {
+    // Names that would inject into the scaffolded Rust source must be
+    // rejected at the entry point — not sanitized-and-rendered, since
+    // the snippet is advertised as paste-into-source.
+    let mut c = jarvy_cmd();
+    c.args(["tools", "--request", "foo\"); panic!(\"x"]);
+
+    c.assert()
+        .failure()
+        .stderr(predicate::str::contains("refusing to process tool name"));
+}
+
+#[test]
 fn tools_request_suggests_close_matches() {
     // `gti` is one transposition away from `git`; fuzzy_suggest should
     // surface it in the JSON suggestions list.
@@ -158,6 +187,75 @@ totally-fake-tool-xyz = "1.0"
         .stderr(predicate::str::contains(
             "cargo run -p cargo-jarvy -- new-tool totally-fake-tool-xyz",
         ));
+}
+
+#[test]
+fn setup_with_mix_of_known_and_unknown_exits_zero() {
+    // The documented contract from src/error_codes.rs: setup returns
+    // TOOL_UNSUPPORTED only when EVERY configured tool is unknown.
+    // Mixed runs (some known + some unknown) must keep returning 0 so
+    // partial setups still succeed. Without this regression guard, a
+    // future tightening of the exit condition would break every
+    // `jarvy.toml` containing a typo on day one.
+    let mut cfg = NamedTempFile::new().unwrap();
+    writeln!(
+        cfg,
+        r#"
+[provisioner]
+git = "*"
+totally-fake-tool-mixed = "1.0"
+"#
+    )
+    .unwrap();
+
+    let mut c = jarvy_cmd();
+    c.env("JARVY_FAST_TEST", "1");
+    c.env("JARVY_SANDBOX", "0");
+    c.args(["setup", "--file"])
+        .arg(cfg.path())
+        .arg("--no-hooks");
+
+    c.assert()
+        .code(0)
+        .stderr(predicate::str::contains("totally-fake-tool-mixed"));
+}
+
+#[test]
+fn setup_seamless_no_telemetry_does_not_claim_sent() {
+    // Bug guard: previously the channel selection mapped
+    // (telemetry-off + seamless) to RequestChannel::Sent, so the
+    // renderer printed "Reported via telemetry" while nothing was
+    // sent. The fix routes seamless to Manual with the URL visible
+    // and the "enable telemetry" hint suppressed.
+    let mut cfg = NamedTempFile::new().unwrap();
+    writeln!(
+        cfg,
+        r#"
+[provisioner]
+seamless-fake-tool = "1.0"
+"#
+    )
+    .unwrap();
+
+    let mut c = jarvy_cmd();
+    c.env("JARVY_FAST_TEST", "1");
+    // Force seamless on, telemetry off — the bug's reproducer.
+    c.env("JARVY_SANDBOX", "1");
+    c.env_remove("JARVY_TELEMETRY");
+    c.args(["setup", "--file"])
+        .arg(cfg.path())
+        .arg("--no-hooks");
+
+    c.assert()
+        .code(TOOL_UNSUPPORTED)
+        // Must NOT claim the request was sent — nothing fired.
+        .stderr(predicate::str::contains("Reported via telemetry").not())
+        // Must show the fallback URL (only remaining channel).
+        .stderr(predicate::str::contains("Telemetry off"))
+        .stderr(predicate::str::contains("bearbinary/Jarvy"))
+        // Must NOT push the user toward `jarvy telemetry enable` —
+        // seamless operators can't toggle it per-run.
+        .stderr(predicate::str::contains("jarvy telemetry enable").not());
 }
 
 #[test]

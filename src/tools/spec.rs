@@ -818,17 +818,61 @@ pub fn generate_tool_index_json() -> String {
     serde_json::to_string_pretty(&index).unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
 }
 
-/// Get a list of all supported tool names (lowercase).
+/// Borrowed iteration over every registered tool name, sorted.
+///
+/// The underlying `Vec<String>` is built once via `OnceLock` and reused
+/// for every call — replacing the per-call rebuild in `list_tool_names`
+/// for hot paths like `unsupported::fuzzy_suggest`. Names are returned
+/// in their canonical (lowercased) form; the tool-naming convention
+/// across this crate is ASCII-lowercase, so the cache stores the
+/// inventory names as-is plus `MANUAL_TOOLS`.
+pub fn iter_tool_names() -> impl Iterator<Item = &'static str> {
+    static SORTED_NAMES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    let names = SORTED_NAMES.get_or_init(|| {
+        let mut v: Vec<String> = iter_tools().map(|e| e.spec.name.to_lowercase()).collect();
+        for (name, _) in MANUAL_TOOLS {
+            v.push((*name).to_string());
+        }
+        v.sort();
+        v.dedup();
+        v
+    });
+    names.iter().map(String::as_str)
+}
+
+/// Get a list of all supported tool names (lowercase). Owned-string
+/// shape kept for callers that need `Vec<String>`; new code should
+/// prefer `iter_tool_names()` to avoid rebuilding the vector.
 pub fn list_tool_names() -> Vec<String> {
-    let mut names: Vec<String> = iter_tools().map(|e| e.spec.name.to_lowercase()).collect();
+    iter_tool_names().map(str::to_string).collect()
+}
 
-    // Add manually registered tools
-    for (name, _) in MANUAL_TOOLS {
-        names.push(name.to_string());
-    }
-
-    names.sort();
-    names
+/// Render the `src/tools/_template.rs` source with placeholder
+/// substitution for a new tool. Single source of truth so that
+/// `cargo-jarvy new-tool` and `jarvy tools --request` produce
+/// identical files — previously these were two separate copies of
+/// the substitution logic that had already drifted (the cargo-jarvy
+/// copy was missing the `__PKG_BSD__` placeholder).
+///
+/// `bin` defaults to `name`. The tool name must already be validated
+/// (`[A-Za-z0-9._-]{1,64}`) — callers should reject invalid input
+/// before reaching this point so the rendered file is safe to write
+/// to disk.
+pub fn render_tool_template(name: &str, bin: Option<&str>) -> String {
+    const TEMPLATE: &str = include_str!("_template.rs");
+    let bin = bin.unwrap_or(name);
+    let upper = name.to_ascii_uppercase().replace('-', "_");
+    let desc = format!("{} tool", name);
+    let winget_id = format!("Publisher.{}", name);
+    TEMPLATE
+        .replace("__TOOL_MOD__", name)
+        .replace("__TOOL_BIN__", bin)
+        .replace("__TOOL_UPPER__", &upper)
+        .replace("__TOOL_DESC__", &desc)
+        .replace("__PKG_BREW__", name)
+        .replace("__PKG_LINUX__", name)
+        .replace("__PKG_WINGET_ID__", &winget_id)
+        .replace("__PKG_BSD__", name)
 }
 
 /// Look up a ToolSpec by name (case-insensitive).

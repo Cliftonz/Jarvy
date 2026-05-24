@@ -449,6 +449,36 @@ jarvy telemetry preview       # Show what events would be sent
 
 **Module**: `src/telemetry.rs` - Unified telemetry API with event functions and metrics.
 
+**Event Taxonomy** — stable contract for AI agents and log queries:
+
+| Event              | Source paths                          | Notes                                        |
+|--------------------|---------------------------------------|----------------------------------------------|
+| `tool.requested`   | per tool in config                    | Setup phase                                  |
+| `tool.installed`   | per successful install                | Setup phase                                  |
+| `tool.failed`      | per failed install                    | Setup phase                                  |
+| `tool.unsupported` | setup unknown-tool loop + `--request` | Uniform field shape across both call sites   |
+| `setup.started` / `setup.completed` | run lifecycle        | Carries duration, counts                     |
+| `hook.started` / `hook.completed` / `hook.failed` / `hook.timeout` | per hook | |
+
+`tool.unsupported` fields (uniform across setup and `--request`):
+```
+tool, version?, source, platform, suggestions, channel,
+fallback_issue_url, scaffold_cmd, exit_code, opt_in_bypassed
+```
+- `source`: `config` | `mcp` | `cli` | `request`
+- `channel`: `telemetry` | `manual` — telemetry is the canonical
+  delivery channel; `manual` means the user must use the
+  `fallback_issue_url` because telemetry is disabled
+- `opt_in_bypassed`: `true` only on the `--request` path (the user
+  typed the command, so consent is implicit and the OTEL counter
+  fires regardless of the global opt-in)
+
+**Project-config trust boundary**: a `jarvy.toml` shipped with a cloned
+repo can NARROW telemetry (disable, lower sample rate, drop signals)
+but cannot BROADEN it (enable opt-in, change endpoint). Endpoint
+overrides from project config are refused with a stderr warning;
+override via `JARVY_OTLP_ENDPOINT` only.
+
 ### Self-Updating
 
 Jarvy includes built-in self-updating functionality that can check for and install updates via multiple methods.
@@ -576,7 +606,12 @@ Integration tests are in `/tests/`. Key test env vars:
 - `0` - Success
 - `2` - CONFIG_ERROR (malformed jarvy.toml)
 - `3` - PREREQ_MISSING (package manager not found)
+- `4` - NETWORK_TIMEOUT (network / proxy failure)
 - `5` - PERMISSION_REQUIRED (sudo needed)
+- `6` - INCOMPATIBLE_OS_ARCH (OS/arch unsupported for the action)
+- `7` - HOOK_FAILED (pre_setup / post_install / post_setup hook errored)
+- `8` - TOOL_UNSUPPORTED (every configured tool is unknown to the
+  registry — mixed runs with at least one known tool still return 0)
 
 ## Conventions
 
