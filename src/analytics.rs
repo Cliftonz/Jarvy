@@ -318,6 +318,36 @@ pub fn send_otlp_smoke_probe() {
     }
 }
 
+/// Build the shared OTLP resource — emitted as `service.*`/`host.*`
+/// **resource attributes** on every signal so the forwarder's
+/// `transform/anonymize` (which only operates on `context: resource`)
+/// applies. Identical Resource is reused by both LoggerProvider here
+/// and MeterProvider in `telemetry.rs` so logs and metrics carry
+/// matching resource identity in Grafana.
+///
+/// `host.name` is emitted RAW. The forwarder hashes it with the rotating
+/// salt before egress — local-only sinks (file logger, stderr) keep the
+/// plaintext for the operator's own debugging. Emitting hashed-locally
+/// would gain nothing (the forwarder already controls fan-out) and
+/// would break `jarvy logs view` for the user.
+pub(crate) fn build_resource() -> opentelemetry_sdk::Resource {
+    use opentelemetry::KeyValue;
+
+    let hostname = hostname::get()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+
+    opentelemetry_sdk::Resource::builder()
+        .with_attributes(vec![
+            KeyValue::new("service.name", "jarvy"),
+            KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
+            KeyValue::new("host.name", hostname),
+            KeyValue::new("os.type", env::consts::OS),
+            KeyValue::new("os.description", env::consts::OS),
+        ])
+        .build()
+}
+
 fn build_otlp_logger_provider(
     cfg: &crate::telemetry::TelemetryConfig,
 ) -> Result<opentelemetry_sdk::logs::SdkLoggerProvider, Box<dyn std::error::Error>> {
@@ -330,7 +360,8 @@ fn build_otlp_logger_provider(
         .with_endpoint(endpoint.as_str())
         .build()?;
 
-    let mut logger_builder = opentelemetry_sdk::logs::SdkLoggerProvider::builder();
+    let mut logger_builder =
+        opentelemetry_sdk::logs::SdkLoggerProvider::builder().with_resource(build_resource());
     if env::var("JARVY_TELEMETRY_SMOKE").as_deref() == Ok("1") {
         logger_builder = logger_builder.with_simple_exporter(exporter);
     } else {

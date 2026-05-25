@@ -454,7 +454,16 @@ fn build_meter_provider(config: &TelemetryConfig) -> Result<SdkMeterProvider, St
         .with_interval(Duration::from_secs(60))
         .build();
 
-    Ok(SdkMeterProvider::builder().with_reader(reader).build())
+    // Reuse the same resource as the logger provider so logs and metrics
+    // carry matching identity (service.name, host.name, …) in the
+    // backend. Without `with_resource` the SDK falls back to
+    // `service.name=unknown_service` which (a) breaks Grafana stack
+    // filtering and (b) bypasses the forwarder's `host.name` hash
+    // statement entirely.
+    Ok(SdkMeterProvider::builder()
+        .with_reader(reader)
+        .with_resource(crate::analytics::build_resource())
+        .build())
 }
 
 /// Shutdown telemetry, flushing any pending data
@@ -715,10 +724,12 @@ pub fn setup_inventory(
         .collect::<Vec<_>>()
         .join(",");
 
-    let hostname = hostname::get()
-        .map(|h| h.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "unknown".to_string());
-
+    // `hostname` is now attached as a `host.name` resource attribute via
+    // `analytics::build_resource()` so the forwarder's anonymize stage
+    // (which only operates on `context: resource`) catches it. Emitting
+    // it as a per-event log-record field as well would bypass the hash
+    // — Grafana would receive plaintext `hostname=Zacs-MacBook-Pro.local`
+    // alongside the hashed `host.name`. Dropped here for that reason.
     tracing::info!(
         event = "setup.inventory",
         tools = %tools_str,
@@ -726,7 +737,6 @@ pub fn setup_inventory(
         role = %role.unwrap_or("none"),
         config_source = %redact_path(config_source),
         machine_id = %machine_id.unwrap_or("unknown"),
-        hostname = %hostname,
         platform = %env::consts::OS,
     );
 
