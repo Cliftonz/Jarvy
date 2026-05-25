@@ -242,11 +242,35 @@ collector:
   #      secretKeyRef: { name: my-secret, key: token }
 
 # -----------------------------------------------------------------------------
+# Grafana Cloud — region selector for the OTLP gateway URL
+# -----------------------------------------------------------------------------
+# Grafana Cloud's OTLP gateway is region-sharded. The API key in the
+# `grafana-otlp-token` Secret is bound to ONE stack which lives in ONE
+# region — presenting the key against a different region's gateway
+# returns HTTP 401 and silently drops every export. To find the right
+# region: log in to Grafana Cloud → Stack details → "Send data via
+# OpenTelemetry Protocol (OTLP)" → the URL shown there embeds the
+# region (e.g. `prod-us-east-3`, `prod-eu-west-2`).
+#
+# Default is `prod-us-east-3`. If you need a different gateway entirely
+# (Honeycomb, Datadog, Tempo running in-cluster, …) set
+# `exporter.endpoint` instead — an explicit endpoint always wins over
+# the region-composed default.
+grafanaCloud:
+  # -- Grafana Cloud OTLP gateway region. Must match the region of the
+  # stack the API key in `grafana-otlp-token` is issued against.
+  region: "prod-us-east-3"
+
+# -----------------------------------------------------------------------------
 # Exporter (downstream backend) — defaults to Grafana Cloud
 # -----------------------------------------------------------------------------
 exporter:
-  # -- OTLP/HTTP endpoint of the downstream backend.
-  endpoint: "https://otlp-gateway-prod-us-east-0.grafana.net/otlp"
+  # -- OTLP/HTTP endpoint of the downstream backend. When empty, the
+  # chart composes `https://otlp-gateway-<region>.grafana.net/otlp`
+  # from `grafanaCloud.region`. Set this to point at any non-Grafana
+  # backend (Honeycomb, Datadog, in-cluster Tempo, …) — explicit
+  # values always win over the region-composed default.
+  endpoint: ""
   # -- Auth scheme passed to the `bearertokenauth` extension. Grafana
   # Cloud uses "Basic" (instance ID + token, base64'd). Honeycomb /
   # Datadog use "Bearer".

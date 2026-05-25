@@ -97,29 +97,31 @@ spec:
 ---
 {{- /*
   CiliumNetworkPolicy: FQDN-based egress restriction. Only allows
-  egress to the parsed hostname of `exporter.endpoint` over 443.
-  Cilium's L7 DNS-resolved policy enforcement is the only standard
-  way to do this without CNI-specific magic.
+  egress to the parsed hostname of the resolved exporter endpoint
+  over 443. Cilium's L7 DNS-resolved policy enforcement is the only
+  standard way to do this without CNI-specific magic.
 
-  Parsing: strip the scheme then take everything up to the first `/`
-  or `:`. This is brittle if the endpoint includes a port; document
-  override via `networkPolicy.cilium.fqdn` if needed.
+  Endpoint comes from the `exporterEndpoint` helper — same source of
+  truth as the BACKEND_OTLP_ENDPOINT env, so a region bump in
+  `grafanaCloud.region` flips both this NetworkPolicy and the env
+  together. Parsing: strip the scheme then take everything up to the
+  first `/` or `:`. Override via `networkPolicy.cilium.fqdn` if needed.
 */ -}}
 {{- $fqdn := .Values.networkPolicy.cilium.fqdn -}}
 {{- if not $fqdn -}}
-{{- $endpoint := .Values.exporter.endpoint -}}
+{{- $endpoint := include "jarvy-telemetry-forwarder.exporterEndpoint" . -}}
 {{- $noScheme := regexReplaceAll "^https?://" $endpoint "" -}}
 {{- $noUserinfo := regexReplaceAll "^[^@/]*@" $noScheme "" -}}
 {{- $fqdn = regexReplaceAll "[/:].*$" $noUserinfo "" -}}
 {{- end -}}
 {{- if not $fqdn -}}
-{{- fail "networkPolicy.egressMode=fqdn requires either a parseable exporter.endpoint or an explicit networkPolicy.cilium.fqdn override." -}}
+{{- fail "networkPolicy.egressMode=fqdn requires either a resolvable exporter endpoint (exporter.endpoint or grafanaCloud.region) or an explicit networkPolicy.cilium.fqdn override." -}}
 {{- end -}}
 {{- /* Defense in depth: ensure derived FQDN is fully-qualified
        (≥1 dot, lowercase, non-empty). Single-label hostnames like
        `grafana` would render a useless allow rule silently. */ -}}
 {{- if not (regexMatch "^[a-z0-9.-]+\\.[a-z]{2,}$" $fqdn) -}}
-{{- fail (printf "Derived FQDN %q must be a fully-qualified hostname (e.g. otlp-gateway-prod-us-east-0.grafana.net). Set networkPolicy.cilium.fqdn explicitly." $fqdn) -}}
+{{- fail (printf "Derived FQDN %q must be a fully-qualified hostname (e.g. otlp-gateway-prod-us-east-3.grafana.net). Set networkPolicy.cilium.fqdn explicitly." $fqdn) -}}
 {{- end -}}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy

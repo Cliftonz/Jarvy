@@ -82,6 +82,32 @@ supply-chain hygiene; tag is decorative when digest is set.
 {{- end -}}
 
 {{/*
+Resolve the final OTLP exporter endpoint. Explicit `exporter.endpoint`
+wins; otherwise compose `https://otlp-gateway-<region>.grafana.net/otlp`
+from `grafanaCloud.region`. This is the single source of truth used by
+both `deployment.yaml` (BACKEND_OTLP_ENDPOINT env) and
+`networkpolicy.yaml` (Cilium FQDN egress derivation) — keeping them in
+lockstep so a region bump can't silently leave the NetworkPolicy
+pinned to the old gateway and produce a connect-then-drop failure
+that's harder to debug than a 401.
+
+Grafana Cloud's OTLP gateway is region-sharded. API keys are bound to
+ONE region; presenting against another returns HTTP 401 and silently
+drops every export.
+*/}}
+{{- define "jarvy-telemetry-forwarder.exporterEndpoint" -}}
+{{- if .Values.exporter.endpoint -}}
+{{- .Values.exporter.endpoint -}}
+{{- else -}}
+{{- $region := .Values.grafanaCloud.region -}}
+{{- if not $region -}}
+{{- fail "Either exporter.endpoint or grafanaCloud.region must be set." -}}
+{{- end -}}
+{{- printf "https://otlp-gateway-%s.grafana.net/otlp" $region -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Render the OTTL anonymize statements — one `set(...)` per key in
 `pii.hashedAttributes`. Used in three OTel contexts
 (resource attributes on log_statements / metric_statements /

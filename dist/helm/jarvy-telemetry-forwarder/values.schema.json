@@ -5,7 +5,7 @@
   "description": "JSON Schema for the chart's values.yaml. Helm itself validates against this on every `helm install`/`helm upgrade`/`helm template`. Other systems (GitOps webhooks, ArgoCD ApplicationSets, OPA gatekeeper policies, in-house CI) can import this directly to validate inputs before they reach the chart. Source of truth lives at `dist/helm/jarvy-telemetry-forwarder/values.schema.json`; published to https://jarvy.dev/schema/jarvy-telemetry-forwarder.values.schema.json on every chart release.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["collector", "exporter", "pii", "secrets", "gatewayApi", "tls", "networkPolicy", "serviceMonitor", "prometheusRule", "pdb", "namespace"],
+  "required": ["collector", "grafanaCloud", "exporter", "pii", "secrets", "gatewayApi", "tls", "networkPolicy", "serviceMonitor", "prometheusRule", "pdb", "namespace"],
   "properties": {
     "nameOverride": { "type": "string" },
     "fullnameOverride": { "type": "string" },
@@ -205,6 +205,20 @@
       }
     },
 
+    "grafanaCloud": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["region"],
+      "properties": {
+        "region": {
+          "type": "string",
+          "description": "Grafana Cloud OTLP gateway region (e.g. `prod-us-east-3`, `prod-eu-west-2`). Must match the region of the stack the API key in `grafana-otlp-token` is issued against — keys are region-scoped and a wrong-region presentation returns HTTP 401 and silently drops every export. Used to compose `https://otlp-gateway-<region>.grafana.net/otlp` when `exporter.endpoint` is empty. Ignored when `exporter.endpoint` is set.",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)+$",
+          "minLength": 3
+        }
+      }
+    },
+
     "exporter": {
       "type": "object",
       "additionalProperties": false,
@@ -212,9 +226,8 @@
       "properties": {
         "endpoint": {
           "type": "string",
-          "format": "uri",
-          "description": "OTLP backend endpoint. Pattern intentionally rejects userinfo (`user@host`) which would slip through the CiliumNetworkPolicy FQDN parser; rejects whitespace; allows https only (http loopback supported by client lib but not here, since this is an internet-facing forwarder).",
-          "pattern": "^https://[a-z0-9.-]+(?::[0-9]+)?(?:/[^\\s]*)?$"
+          "description": "OTLP backend endpoint. Leave empty (`\"\"`) to let the chart compose the URL from `grafanaCloud.region`. Set explicitly to point at a non-Grafana backend (Honeycomb, Datadog, in-cluster Tempo, …). Pattern intentionally rejects userinfo (`user@host`) which would slip through the CiliumNetworkPolicy FQDN parser; rejects whitespace; allows https only (http loopback supported by client lib but not here, since this is an internet-facing forwarder).",
+          "pattern": "^(|https://[a-z0-9.-]+(?::[0-9]+)?(?:/[^\\s]*)?)$"
         },
         "authScheme": { "type": "string", "enum": ["Basic", "Bearer"] }
       }
