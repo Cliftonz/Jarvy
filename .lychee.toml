@@ -38,7 +38,7 @@ exclude = [
 # Be patient with rate-limited domains.
 exclude_link_local = true
 exclude_loopback = true
-exclude_mail = true
+include_mail = false
 exclude_path = [
     "site/",
     "target/",

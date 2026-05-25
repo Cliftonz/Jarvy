@@ -215,7 +215,7 @@ Consequences:
    `VERSION_PLACEHOLDER` / `SHA256_PLACEHOLDER_*` strings from initial
    setup on 2026-01-18.
 3. `brew install jarvy` (or `brew install bearbinary/tap/jarvy`)
-   currently fails — the formula is unparseable and references
+   currently fails — the formula is unparsable and references
    non-existent URLs.
 
 Until the pipeline is rebuilt, Homebrew is **not a viable distribution
