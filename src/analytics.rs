@@ -65,7 +65,17 @@ fn set_bootstrap_state(state: TelemetryBootstrapState) {
     }
 }
 
-pub fn init_logging(enable_analytics: bool) {
+/// Initialize the global tracing subscriber + OTLP logger provider.
+///
+/// `cfg` is the fully-merged effective telemetry config (env > project >
+/// global file). Both the master switch (`cfg.enabled` && `cfg.logs`)
+/// and the endpoint must come from this single source — earlier
+/// versions gated the OTLP layer on the global file flag while
+/// `telemetry::init` gated metrics/traces on the merged config,
+/// producing the bug where `JARVY_TELEMETRY=1` env-only opt-in left
+/// the logger layer permanently disabled.
+pub fn init_logging(cfg: &crate::telemetry::TelemetryConfig) {
+    let enable_analytics = cfg.enabled && cfg.logs;
     // Registry-level EnvFilter so dependency-crate `info!`/`debug!`
     // events from `dirs`, `ureq`, `opentelemetry_sdk`, `rustls`, etc.
     // don't flood `~/.jarvy/logs/jarvy.log` and OTLP exports
@@ -139,7 +149,7 @@ pub fn init_logging(enable_analytics: bool) {
     // export time (observability review #2).
     let mut bootstrap_error: Option<String> = None;
     let otel_layer_opt = if enable_analytics {
-        match build_otlp_logger_provider() {
+        match build_otlp_logger_provider(cfg) {
             Ok(logger_provider) => {
                 let layer = opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(
                     &logger_provider,
@@ -246,22 +256,47 @@ fn ensure_log_dir() -> std::io::Result<std::path::PathBuf> {
     Ok(dir)
 }
 
-fn otlp_logs_endpoint() -> String {
-    if let Ok(v) = env::var("JARVY_OTLP_LOGS_ENDPOINT") {
-        if !v.trim().is_empty() {
-            return v;
-        }
+/// Resolve the per-signal OTLP/HTTP endpoint.
+///
+/// Precedence: `JARVY_OTLP_{SIGNAL}_ENDPOINT` env (full URL, used verbatim) >
+/// `JARVY_OTLP_ENDPOINT` env (base) > caller-supplied base (from
+/// `TelemetryConfig.endpoint`, which is itself sourced from the file
+/// config or env). When the resolved value is a base URL (no `/v1/`
+/// path segment), the signal path is appended — `opentelemetry-otlp`
+/// 0.31's `with_endpoint()` is treated as the full URL and does NOT
+/// auto-append, so a bare base produces a `POST /` and the collector
+/// 404s every batch.
+pub(crate) fn resolve_otlp_endpoint(base: &str, signal: &str) -> String {
+    let signal_env = match signal {
+        "logs" => "JARVY_OTLP_LOGS_ENDPOINT",
+        "metrics" => "JARVY_OTLP_METRICS_ENDPOINT",
+        "traces" => "JARVY_OTLP_TRACES_ENDPOINT",
+        _ => "",
+    };
+    let candidate = env::var(signal_env)
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| {
+            env::var("JARVY_OTLP_ENDPOINT")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+        })
+        .unwrap_or_else(|| base.to_string());
+    append_signal_path(&candidate, signal)
+}
+
+/// Append `/v1/{signal}` to `endpoint` unless it already terminates in
+/// an OTLP signal path. Keeps the helper idempotent so an operator who
+/// explicitly sets `JARVY_OTLP_LOGS_ENDPOINT=https://host/v1/logs`
+/// doesn't get a double-pathed `https://host/v1/logs/v1/logs`.
+fn append_signal_path(endpoint: &str, signal: &str) -> String {
+    let trimmed = endpoint.trim_end_matches('/');
+    let suffix = format!("/v1/{}", signal);
+    if trimmed.ends_with(&suffix) || trimmed.contains("/v1/") {
+        trimmed.to_string()
+    } else {
+        format!("{}{}", trimmed, suffix)
     }
-    if let Ok(v) = env::var("JARVY_OTLP_ENDPOINT") {
-        if !v.trim().is_empty() {
-            return v;
-        }
-    }
-    // Fallback to compile-time overrides or default (base URL; path is appended by exporter)
-    option_env!("JARVY_OTLP_LOGS_ENDPOINT")
-        .or(option_env!("JARVY_OTLP_ENDPOINT"))
-        .unwrap_or("http://localhost:4318")
-        .to_string()
 }
 
 pub fn send_otlp_smoke_probe() {
@@ -283,11 +318,12 @@ pub fn send_otlp_smoke_probe() {
     }
 }
 
-fn build_otlp_logger_provider()
--> Result<opentelemetry_sdk::logs::SdkLoggerProvider, Box<dyn std::error::Error>> {
+fn build_otlp_logger_provider(
+    cfg: &crate::telemetry::TelemetryConfig,
+) -> Result<opentelemetry_sdk::logs::SdkLoggerProvider, Box<dyn std::error::Error>> {
     use opentelemetry_otlp::{Protocol, WithExportConfig};
 
-    let endpoint = otlp_logs_endpoint();
+    let endpoint = resolve_otlp_endpoint(&cfg.endpoint, "logs");
     let exporter = opentelemetry_otlp::LogExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpBinary)

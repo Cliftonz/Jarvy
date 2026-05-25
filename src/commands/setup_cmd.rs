@@ -861,6 +861,14 @@ pub fn run_setup(
 fn emit_telemetry_hint_if_undecided() {
     use std::fs;
 
+    // A live env-var opt-in (`JARVY_TELEMETRY=1`) is a per-run choice —
+    // not persisted to config, but absolutely an explicit decision for
+    // this invocation. Surfacing "telemetry is off" while the user is
+    // actively running with telemetry on misrepresents what's happening.
+    if crate::telemetry::is_enabled() {
+        return;
+    }
+
     let Some(home) = dirs::home_dir() else {
         return;
     };

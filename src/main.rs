@@ -75,20 +75,20 @@ fn main() {
 
     // Initialize after parsing arguments
     let global_config = initialize();
-    // The legacy `settings.telemetry` flag was opt-out (defaulted true),
-    // which contradicted the documented "opt-in by default" promise in
-    // CLAUDE.md and made the OTLP layer fire on every first-run install
-    // — emitting `BatchLogProcessor.ExportError: ConnectionRefused on
-    // http://localhost:4318/` for every user without a local OTLP
-    // collector. The authoritative flag is `[telemetry] enabled`, which
-    // properly defaults false (see TelemetryConfig::default). Gate OTLP
-    // init on that one instead.
-    init_logging(global_config.telemetry.enabled);
 
-    // Initialize unified telemetry (OTEL-based)
-    // Priority: env vars > project jarvy.toml > global ~/.jarvy/config.toml
+    // Build the effective TelemetryConfig BEFORE `init_logging` so the
+    // tracing subscriber's OTLP layer sees the same merge result as
+    // `telemetry::init` (metrics + traces). Earlier versions gated the
+    // log layer on the file flag only — `JARVY_TELEMETRY=1` env-only
+    // opt-in left the OTLP logger permanently off, while metrics still
+    // exported, producing a half-on telemetry stack that was hard to
+    // diagnose.
+    //
+    // Precedence: env > project jarvy.toml > global ~/.jarvy/config.toml.
     let mut telemetry_config = global_config.telemetry.clone();
     if !global_config.settings.telemetry {
+        // Legacy opt-out flag — preserved for users who set it via the
+        // old `[settings] telemetry = false` shape before the migration.
         telemetry_config.enabled = false;
     }
 
@@ -117,6 +117,8 @@ fn main() {
     if std::env::var("JARVY_OTLP_ENDPOINT").is_ok() {
         telemetry_config.endpoint = env_config.endpoint;
     }
+
+    init_logging(&telemetry_config);
     telemetry::init(telemetry_config);
 
     // Install panic hook BEFORE the banner so any (currently hard-to-
@@ -177,9 +179,16 @@ fn main() {
     // Dispatch to command handlers
     let exit_code = dispatch_command(&cli, &global_config);
 
-    // Flush OTLP log batches before `process::exit` kills the worker
-    // thread — `exit` skips every `Drop`, including the batch
-    // processor's shutdown sequence (round-2 obs P0).
+    // Flush OTLP signal batches before `process::exit` kills worker
+    // threads — `exit` skips every `Drop`, including the batch
+    // processor's shutdown sequence (round-2 obs P0). Both providers
+    // must be drained explicitly: `telemetry::shutdown` flushes the
+    // PeriodicReader's metric batch (60s default cadence — without
+    // explicit shutdown short-lived commands like `jarvy setup` exit
+    // before the first periodic export and lose every metric point);
+    // `analytics::shutdown_logging` drains the BatchLogProcessor's
+    // log queue.
+    telemetry::shutdown();
     analytics::shutdown_logging();
 
     std::process::exit(exit_code);

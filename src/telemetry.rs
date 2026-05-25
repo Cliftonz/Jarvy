@@ -439,10 +439,14 @@ fn build_telemetry_state(config: TelemetryConfig) -> TelemetryState {
 }
 
 fn build_meter_provider(config: &TelemetryConfig) -> Result<SdkMeterProvider, String> {
+    // Compose `/v1/metrics` onto the base endpoint. `opentelemetry-otlp`
+    // 0.31's `with_endpoint()` is the FULL URL — a bare base produces
+    // `POST /` and the collector 404s every export.
+    let endpoint = crate::analytics::resolve_otlp_endpoint(&config.endpoint, "metrics");
     let exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpBinary)
-        .with_endpoint(&config.endpoint)
+        .with_endpoint(endpoint.as_str())
         .build()
         .map_err(|e| format!("Failed to build metric exporter: {}", e))?;
 
