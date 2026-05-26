@@ -12,16 +12,20 @@ on:
   # regressions before the artifact build runs in release.yml.
   pull_request:
     branches: [ "main" ]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'CHANGELOG.md'
-      - 'LICENSE*'
-      - 'examples/**'
-      - 'mkdocs.yml'
-      - '.gitignore'
-      - '.lychee.toml'
-      - '.vale.ini'
+    # Positive filter: PR test runs only fire when source / tests / dep
+    # manifests / build config change. Excludes doc-only, CI-only,
+    # example-only, lint-config PRs that can't shift the test outcome.
+    # Inverted from paths-ignore for predictability — easier to reason
+    # about "what triggers a run" than "what does NOT trigger".
+    paths:
+      - 'src/**'
+      - 'crates/**'
+      - 'tests/**'
+      - 'benches/**'
+      - 'build.rs'
+      - 'Cargo.toml'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/test.yml'
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
