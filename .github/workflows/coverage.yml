@@ -7,6 +7,13 @@ on:
   # not running it on every merge saves significant runner time.
   pull_request:
     branches: [ "main" ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'CHANGELOG.md'
+      - 'LICENSE*'
+      - 'examples/**'
+      - 'mkdocs.yml'
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
@@ -15,6 +22,11 @@ on:
 
 permissions:
   contents: read
+
+# Cancel previous runs on the same ref (force-push during PR iteration).
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
