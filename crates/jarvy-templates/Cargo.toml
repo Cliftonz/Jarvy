@@ -1,10 +1,18 @@
 [package]
 name = "jarvy-templates"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Shared tool-scaffold template + validation for jarvy and cargo-jarvy. No runtime deps so dependents stay light."
 license = "MIT OR Apache-2.0"
-publish = false
+repository = "https://github.com/bearbinary/jarvy"
+homepage = "https://jarvy.dev"
+# `publish = false` previously kept this internal — but jarvy and
+# cargo-jarvy depend on it via `{ version = "X", path = "..." }`, and
+# crates.io strips the `path` on publish and resolves from the registry.
+# So this crate MUST be publishable for the parent jarvy crate to
+# publish at all. v0.1.0 hit `error: failed to verify manifest ...
+# `jarvy-templates` does not specify a version` because the dep had no
+# version + publish=false here meant nothing could be published.
 
 [dependencies]
 # Intentionally empty — std-only. Keeping this crate dependency-free

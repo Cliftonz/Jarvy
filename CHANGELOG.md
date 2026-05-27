@@ -27,6 +27,47 @@ for the full release process and
 [`docs/release-quirks-jarvy.md`](https://github.com/bearbinary/jarvy/blob/main/docs/release-quirks-jarvy.md)
 for divergences from generic release skills.
 
+## [v0.1.1] — Fix crates.io publish pipeline (2026-05-27)
+
+Patch release closing the crates.io gap that v0.1.0 left open. No
+runtime code changes — release-pipeline metadata only.
+
+### Fixed
+
+- **`jarvy-templates` is now publishable.** The crate was marked
+  `publish = false` and lacked the `repository` / `homepage` metadata
+  crates.io requires. Both `jarvy` and `cargo-jarvy` depend on it via
+  `{ version = "X", path = "..." }`; crates.io strips `path` on publish
+  and resolves from the registry, so the dep must already be available
+  there. With `publish = false` + no version spec on the parents, the
+  v0.1.0 `cargo publish` failed at `error: failed to verify manifest
+  ... 'jarvy-templates' does not specify a version` before either crate
+  could upload.
+- **Both `jarvy-templates` path dependency declarations now carry a
+  `version = "0.1.1"` requirement.** Required by `cargo publish` —
+  without it the parent crate cannot verify against the published
+  registry form of the dep.
+- **`publish-packages.yml::publish-crates-io` step is now ordered.**
+  Previously one `cargo publish` call attempted to publish `jarvy` as
+  the workspace root; `jarvy-templates` was never published, so the
+  parent's resolve always 404'd. The job now publishes
+  `jarvy-templates` first, polls the crates.io index for up to 150s
+  until the dep surfaces, then publishes `jarvy` with `--no-verify`
+  (the workspace verify already ran at tag-build time; the
+  post-publish re-verify would race the index refresh).
+
+### Impact on v0.1.0 users
+
+- The GitHub Release for v0.1.0 (all 49 binary assets + Sigstore
+  signatures) is unaffected. `.deb` / `.rpm` / `.dmg` / `.msi` /
+  `.AppImage` install paths work exactly as documented.
+- `cargo install jarvy` resolves to v0.1.1 (the first crates.io
+  release in the v0.1.x line). Users who tried `cargo install jarvy`
+  during the v0.1.0 → v0.1.1 window saw `error: could not find
+  jarvy 0.1.0 in registry crates-io`.
+- Other channels (Homebrew tap, AUR, winget, Chocolatey) were not
+  affected by this gap.
+
 ## [helm-v0.6.1] — Defense-in-depth: anonymize record-level attrs (2026-05-25)
 
 ### Fixed — `jarvy-telemetry-forwarder` Helm chart
