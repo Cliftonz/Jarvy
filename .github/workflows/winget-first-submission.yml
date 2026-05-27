@@ -1,0 +1,113 @@
+name: Winget first-time submission
+
+# One-shot helper for the first-time submission of `Jarvy.Jarvy` to
+# microsoft/winget-pkgs. `wingetcreate` ships as a Windows-only .NET
+# app (Microsoft does not publish to NuGet or to non-Windows binary
+# channels), so the maintainer on macOS / Linux cannot run it
+# locally without standing up Wine or a Windows VM. This workflow
+# runs it on a windows-latest GitHub-hosted runner.
+#
+# Use ONCE per package — once Jarvy.Jarvy lands in winget-pkgs,
+# every subsequent `vX.Y.Z` release auto-propagates via
+# `publish-packages.yml::update-winget` (which uses
+# `vedantmgoyal2009/winget-releaser@v2`, the update-only action).
+# Delete or disable this file after first submission if you want.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Jarvy version to submit (no v prefix). Defaults to the latest GitHub release.'
+        required: false
+        default: ''
+      dry_run:
+        description: 'Generate the manifest YAML but do NOT submit the PR. Use this for the first run to inspect the output.'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+permissions:
+  contents: read
+
+jobs:
+  submit:
+    name: Submit Jarvy.Jarvy to winget-pkgs
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          V="${{ github.event.inputs.version }}"
+          if [ -z "$V" ]; then
+            # Latest GitHub release that matches vX.Y.Z (not -rc / -beta / helm-).
+            V=$(gh release list --repo bearbinary/jarvy --limit 20 --json tagName \
+                --jq '.[].tagName' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | head -1 \
+              | sed 's/^v//')
+          fi
+          if [ -z "$V" ]; then
+            echo "::error::Could not resolve a Jarvy version to submit."
+            exit 1
+          fi
+          echo "version=$V" >> $GITHUB_OUTPUT
+          echo "Resolved version: $V"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Install wingetcreate via winget itself — runs natively on the
+      # windows-latest runner. The tool ships through the Windows
+      # Package Manager so this is the canonical install path.
+      - name: Install wingetcreate
+        shell: pwsh
+        run: |
+          winget install --id Microsoft.WingetCreate --silent `
+            --accept-package-agreements --accept-source-agreements
+          wingetcreate --version
+
+      # Generate the manifest into ./out/manifests/<j>/<...>/<version>/
+      # Always runs (dry-run or real-run). For the very first run set
+      # `dry_run: true` and download the artifact to inspect the YAML
+      # before submitting.
+      - name: Generate manifest
+        shell: pwsh
+        run: |
+          $version = "${{ steps.resolve.outputs.version }}"
+          $msi = "https://github.com/bearbinary/Jarvy/releases/download/v$version/jarvy_${version}_x64_en-US.msi"
+          New-Item -ItemType Directory -Path out -Force | Out-Null
+          wingetcreate new --urls "$msi" `
+            --out (Resolve-Path out).Path `
+            --token "${{ secrets.WINGET_TOKEN }}"
+
+      - name: Upload manifest artifact (for dry-run review)
+        uses: actions/upload-artifact@v7
+        with:
+          name: winget-manifest-${{ steps.resolve.outputs.version }}
+          path: out/
+          retention-days: 30
+
+      # Submit only when dry_run=false. The submit step forks
+      # microsoft/winget-pkgs to the maintainer's account via the
+      # WINGET_TOKEN PAT, commits the three manifest YAML files, and
+      # opens the PR. Microsoft maintainers review (typically 24-48h
+      # for new packages); approved PRs land in winget-pkgs main.
+      - name: Submit PR to microsoft/winget-pkgs
+        if: ${{ github.event.inputs.dry_run == 'false' }}
+        shell: pwsh
+        run: |
+          $version = "${{ steps.resolve.outputs.version }}"
+          $msi = "https://github.com/bearbinary/Jarvy/releases/download/v$version/jarvy_${version}_x64_en-US.msi"
+          # `new --submit` regenerates the manifest in a clean dir and
+          # submits in one shot. Re-using the dry-run output dir would
+          # also work but a fresh generate matches what Microsoft would
+          # see if they re-ran wingetcreate themselves.
+          wingetcreate new --urls "$msi" `
+            --submit `
+            --token "${{ secrets.WINGET_TOKEN }}"
