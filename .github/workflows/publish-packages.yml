@@ -44,39 +44,85 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # Read the workspace version once so each downstream step uses a
+      # consistent value (env.VERSION is the tag name `vX.Y.Z` form;
+      # cargo needs the unprefixed semver `X.Y.Z`). Reading from
+      # Cargo.toml keeps the source of truth in one place.
+      - name: Read workspace version
+        id: workspace
+        shell: bash
+        run: |
+          V=$(awk -F'"' '/^version = / {print $2; exit}' Cargo.toml)
+          echo "Workspace version: $V"
+          echo "version=$V" >> $GITHUB_OUTPUT
+
       # Publish workspace deps before the consumer. `jarvy` depends on
       # `jarvy-templates` via a `{ version = "X", path = "..." }`
       # declaration; `cargo publish` of the parent crate fetches the
       # dep from crates.io (the `path` is stripped on publish), so the
-      # dep must already be there. `--no-verify` is intentional on the
-      # parent since the workspace verify already happened at tag-build
-      # time; the post-publish re-verify pulls jarvy-templates from
-      # crates.io, which 404s for ~1-2 minutes after publish until the
-      # index refreshes.
-      - name: Publish jarvy-templates to crates.io
-        run: cargo publish -p jarvy-templates --token ${{ secrets.CRATES_IO_TOKEN }}
+      # dep must already be there. Tolerate the rerun case where the
+      # dep version was already uploaded in a prior partial run (e.g.
+      # the workflow's first attempt failed at the index-poll step,
+      # leaving jarvy-templates published but jarvy unpublished). The
+      # sparse-index probe is the source of truth — if the version is
+      # already there, we skip; otherwise we publish.
+      - name: Publish jarvy-templates to crates.io (skip if already there)
+        shell: bash
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-
-      - name: Wait for crates.io index to surface jarvy-templates
+          VERSION: ${{ steps.workspace.outputs.version }}
         run: |
-          # Crates.io index takes a few seconds to propagate after publish.
-          # Poll with a hard ceiling so a stuck index doesn't hang CI.
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            if cargo search jarvy-templates --limit 1 2>/dev/null | grep -q '^jarvy-templates ='; then
-              echo "jarvy-templates visible in index"
+          set -euo pipefail
+          # Sparse-index path for a 14-char crate name `jarvy-templates`
+          # is /ja/rv/jarvy-templates per the sparse-index naming rules.
+          IDX_URL="https://index.crates.io/ja/rv/jarvy-templates"
+          if curl -fsSL "$IDX_URL" 2>/dev/null | grep -q "\"vers\":\"${VERSION}\""; then
+            echo "jarvy-templates@${VERSION} already on crates.io — skipping publish"
+            exit 0
+          fi
+          cargo publish -p jarvy-templates --token "$CARGO_REGISTRY_TOKEN"
+
+      # Poll for index propagation. The sparse-index URL is the same
+      # source the parent's `cargo publish` will consult to resolve the
+      # dep, so a positive match here means the next step will succeed.
+      # 5-minute ceiling — observed propagation up to ~3 minutes for
+      # brand-new crates; existing-crate updates surface in seconds.
+      - name: Wait for crates.io index to surface jarvy-templates
+        shell: bash
+        env:
+          VERSION: ${{ steps.workspace.outputs.version }}
+        run: |
+          set -euo pipefail
+          IDX_URL="https://index.crates.io/ja/rv/jarvy-templates"
+          for i in $(seq 1 20); do
+            if curl -fsSL "$IDX_URL" 2>/dev/null | grep -q "\"vers\":\"${VERSION}\""; then
+              echo "jarvy-templates@${VERSION} visible in sparse index"
               exit 0
             fi
             echo "attempt $i: not yet visible, sleeping 15s"
             sleep 15
           done
-          echo "jarvy-templates did not surface within 150s; aborting"
+          echo "jarvy-templates@${VERSION} did not surface within 300s; aborting"
           exit 1
 
-      - name: Publish jarvy to crates.io
-        run: cargo publish -p jarvy --no-verify --token ${{ secrets.CRATES_IO_TOKEN }}
+      # `--no-verify` is intentional: the workspace verify already
+      # happened at tag-build time, and the post-publish re-verify
+      # pulls jarvy-templates from crates.io which can race the
+      # final index refresh. Tolerate the rerun case (same shape as
+      # jarvy-templates) — if jarvy@VERSION is already there, skip.
+      - name: Publish jarvy to crates.io (skip if already there)
+        shell: bash
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+          VERSION: ${{ steps.workspace.outputs.version }}
+        run: |
+          set -euo pipefail
+          IDX_URL="https://index.crates.io/ja/rv/jarvy"
+          if curl -fsSL "$IDX_URL" 2>/dev/null | grep -q "\"vers\":\"${VERSION}\""; then
+            echo "jarvy@${VERSION} already on crates.io — skipping publish"
+            exit 0
+          fi
+          cargo publish -p jarvy --no-verify --token "$CARGO_REGISTRY_TOKEN"
 
   update-homebrew:
     name: Update Homebrew Formula
