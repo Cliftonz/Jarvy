@@ -68,15 +68,24 @@ jobs:
       - name: Install wingetcreate
         shell: pwsh
         run: |
-          # `winget install` exit code: 0 even when the subprocess
-          # invocation that follows fails to find wingetcreate on PATH,
-          # so make this step's pass/fail reflect actual usability.
-          winget install --id Microsoft.WingetCreate --silent `
-            --accept-package-agreements --accept-source-agreements
-          # wingetcreate uses `version` as a subcommand (not `--version`
-          # flag). The previous form printed help + exited 1, killing
-          # this step before the manifest generation ran.
-          wingetcreate version
+          # Direct binary download instead of `winget install --id
+          # Microsoft.WingetCreate`. winget installs MSIX packages
+          # which register PATH aliases via AppExecutionAlias — those
+          # aliases DON'T refresh in the same PowerShell session that
+          # did the install, so the subsequent `wingetcreate` calls
+          # silently invoke some fallback and exit 1.
+          #
+          # Pinning to v1.12.8.0 (the release tag as of 2026-05-27 per
+          # microsoft/winget-create). Update this string when bumping.
+          $url = 'https://github.com/microsoft/winget-create/releases/download/v1.12.8.0/wingetcreate.exe'
+          $bin = "$env:GITHUB_WORKSPACE\bin"
+          New-Item -ItemType Directory -Path $bin -Force | Out-Null
+          Invoke-WebRequest -Uri $url -OutFile "$bin\wingetcreate.exe"
+          # Add to PATH for subsequent steps in this job.
+          echo "$bin" >> $env:GITHUB_PATH
+          # Smoke check (in current shell — the GITHUB_PATH export only
+          # applies to subsequent steps, not the current one).
+          & "$bin\wingetcreate.exe" version
 
       # Generate the manifest into ./out/manifests/<j>/<...>/<version>/
       # Always runs (dry-run or real-run). For the very first run set
