@@ -83,9 +83,17 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile "$bin\wingetcreate.exe"
           # Add to PATH for subsequent steps in this job.
           echo "$bin" >> $env:GITHUB_PATH
-          # Smoke check (in current shell — the GITHUB_PATH export only
-          # applies to subsequent steps, not the current one).
-          & "$bin\wingetcreate.exe" version
+          # Don't run `wingetcreate version` as a smoke check — the
+          # 1.12.8.0 binary prints the version line correctly but then
+          # falls through to printing the top-level help and exits 1.
+          # The behavior looks intentional (or at least consistent) in
+          # the upstream binary. File-existence check + Get-Item is a
+          # reliable smoke check that doesn't depend on the binary's
+          # exit-code conventions.
+          if (-not (Test-Path "$bin\wingetcreate.exe")) {
+            throw "wingetcreate.exe download failed"
+          }
+          Get-Item "$bin\wingetcreate.exe" | Select-Object Length, LastWriteTime
 
       # Generate the manifest into ./out/manifests/<j>/<...>/<version>/
       # Always runs (dry-run or real-run). For the very first run set
