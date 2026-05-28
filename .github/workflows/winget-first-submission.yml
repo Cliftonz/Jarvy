@@ -105,9 +105,12 @@ jobs:
           $version = "${{ steps.resolve.outputs.version }}"
           $msi = "https://github.com/bearbinary/Jarvy/releases/download/v$version/jarvy_${version}_x64_en-US.msi"
           New-Item -ItemType Directory -Path out -Force | Out-Null
-          wingetcreate new --urls "$msi" `
-            --out (Resolve-Path out).Path `
-            --token "${{ secrets.WINGET_TOKEN }}"
+          $outDir = (Resolve-Path out).Path
+          # The InstallerUrl is a POSITIONAL argument in wingetcreate
+          # 1.12.8.0 (no `--urls` flag — that was a misreading of the
+          # docs). Usage per `wingetcreate new --help`:
+          #   wingetcreate.exe new --out <dir> --token <pat> <Url1> [Url2 ...]
+          wingetcreate new --out $outDir --token "${{ secrets.WINGET_TOKEN }}" $msi
 
       - name: Upload manifest artifact (for dry-run review)
         uses: actions/upload-artifact@v7
@@ -128,9 +131,5 @@ jobs:
           $version = "${{ steps.resolve.outputs.version }}"
           $msi = "https://github.com/bearbinary/Jarvy/releases/download/v$version/jarvy_${version}_x64_en-US.msi"
           # `new --submit` regenerates the manifest in a clean dir and
-          # submits in one shot. Re-using the dry-run output dir would
-          # also work but a fresh generate matches what Microsoft would
-          # see if they re-ran wingetcreate themselves.
-          wingetcreate new --urls "$msi" `
-            --submit `
-            --token "${{ secrets.WINGET_TOKEN }}"
+          # submits in one shot. URL is positional (see Generate step).
+          wingetcreate new --submit --token "${{ secrets.WINGET_TOKEN }}" $msi
