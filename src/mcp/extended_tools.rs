@@ -22,8 +22,99 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::mcp::audit::AuditLog;
+use crate::mcp::config::McpConfig;
 use crate::mcp::error::{McpError, McpResult};
+use crate::mcp::safety::RateLimiter;
+use crate::mcp::safety::{
+    ConfirmationResult, prompt_mutation_confirmation, resolve_within_workspace,
+};
 use crate::mcp::tools::McpToolDefinition;
+
+/// Collaborators every mutating extended-tool handler needs in order to
+/// enforce the MCP safety boundary (rate limit, audit, confirmation,
+/// workspace path containment). Built once per `tools/call` request by
+/// the dispatcher in `server.rs`.
+pub struct MutationCtx<'a> {
+    pub config: &'a McpConfig,
+    pub rate_limiter: &'a RateLimiter,
+    pub audit_log: &'a AuditLog,
+    pub client_name: Option<&'a str>,
+    pub workspace_root: PathBuf,
+}
+
+impl MutationCtx<'_> {
+    pub fn workspace(&self) -> &Path {
+        &self.workspace_root
+    }
+}
+
+/// Runs the shared MCP mutation guard before any extended tool mutates
+/// state. Mirrors `handle_install_tool`'s flow:
+///
+/// 1. Audit the request (pre-flight, regardless of outcome).
+/// 2. Apply the install rate-limit bucket (general "mutating MCP call").
+/// 3. Prompt for confirmation unless `require_confirmation = false` or
+///    the user previously selected "always" via the auto-approve flow.
+/// 4. Audit the operator's decision (cancel / approve / always).
+///
+/// Returns `Ok(())` once the call is authorized to proceed. Errors bubble
+/// up as `tools/call` failures so the agent sees a clean denial.
+pub fn gate_mutation(
+    ctx: &MutationCtx<'_>,
+    tool_name: &str,
+    effect_summary: &str,
+) -> McpResult<()> {
+    // Audit the request itself before any rate-limit / confirmation
+    // decisions. Even a denial leaves a trail showing what was asked.
+    ctx.audit_log.log_mcp_mutation(
+        ctx.client_name,
+        tool_name,
+        false,
+        true,
+        Some(effect_summary),
+    );
+
+    // Reuse the install rate-limit bucket for any non-read MCP call.
+    ctx.rate_limiter.check_install_limit().inspect_err(|_| {
+        ctx.audit_log.log_rate_limited(ctx.client_name, tool_name);
+    })?;
+
+    // Skip the confirmation prompt when the operator has either
+    // disabled it globally or pre-approved with "always allow".
+    let global_auto_approve = crate::init::initialize().mcp.auto_approve_installs;
+    if !ctx.config.mcp.require_confirmation || global_auto_approve {
+        return Ok(());
+    }
+
+    match prompt_mutation_confirmation(tool_name, effect_summary, ctx.client_name)? {
+        ConfirmationResult::Yes => Ok(()),
+        ConfirmationResult::No => {
+            ctx.audit_log.log_cancelled(ctx.client_name, tool_name);
+            Err(McpError::user_cancelled())
+        }
+        ConfirmationResult::Always => {
+            // Persist "always allow" to ~/.jarvy/config.toml so a fleet
+            // operator who said yes once doesn't get re-prompted.
+            if let Err(e) = crate::init::modify_global_config(|cfg| {
+                cfg.mcp.auto_approve_installs = true;
+            }) {
+                tracing::warn!(
+                    event = "mcp.auto_approve.persist_failed",
+                    tool = %tool_name,
+                    error = %e,
+                );
+            } else {
+                tracing::info!(
+                    event = "mcp.auto_approve.enabled",
+                    tool = %tool_name,
+                    client = ctx.client_name.unwrap_or("unknown"),
+                );
+            }
+            Ok(())
+        }
+    }
+}
 
 /// Tool definitions appended to the main `list_tools()` registration.
 pub fn extended_definitions() -> Vec<McpToolDefinition> {
@@ -371,7 +462,7 @@ struct ApplyArgs {
     dry_run: Option<bool>,
 }
 
-pub fn handle_ai_hooks_apply(arguments: Option<Value>) -> McpResult<Value> {
+pub fn handle_ai_hooks_apply(arguments: Option<Value>, ctx: &MutationCtx<'_>) -> McpResult<Value> {
     let args: ApplyArgs = parse(arguments)?;
     let file = args
         .config_path
@@ -382,6 +473,17 @@ pub fn handle_ai_hooks_apply(arguments: Option<Value>) -> McpResult<Value> {
     let dry_run = args.dry_run.unwrap_or(true);
     if dry_run {
         let refused = crate::ai_hooks::runner::audit_custom_commands(&cfg);
+        ctx.audit_log.log_mcp_mutation(
+            ctx.client_name,
+            "jarvy_ai_hooks_apply",
+            true,
+            true,
+            Some(&format!(
+                "preview: {} hook(s) across {} agent(s)",
+                cfg.hooks.len(),
+                cfg.unique_agents().len()
+            )),
+        );
         return envelope(json!({
             "dry_run": true,
             "would_apply_hooks": cfg.hooks.len(),
@@ -390,6 +492,17 @@ pub fn handle_ai_hooks_apply(arguments: Option<Value>) -> McpResult<Value> {
             "notes": "Set dry_run to false to actually write agent settings files. Mutating changes go through the host's stderr confirmation flow.",
         }));
     }
+    let summary = format!(
+        "Write {} hook(s) into the settings file of {} AI agent(s): {}",
+        cfg.hooks.len(),
+        cfg.unique_agents().len(),
+        cfg.unique_agents()
+            .iter()
+            .map(|a| a.slug())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    gate_mutation(ctx, "jarvy_ai_hooks_apply", &summary)?;
     match crate::ai_hooks::apply(&cfg) {
         Ok(report) => envelope(json!({
             "dry_run": false,
@@ -487,7 +600,10 @@ pub fn handle_mcp_register_check(arguments: Option<Value>) -> McpResult<Value> {
     }))
 }
 
-pub fn handle_mcp_register_apply(arguments: Option<Value>) -> McpResult<Value> {
+pub fn handle_mcp_register_apply(
+    arguments: Option<Value>,
+    ctx: &MutationCtx<'_>,
+) -> McpResult<Value> {
     let args: ApplyArgs = parse(arguments)?;
     let file = args
         .config_path
@@ -497,6 +613,17 @@ pub fn handle_mcp_register_apply(arguments: Option<Value>) -> McpResult<Value> {
     };
     let dry_run = args.dry_run.unwrap_or(true);
     if dry_run {
+        ctx.audit_log.log_mcp_mutation(
+            ctx.client_name,
+            "jarvy_mcp_register_apply",
+            true,
+            true,
+            Some(&format!(
+                "preview: {} server(s) across {} agent(s)",
+                cfg.servers.len() + 1,
+                cfg.unique_agents().len()
+            )),
+        );
         return envelope(json!({
             "dry_run": true,
             "would_register_servers": cfg.servers.len() + 1,
@@ -504,6 +631,17 @@ pub fn handle_mcp_register_apply(arguments: Option<Value>) -> McpResult<Value> {
             "notes": "Set dry_run to false to actually write agent MCP config files.",
         }));
     }
+    let summary = format!(
+        "Register {} MCP server(s) (jarvy + custom) with {} agent(s): {}",
+        cfg.servers.len() + 1,
+        cfg.unique_agents().len(),
+        cfg.unique_agents()
+            .iter()
+            .map(|a| a.slug())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    gate_mutation(ctx, "jarvy_mcp_register_apply", &summary)?;
     match crate::mcp_register::apply(&cfg) {
         Ok(report) => envelope(json!({
             "dry_run": false,
@@ -689,13 +827,19 @@ struct ServicesStartArgs {
     detach: Option<bool>,
 }
 
-pub fn handle_services_start(arguments: Option<Value>) -> McpResult<Value> {
+pub fn handle_services_start(arguments: Option<Value>, ctx: &MutationCtx<'_>) -> McpResult<Value> {
     let args: ServicesStartArgs = parse(arguments)?;
-    let dir = args
+    // Caller-supplied project_dir is resolved RELATIVE to the MCP
+    // workspace root. An absolute path or a `..` traversal that would
+    // escape the workspace is refused — otherwise a malicious agent
+    // could `services_start { project_dir: "/etc" }` and spin up
+    // whatever docker-compose file happens to live there.
+    let requested = args
         .project_dir
         .clone()
         .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        .unwrap_or_else(|| PathBuf::from("."));
+    let dir = resolve_within_workspace(ctx.workspace(), &requested)?;
     let dry_run = args.dry_run.unwrap_or(true);
     let detach = args.detach.unwrap_or(true);
     let Some((backend, config_path)) = crate::services::detect_backend(&dir) else {
@@ -716,6 +860,17 @@ pub fn handle_services_start(arguments: Option<Value>) -> McpResult<Value> {
         }));
     }
     if dry_run {
+        ctx.audit_log.log_mcp_mutation(
+            ctx.client_name,
+            "jarvy_services_start",
+            true,
+            true,
+            Some(&format!(
+                "preview: {backend:?} {} from {}",
+                if detach { "(detached)" } else { "(attached)" },
+                config_path.display()
+            )),
+        );
         return envelope(json!({
             "dry_run": true,
             "backend": format!("{:?}", backend),
@@ -724,6 +879,11 @@ pub fn handle_services_start(arguments: Option<Value>) -> McpResult<Value> {
             "notes": "Set dry_run to false to actually start. Mutating ops go through the host's stderr confirmation flow.",
         }));
     }
+    let summary = format!(
+        "Start the {backend:?} backend using {} (detach={detach})",
+        config_path.display()
+    );
+    gate_mutation(ctx, "jarvy_services_start", &summary)?;
     match backend_impl.start(&config_path, detach) {
         Ok(result) => envelope(json!({
             "dry_run": false,
@@ -809,7 +969,7 @@ struct TemplatesUseArgs {
     force: Option<bool>,
 }
 
-pub fn handle_templates_use(arguments: Option<Value>) -> McpResult<Value> {
+pub fn handle_templates_use(arguments: Option<Value>, ctx: &MutationCtx<'_>) -> McpResult<Value> {
     let args: TemplatesUseArgs = arguments
         .ok_or_else(|| McpError::invalid_params("Missing template name"))
         .and_then(|v| serde_json::from_value(v).map_err(McpError::from))?;
@@ -821,13 +981,25 @@ pub fn handle_templates_use(arguments: Option<Value>) -> McpResult<Value> {
     };
     let dry_run = args.dry_run.unwrap_or(true);
     let force = args.force.unwrap_or(false);
-    let output = args
+    // Caller-supplied output_path is resolved RELATIVE to the MCP
+    // workspace root. Absolute paths and `..` traversal outside the
+    // workspace are refused — otherwise the agent could clobber files
+    // anywhere the Jarvy process can write.
+    let requested = args
         .output_path
         .clone()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("jarvy.toml"));
+    let output = resolve_within_workspace(ctx.workspace(), &requested)?;
     let content = template.to_template().to_jarvy_toml();
     if dry_run {
+        ctx.audit_log.log_mcp_mutation(
+            ctx.client_name,
+            "jarvy_templates_use",
+            true,
+            true,
+            Some(&format!("preview: {} → {}", args.name, output.display())),
+        );
         return envelope(json!({
             "dry_run": true,
             "template": args.name,
@@ -845,19 +1017,100 @@ pub fn handle_templates_use(arguments: Option<Value>) -> McpResult<Value> {
             "error": "file already exists; pass force = true to overwrite",
         }));
     }
-    match std::fs::write(&output, &content) {
-        Ok(()) => envelope(json!({
-            "dry_run": false,
-            "created": true,
-            "template": args.name,
-            "output_path": output.display().to_string(),
-            "tool_count": template.tools.len(),
-            "bytes_written": content.len(),
-        })),
-        Err(e) => Err(McpError::internal_error(format!(
-            "templates::use write failed: {e}"
-        ))),
+    let summary = format!(
+        "Scaffold {} ({} bytes) → {}",
+        args.name,
+        content.len(),
+        output.display()
+    );
+    gate_mutation(ctx, "jarvy_templates_use", &summary)?;
+    let (backup, backed_up) = write_template_atomic(&output, content.as_bytes(), force)?;
+    envelope(json!({
+        "dry_run": false,
+        "created": true,
+        "template": args.name,
+        "output_path": output.display().to_string(),
+        "tool_count": template.tools.len(),
+        "bytes_written": content.len(),
+        "backed_up": backed_up,
+        "backup_path": backup.map(|p| p.display().to_string()),
+    }))
+}
+
+/// Atomic-write a template to `path`, backing up any existing file when
+/// `force = true`. Returns `(backup_path, backed_up)` — the optional
+/// path to the `.bak` sibling and a flag indicating whether a backup
+/// was actually written.
+///
+/// Steps:
+/// 1. If the target exists and `force == true`, copy it to
+///    `<path>.bak`. Pre-existing `.bak` is overwritten — operators
+///    asked for force, they get one.
+/// 2. Write the new content to `<path>.jarvy.tmp.<pid>.<nanos>` with
+///    `O_CREAT|O_EXCL`, fsync, then rename. No torn file at `path`
+///    even if the process is killed mid-write.
+fn write_template_atomic(
+    path: &Path,
+    content: &[u8],
+    force: bool,
+) -> McpResult<(Option<PathBuf>, bool)> {
+    use std::fs::{self, OpenOptions};
+    use std::io::Write;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let mut backup_path: Option<PathBuf> = None;
+    let mut backed_up = false;
+    if path.exists() {
+        if !force {
+            return Err(McpError::invalid_params(format!(
+                "file already exists at {}; pass force = true to overwrite",
+                path.display()
+            )));
+        }
+        let bak = path.with_extension({
+            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("toml");
+            format!("{ext}.bak")
+        });
+        fs::copy(path, &bak).map_err(|e| {
+            McpError::internal_error(format!(
+                "failed to back up existing {}: {e}",
+                path.display()
+            ))
+        })?;
+        backup_path = Some(bak);
+        backed_up = true;
     }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            McpError::internal_error(format!("failed to create parent {}: {e}", parent.display()))
+        })?;
+    }
+    let pid = std::process::id();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = path.with_extension(format!("jarvy.tmp.{pid}.{nanos}"));
+    {
+        let mut f = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&tmp)
+            .map_err(|e| {
+                McpError::internal_error(format!(
+                    "failed to create tempfile {}: {e}",
+                    tmp.display()
+                ))
+            })?;
+        f.write_all(content)
+            .map_err(|e| McpError::internal_error(format!("failed to write tempfile: {e}")))?;
+        f.sync_all()
+            .map_err(|e| McpError::internal_error(format!("failed to fsync tempfile: {e}")))?;
+    }
+    fs::rename(&tmp, path).map_err(|e| {
+        McpError::internal_error(format!("failed to rename tempfile into place: {e}"))
+    })?;
+    Ok((backup_path, backed_up))
 }
 
 // ---- Config validation -----------------------------------------------------
@@ -910,8 +1163,46 @@ pub fn handle_validate_config(arguments: Option<Value>) -> McpResult<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::audit::AuditLog;
+    use crate::mcp::config::McpConfig;
+    use crate::mcp::safety::RateLimiter;
     use serde_json::json;
     use tempfile::TempDir;
+
+    /// Configure an MCP context for tests: workspace pinned to `dir`,
+    /// confirmation disabled so the prompt isn't reached, rate limiter
+    /// reset.
+    struct TestCtx {
+        config: McpConfig,
+        rate_limiter: RateLimiter,
+        audit_log: AuditLog,
+        workspace_root: std::path::PathBuf,
+    }
+
+    impl TestCtx {
+        fn new(workspace: &std::path::Path) -> Self {
+            let mut config = McpConfig::default();
+            config.mcp.require_confirmation = false;
+            let rate_limiter = RateLimiter::new(&config);
+            let audit_log = AuditLog::disabled();
+            Self {
+                config,
+                rate_limiter,
+                audit_log,
+                workspace_root: workspace.to_path_buf(),
+            }
+        }
+
+        fn ctx(&self) -> MutationCtx<'_> {
+            MutationCtx {
+                config: &self.config,
+                rate_limiter: &self.rate_limiter,
+                audit_log: &self.audit_log,
+                client_name: Some("jarvy-tests"),
+                workspace_root: self.workspace_root.clone(),
+            }
+        }
+    }
 
     #[test]
     fn ai_hooks_list_library_returns_curated_set() {
@@ -991,10 +1282,9 @@ git = "latest"
     #[test]
     fn services_start_in_empty_dir_reports_not_started() {
         let dir = TempDir::new().unwrap();
-        let resp = handle_services_start(Some(json!({
-            "project_dir": dir.path().to_str().unwrap()
-        })))
-        .unwrap();
+        let tc = TestCtx::new(dir.path());
+        // Relative path inside the workspace.
+        let resp = handle_services_start(Some(json!({ "project_dir": "." })), &tc.ctx()).unwrap();
         let text = resp["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("\"started\": false"));
     }
@@ -1002,76 +1292,240 @@ git = "latest"
     #[test]
     fn templates_use_dry_run_returns_preview_without_writing() {
         let dir = TempDir::new().unwrap();
-        let out = dir.path().join("jarvy.toml");
-        // Pick any name that's guaranteed in the built-in registry.
+        let tc = TestCtx::new(dir.path());
         let any_name = crate::templates::builtin::list_builtin_templates()
             .first()
             .map(|t| t.name.to_string())
             .expect("at least one built-in template");
-        let resp = handle_templates_use(Some(json!({
-            "name": any_name,
-            "output_path": out.to_str().unwrap(),
-            "dry_run": true
-        })))
+        let resp = handle_templates_use(
+            Some(json!({
+                "name": any_name,
+                "output_path": "jarvy.toml",
+                "dry_run": true
+            })),
+            &tc.ctx(),
+        )
         .unwrap();
         let text = resp["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("\"dry_run\": true"));
         assert!(text.contains("\"content_preview\""));
-        // No write should have occurred.
-        assert!(!out.exists());
+        assert!(!dir.path().join("jarvy.toml").exists());
     }
 
     #[test]
     fn templates_use_refuses_to_overwrite_without_force() {
         let dir = TempDir::new().unwrap();
+        let tc = TestCtx::new(dir.path());
         let out = dir.path().join("jarvy.toml");
         std::fs::write(&out, b"existing").unwrap();
         let any_name = crate::templates::builtin::list_builtin_templates()
             .first()
             .map(|t| t.name.to_string())
             .unwrap();
-        let resp = handle_templates_use(Some(json!({
-            "name": any_name,
-            "output_path": out.to_str().unwrap(),
-            "dry_run": false,
-            "force": false
-        })))
+        let resp = handle_templates_use(
+            Some(json!({
+                "name": any_name,
+                "output_path": "jarvy.toml",
+                "dry_run": false,
+                "force": false
+            })),
+            &tc.ctx(),
+        )
         .unwrap();
         let text = resp["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("\"created\": false"));
         assert!(text.contains("already exists"));
-        // Existing file untouched.
         assert_eq!(std::fs::read(&out).unwrap(), b"existing");
     }
 
     #[test]
-    fn templates_use_writes_when_force_is_set() {
+    fn templates_use_writes_when_force_is_set_and_backs_up_existing() {
         let dir = TempDir::new().unwrap();
+        let tc = TestCtx::new(dir.path());
         let out = dir.path().join("jarvy.toml");
         std::fs::write(&out, b"existing").unwrap();
         let any_name = crate::templates::builtin::list_builtin_templates()
             .first()
             .map(|t| t.name.to_string())
             .unwrap();
-        let resp = handle_templates_use(Some(json!({
-            "name": any_name,
-            "output_path": out.to_str().unwrap(),
-            "dry_run": false,
-            "force": true
-        })))
+        let resp = handle_templates_use(
+            Some(json!({
+                "name": any_name,
+                "output_path": "jarvy.toml",
+                "dry_run": false,
+                "force": true
+            })),
+            &tc.ctx(),
+        )
         .unwrap();
         let text = resp["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("\"created\": true"));
+        assert!(text.contains("\"backed_up\": true"));
         let body = std::fs::read_to_string(&out).unwrap();
         assert!(body.contains("[provisioner]") || body.contains("provisioner"));
+        // Backup sibling preserves the pre-existing bytes.
+        let bak = dir.path().join("jarvy.toml.bak");
+        assert!(bak.exists(), "force should produce a .bak sibling");
+        assert_eq!(std::fs::read(&bak).unwrap(), b"existing");
     }
 
     #[test]
     fn templates_use_unknown_template_returns_error() {
-        let resp = handle_templates_use(Some(json!({
-            "name": "definitely-not-a-real-template"
-        })));
+        let dir = TempDir::new().unwrap();
+        let tc = TestCtx::new(dir.path());
+        let resp = handle_templates_use(
+            Some(json!({ "name": "definitely-not-a-real-template" })),
+            &tc.ctx(),
+        );
         let err = resp.unwrap_err();
         assert!(err.to_string().contains("Unknown template"));
+    }
+
+    // ---- Workspace path containment (Codex finding #2) ------------------
+
+    #[test]
+    fn templates_use_refuses_absolute_path_outside_workspace() {
+        let dir = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let tc = TestCtx::new(dir.path());
+        let any_name = crate::templates::builtin::list_builtin_templates()
+            .first()
+            .map(|t| t.name.to_string())
+            .unwrap();
+        let attempt = outside.path().join("jarvy.toml");
+        let err = handle_templates_use(
+            Some(json!({
+                "name": any_name,
+                "output_path": attempt.to_str().unwrap(),
+                "dry_run": false,
+            })),
+            &tc.ctx(),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().to_lowercase().contains("workspace"),
+            "expected workspace refusal, got: {err}"
+        );
+        assert!(!attempt.exists(), "must not have written outside workspace");
+    }
+
+    #[test]
+    fn templates_use_refuses_parent_traversal() {
+        let dir = TempDir::new().unwrap();
+        let tc = TestCtx::new(dir.path());
+        let any_name = crate::templates::builtin::list_builtin_templates()
+            .first()
+            .map(|t| t.name.to_string())
+            .unwrap();
+        let err = handle_templates_use(
+            Some(json!({
+                "name": any_name,
+                "output_path": "../escape.toml",
+                "dry_run": false,
+            })),
+            &tc.ctx(),
+        )
+        .unwrap_err();
+        let s = err.to_string().to_lowercase();
+        assert!(s.contains("workspace") || s.contains("escape"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn templates_use_refuses_to_write_through_symlink() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new().unwrap();
+        let tc = TestCtx::new(dir.path());
+        let target = dir.path().join("real.toml");
+        std::fs::write(&target, b"real-content").unwrap();
+        let link = dir.path().join("jarvy.toml");
+        symlink(&target, &link).unwrap();
+        let any_name = crate::templates::builtin::list_builtin_templates()
+            .first()
+            .map(|t| t.name.to_string())
+            .unwrap();
+        let err = handle_templates_use(
+            Some(json!({
+                "name": any_name,
+                "output_path": "jarvy.toml",
+                "dry_run": false,
+                "force": true
+            })),
+            &tc.ctx(),
+        )
+        .unwrap_err();
+        assert!(err.to_string().to_lowercase().contains("symlink"));
+        // Real file untouched — the symlink defense ran BEFORE the
+        // backup step.
+        assert_eq!(std::fs::read(&target).unwrap(), b"real-content");
+    }
+
+    #[test]
+    fn services_start_refuses_absolute_outside_workspace() {
+        let dir = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let tc = TestCtx::new(dir.path());
+        let err = handle_services_start(
+            Some(json!({ "project_dir": outside.path().to_str().unwrap(), "dry_run": false })),
+            &tc.ctx(),
+        )
+        .unwrap_err();
+        assert!(err.to_string().to_lowercase().contains("workspace"));
+    }
+
+    // ---- Mutation guard (Codex finding #1) ------------------------------
+
+    #[test]
+    fn ai_hooks_apply_dry_run_emits_audit_event_without_writing() {
+        // The dry-run path doesn't trip the rate limiter or the
+        // confirmation prompt, but it MUST emit an audit event so the
+        // operator can see the agent previewed a mutation.
+        let dir = TempDir::new().unwrap();
+        let tc = TestCtx::new(dir.path());
+        let f = dir.path().join("jarvy.toml");
+        std::fs::write(
+            &f,
+            r#"[provisioner]
+git = "latest"
+
+[ai_hooks]
+agents = ["claude-code"]
+
+[[ai_hooks.hook]]
+use = "block-rm-rf"
+"#,
+        )
+        .unwrap();
+        let resp = handle_ai_hooks_apply(
+            Some(json!({ "config_path": f.to_str().unwrap(), "dry_run": true })),
+            &tc.ctx(),
+        )
+        .unwrap();
+        let text = resp["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("\"dry_run\": true"));
+    }
+
+    #[test]
+    fn mcp_register_apply_dry_run_emits_audit_event() {
+        let dir = TempDir::new().unwrap();
+        let tc = TestCtx::new(dir.path());
+        let f = dir.path().join("jarvy.toml");
+        std::fs::write(
+            &f,
+            r#"[provisioner]
+git = "latest"
+
+[mcp_register]
+agents = ["claude-code"]
+"#,
+        )
+        .unwrap();
+        let resp = handle_mcp_register_apply(
+            Some(json!({ "config_path": f.to_str().unwrap(), "dry_run": true })),
+            &tc.ctx(),
+        )
+        .unwrap();
+        let text = resp["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("\"dry_run\": true"));
     }
 }

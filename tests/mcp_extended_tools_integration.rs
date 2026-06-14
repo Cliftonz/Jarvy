@@ -21,17 +21,26 @@ struct McpHarness {
 
 impl McpHarness {
     fn spawn() -> Self {
-        let mut child = Command::cargo_bin("jarvy")
-            .expect("jarvy binary built")
-            .arg("mcp")
+        Self::spawn_with_workspace(None)
+    }
+
+    /// Spawn the MCP server with a specific workspace root. Tests that
+    /// exercise the path-containment defense use this so the
+    /// `templates_use` / `services_start` handlers see a controlled
+    /// directory as their workspace.
+    fn spawn_with_workspace(workspace: Option<&std::path::Path>) -> Self {
+        let mut cmd = Command::cargo_bin("jarvy").expect("jarvy binary built");
+        cmd.arg("mcp")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .env("JARVY_TEST_MODE", "1")
             .env("JARVY_TELEMETRY", "0")
-            .env("JARVY_NO_CI", "1")
-            .spawn()
-            .expect("spawn jarvy mcp");
+            .env("JARVY_NO_CI", "1");
+        if let Some(ws) = workspace {
+            cmd.env("JARVY_MCP_WORKSPACE", ws);
+        }
+        let mut child = cmd.spawn().expect("spawn jarvy mcp");
         let stdin = child.stdin.take().expect("stdin");
         let stdout = child.stdout.take().expect("stdout");
         let reader = BufReader::new(stdout);
@@ -115,6 +124,10 @@ impl Drop for McpHarness {
 
 fn harness() -> McpHarness {
     McpHarness::spawn()
+}
+
+fn harness_in(workspace: &std::path::Path) -> McpHarness {
+    McpHarness::spawn_with_workspace(Some(workspace))
 }
 
 #[test]
@@ -297,23 +310,21 @@ use = "block-rm-rf"
 }
 
 #[test]
-fn services_start_in_empty_dir_reports_no_backend_via_mcp() {
+fn services_start_dry_run_in_workspace_reports_no_backend_via_mcp() {
     let dir = tempfile::tempdir().unwrap();
-    let mut h = harness();
+    let mut h = harness_in(dir.path());
     let result = h.call_tool(
         "jarvy_services_start",
-        json!({ "project_dir": dir.path().to_str().unwrap() }),
+        json!({ "project_dir": ".", "dry_run": true }),
     );
+    // No compose/Tilt file present → started: false envelope.
     assert_eq!(result["started"], false);
 }
 
 #[test]
 fn templates_use_dry_run_returns_preview_via_mcp() {
     let dir = tempfile::tempdir().unwrap();
-    let out = dir.path().join("jarvy.toml");
-    // Pull the first available template name via the list endpoint so we
-    // don't hard-code one that might be renamed.
-    let mut h = harness();
+    let mut h = harness_in(dir.path());
     let list = h.call_tool("jarvy_templates_list", json!({}));
     let first = list["templates"][0]["name"]
         .as_str()
@@ -323,34 +334,123 @@ fn templates_use_dry_run_returns_preview_via_mcp() {
         "jarvy_templates_use",
         json!({
             "name": first,
-            "output_path": out.to_str().unwrap(),
+            "output_path": "jarvy.toml",
             "dry_run": true
         }),
     );
     assert_eq!(result["dry_run"], true);
     assert!(result["content_preview"].is_string());
-    assert!(!out.exists(), "dry_run must not write");
+    assert!(
+        !dir.path().join("jarvy.toml").exists(),
+        "dry_run must not write"
+    );
+}
+
+// ---- Codex finding fixes — proved over the wire ----------------------------
+
+#[test]
+fn templates_use_dry_run_false_is_rejected_in_non_interactive_mode() {
+    // The MCP server's stderr is redirected to /dev/null by the test
+    // harness, which simulates the canonical "agent runs Jarvy headless"
+    // posture. The mutation guard must fail closed: dry_run=false +
+    // no TTY = user_cancelled, no file written.
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("jarvy.toml");
+    let mut h = harness_in(dir.path());
+    let list = h.call_tool("jarvy_templates_list", json!({}));
+    let first = list["templates"][0]["name"].as_str().unwrap().to_string();
+    let resp = h.call(
+        "tools/call",
+        json!({
+            "name": "jarvy_templates_use",
+            "arguments": {
+                "name": first,
+                "output_path": "jarvy.toml",
+                "dry_run": false
+            }
+        }),
+    );
+    assert!(
+        resp.get("error").is_some(),
+        "expected error response in non-interactive mode, got: {resp}"
+    );
+    assert!(
+        !out.exists(),
+        "mutation must not land on disk when confirmation cannot run"
+    );
 }
 
 #[test]
-fn templates_use_writes_when_dry_run_false_and_no_conflict_via_mcp() {
-    let dir = tempfile::tempdir().unwrap();
-    let out = dir.path().join("jarvy.toml");
-    let mut h = harness();
+fn templates_use_refuses_absolute_path_outside_workspace_via_mcp() {
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let attempt = outside.path().join("jarvy.toml");
+    let mut h = harness_in(workspace.path());
     let list = h.call_tool("jarvy_templates_list", json!({}));
     let first = list["templates"][0]["name"].as_str().unwrap().to_string();
-    let result = h.call_tool(
-        "jarvy_templates_use",
+    let resp = h.call(
+        "tools/call",
         json!({
-            "name": first,
-            "output_path": out.to_str().unwrap(),
-            "dry_run": false
+            "name": "jarvy_templates_use",
+            "arguments": {
+                "name": first,
+                "output_path": attempt.to_str().unwrap(),
+                "dry_run": true
+            }
         }),
     );
-    assert_eq!(result["created"], true);
-    assert!(out.exists());
-    let body = std::fs::read_to_string(&out).unwrap();
-    assert!(body.contains("provisioner"));
+    assert!(
+        resp.get("error").is_some(),
+        "expected workspace-containment error, got: {resp}"
+    );
+    assert!(
+        !attempt.exists(),
+        "no write should land outside the configured workspace"
+    );
+}
+
+#[test]
+fn templates_use_refuses_parent_traversal_via_mcp() {
+    let workspace = tempfile::tempdir().unwrap();
+    let mut h = harness_in(workspace.path());
+    let list = h.call_tool("jarvy_templates_list", json!({}));
+    let first = list["templates"][0]["name"].as_str().unwrap().to_string();
+    let resp = h.call(
+        "tools/call",
+        json!({
+            "name": "jarvy_templates_use",
+            "arguments": {
+                "name": first,
+                "output_path": "../escape.toml",
+                "dry_run": true
+            }
+        }),
+    );
+    assert!(
+        resp.get("error").is_some(),
+        "expected traversal refusal, got: {resp}"
+    );
+}
+
+#[test]
+fn services_start_refuses_absolute_outside_workspace_via_mcp() {
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let mut h = harness_in(workspace.path());
+    let resp = h.call(
+        "tools/call",
+        json!({
+            "name": "jarvy_services_start",
+            "arguments": {
+                "project_dir": outside.path().to_str().unwrap(),
+                "dry_run": true
+            }
+        }),
+    );
+    assert!(
+        resp.get("error").is_some(),
+        "expected workspace refusal, got: {resp}"
+    );
 }
 
 #[test]

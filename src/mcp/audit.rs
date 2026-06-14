@@ -175,6 +175,29 @@ impl AuditLog {
                 .with_data("reason", serde_json::json!(reason)),
         );
     }
+
+    /// Log a request to invoke a mutating extended MCP tool
+    /// (`jarvy_ai_hooks_apply`, `jarvy_services_start`, etc.). Records
+    /// the dry_run flag so the audit trail distinguishes "preview"
+    /// invocations from "actually applied" invocations.
+    pub fn log_mcp_mutation(
+        &self,
+        client: Option<&str>,
+        tool: &str,
+        dry_run: bool,
+        success: bool,
+        details: Option<&str>,
+    ) {
+        let mut entry = AuditEntry::new(AuditAction::McpMutation)
+            .with_client(client)
+            .with_tool(tool)
+            .with_success(success)
+            .with_data("dry_run", serde_json::json!(dry_run));
+        if let Some(d) = details {
+            entry = entry.with_data("details", serde_json::json!(d));
+        }
+        let _ = self.log(entry);
+    }
 }
 
 /// Actions that can be logged
@@ -205,6 +228,10 @@ pub enum AuditAction {
     /// Get prompt
     #[allow(dead_code)] // Reserved for MCP prompt logging
     GetPrompt,
+    /// Invocation of an extended mutating MCP tool (ai_hooks_apply,
+    /// mcp_register_apply, services_start, templates_use). Records the
+    /// `dry_run` flag and the per-tool result.
+    McpMutation,
 }
 
 /// A single audit log entry

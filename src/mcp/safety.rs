@@ -176,6 +176,130 @@ pub enum ConfirmationResult {
     Always,
 }
 
+/// Prompt the user for confirmation of a generic mutating MCP tool
+/// invocation (not a tool install — those go through
+/// [`prompt_user_confirmation`]). Used by the extended-tool mutation
+/// guard for `ai_hooks_apply`, `mcp_register_apply`, `services_start`,
+/// and `templates_use`.
+///
+/// Fails closed in non-interactive mode (stderr is not a TTY): returns
+/// `Err(user_cancelled)` so a headless agent cannot trick the server
+/// into applying changes without a human in the loop.
+pub fn prompt_mutation_confirmation(
+    tool_name: &str,
+    summary: &str,
+    client_name: Option<&str>,
+) -> McpResult<ConfirmationResult> {
+    if !std::io::stderr().is_terminal() {
+        return Err(McpError::user_cancelled());
+    }
+    let mut stderr = std::io::stderr();
+    writeln!(stderr)?;
+    writeln!(
+        stderr,
+        "┌────────────────────────────────────────────────────"
+    )?;
+    writeln!(stderr, "│ Jarvy MCP: run {}?", tool_name)?;
+    writeln!(stderr, "│")?;
+    writeln!(stderr, "│ Effect:")?;
+    for line in summary.lines() {
+        writeln!(stderr, "│   {}", line)?;
+    }
+    writeln!(stderr, "│")?;
+    if let Some(client) = client_name {
+        writeln!(stderr, "│ Requested by: {}", client)?;
+        writeln!(stderr, "│")?;
+    }
+    writeln!(stderr, "│ [Y]es / [N]o / [A]lways allow {}:", tool_name)?;
+    writeln!(
+        stderr,
+        "└────────────────────────────────────────────────────"
+    )?;
+    write!(stderr, "> ")?;
+    stderr.flush()?;
+    let mut response = String::new();
+    std::io::stdin().read_line(&mut response)?;
+    let response = response.trim().to_lowercase();
+    match response.as_str() {
+        "y" | "yes" => Ok(ConfirmationResult::Yes),
+        "n" | "no" | "" => Ok(ConfirmationResult::No),
+        "a" | "always" => Ok(ConfirmationResult::Always),
+        _ => {
+            writeln!(stderr, "Invalid response. Interpreting as 'no'.")?;
+            Ok(ConfirmationResult::No)
+        }
+    }
+}
+
+/// Resolve a caller-supplied path against the MCP workspace root and
+/// refuse anything that would escape it.
+///
+/// Defenses:
+/// - Absolute paths are accepted only when they canonicalize to a
+///   location strictly under the workspace.
+/// - Any `..` component that would walk above the workspace is refused.
+/// - Symlink endpoints are refused (`symlink_metadata`) so a planted
+///   link at the requested path cannot redirect the write.
+///
+/// Intentionally **does not** canonicalize the entire requested path
+/// (which would fail when the file doesn't yet exist — the common
+/// `templates_use` case). It canonicalizes the deepest existing
+/// ancestor and verifies the result is under the workspace.
+pub fn resolve_within_workspace(
+    workspace: &std::path::Path,
+    requested: &std::path::Path,
+) -> McpResult<std::path::PathBuf> {
+    use std::path::{Component, PathBuf};
+    let workspace_canon = workspace
+        .canonicalize()
+        .map_err(|e| McpError::invalid_params(format!("workspace not accessible: {e}")))?;
+
+    let joined = if requested.is_absolute() {
+        requested.to_path_buf()
+    } else {
+        workspace_canon.join(requested)
+    };
+
+    // Walk normalized components, allowing CurDir but refusing ParentDir
+    // that would escape the workspace.
+    let mut normalized = PathBuf::new();
+    for component in joined.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() || !normalized.starts_with(&workspace_canon) {
+                    return Err(McpError::invalid_params(format!(
+                        "path escapes workspace: {}",
+                        requested.display()
+                    )));
+                }
+            }
+            other => {
+                normalized.push(other.as_os_str());
+            }
+        }
+    }
+
+    if !normalized.starts_with(&workspace_canon) {
+        return Err(McpError::invalid_params(format!(
+            "path is not under workspace ({})",
+            workspace_canon.display()
+        )));
+    }
+
+    // Refuse symlink at the requested final path (don't follow it).
+    if let Ok(meta) = std::fs::symlink_metadata(&normalized)
+        && meta.file_type().is_symlink()
+    {
+        return Err(McpError::invalid_params(format!(
+            "refusing to write through symlink: {}",
+            normalized.display()
+        )));
+    }
+
+    Ok(normalized)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

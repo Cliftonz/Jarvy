@@ -23,6 +23,12 @@ pub struct McpServer {
     audit_log: AuditLog,
     /// Client information (set during initialize)
     client_info: Option<ClientInfo>,
+    /// Filesystem root every mutating tool is constrained to. Caller-
+    /// supplied `project_dir` / `output_path` arguments are resolved
+    /// **relative** to this directory and any traversal outside it is
+    /// refused. Captured at server start from `JARVY_MCP_WORKSPACE`
+    /// (override) or the process's cwd.
+    workspace_root: std::path::PathBuf,
 }
 
 /// Information about the connected MCP client
@@ -114,12 +120,37 @@ impl McpServer {
     pub fn new(config: McpConfig) -> Self {
         let rate_limiter = RateLimiter::new(&config);
         let audit_log = AuditLog::new(&config).unwrap_or_else(|_| AuditLog::disabled());
+        // Workspace defaults to the process cwd at startup. Tests +
+        // sandboxed launchers can override with JARVY_MCP_WORKSPACE.
+        let workspace_root = std::env::var_os("JARVY_MCP_WORKSPACE")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            });
 
         Self {
             config,
             rate_limiter,
             audit_log,
             client_info: None,
+            workspace_root,
+        }
+    }
+
+    /// Build a [`MutationCtx`] referencing this server's collaborators.
+    /// Called per `tools/call` for any mutating extended tool — the
+    /// borrow lifetimes are tied to the surrounding match arm and
+    /// dropped immediately after the handler returns.
+    fn mutation_ctx<'a>(
+        &'a self,
+        client_name: Option<&'a str>,
+    ) -> crate::mcp::extended_tools::MutationCtx<'a> {
+        crate::mcp::extended_tools::MutationCtx {
+            config: &self.config,
+            rate_limiter: &self.rate_limiter,
+            audit_log: &self.audit_log,
+            client_name,
+            workspace_root: self.workspace_root.clone(),
         }
     }
 
@@ -331,6 +362,10 @@ impl McpServer {
                 }))
             }
             // ---- Extended tools (phase 2) -------------------------------
+            //
+            // Mutating tools take a MutationCtx so the shared guard
+            // (rate limit + audit + confirmation + workspace path
+            // containment) sits between the agent and any state change.
             "jarvy_ai_hooks_list" => {
                 crate::mcp::extended_tools::handle_ai_hooks_list(params.arguments)
             }
@@ -338,7 +373,8 @@ impl McpServer {
                 crate::mcp::extended_tools::handle_ai_hooks_check(params.arguments)
             }
             "jarvy_ai_hooks_apply" => {
-                crate::mcp::extended_tools::handle_ai_hooks_apply(params.arguments)
+                let ctx = self.mutation_ctx(client_name);
+                crate::mcp::extended_tools::handle_ai_hooks_apply(params.arguments, &ctx)
             }
             "jarvy_mcp_register_list" => {
                 crate::mcp::extended_tools::handle_mcp_register_list(params.arguments)
@@ -347,7 +383,8 @@ impl McpServer {
                 crate::mcp::extended_tools::handle_mcp_register_check(params.arguments)
             }
             "jarvy_mcp_register_apply" => {
-                crate::mcp::extended_tools::handle_mcp_register_apply(params.arguments)
+                let ctx = self.mutation_ctx(client_name);
+                crate::mcp::extended_tools::handle_mcp_register_apply(params.arguments, &ctx)
             }
             "jarvy_drift_check" => crate::mcp::extended_tools::handle_drift_check(params.arguments),
             "jarvy_drift_status" => {
@@ -359,7 +396,8 @@ impl McpServer {
                 crate::mcp::extended_tools::handle_services_status(params.arguments)
             }
             "jarvy_services_start" => {
-                crate::mcp::extended_tools::handle_services_start(params.arguments)
+                let ctx = self.mutation_ctx(client_name);
+                crate::mcp::extended_tools::handle_services_start(params.arguments, &ctx)
             }
             "jarvy_templates_list" => {
                 crate::mcp::extended_tools::handle_templates_list(params.arguments)
@@ -368,7 +406,8 @@ impl McpServer {
                 crate::mcp::extended_tools::handle_templates_show(params.arguments)
             }
             "jarvy_templates_use" => {
-                crate::mcp::extended_tools::handle_templates_use(params.arguments)
+                let ctx = self.mutation_ctx(client_name);
+                crate::mcp::extended_tools::handle_templates_use(params.arguments, &ctx)
             }
             "jarvy_validate_config" => {
                 crate::mcp::extended_tools::handle_validate_config(params.arguments)
