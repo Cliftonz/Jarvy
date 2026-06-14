@@ -457,19 +457,24 @@ Phase 2 of the MCP integration: beyond the tool-installer family (`jarvy_list_to
 
 **Tools added** (all `jarvy_` prefix):
 - Read-only: `ai_hooks_list`, `ai_hooks_check`, `mcp_register_list`, `mcp_register_check`, `drift_check`, `drift_status`, `roles_list`, `roles_show`, `services_status`, `templates_list`, `templates_show`, `validate_config`
-- Mutating (dry_run = true default): `ai_hooks_apply`, `mcp_register_apply`
+- Mutating (dry_run = true default): `ai_hooks_apply`, `mcp_register_apply`, `services_start`, `templates_use`
 
-**Pattern**: each handler returns an MCP `content` envelope wrapping a JSON object. Read-only tools fail closed with `configured: false` / `baseline_exists: false` envelopes rather than JSON-RPC errors so agents can call them speculatively. Mutating tools default to `dry_run: true` and only require confirmation when set to false (same flow as `jarvy_install_tool`).
+**Pattern**: each handler returns an MCP `content` envelope wrapping a JSON object. Read-only tools fail closed with `configured: false` / `baseline_exists: false` envelopes rather than JSON-RPC errors so agents can call them speculatively. Mutating tools default to `dry_run: true` and only require confirmation when set to false.
+
+**Mutation guard** (`extended_tools::gate_mutation` + `MutationCtx`): every mutating handler runs rate-limit check → fail-closed stderr confirmation prompt → audit-log entry (`AuditAction::McpMutation`) before executing. The prompt returns `Err(user_cancelled)` when stderr is not a TTY so a headless agent cannot drive a mutation without a human in the loop.
+
+**Workspace containment** (`safety::resolve_within_workspace`): caller-supplied paths (`services_start.project_dir`, `templates_use.output_path`) are resolved against the MCP workspace root and refused if they escape it. Defenses: canonicalize workspace, refuse absolute paths outside, refuse `..` traversal, refuse symlink at the endpoint. Workspace root comes from `JARVY_MCP_WORKSPACE` (absolute path env var) or falls back to the server's cwd at startup. `templates_use` additionally backs up any existing file to `<path>.bak` and writes atomically (tempfile w/ O_CREAT|O_EXCL → fsync → rename).
 
 **Wiring**:
 - `src/mcp/extended_tools.rs::extended_definitions()` appended to `src/mcp/tools.rs::list_tools()` so `tools/list` advertises them.
-- `src/mcp/server.rs::handle_tools_call` dispatches `jarvy_*` names to the handlers.
+- `src/mcp/server.rs::McpServer` carries `workspace_root: PathBuf` (read from `JARVY_MCP_WORKSPACE` env or cwd) and exposes `mutation_ctx(client_name)`.
+- `server.rs::handle_tools_call` dispatches `jarvy_*` names to the handlers; mutating arms build a `MutationCtx` and pass it in.
 
 **Tests**:
-- 7 unit tests in `extended_tools::tests` (library lookup, missing file, parse, templates list, drift baseline absence, services backend absence).
-- 12 e2e tests in `tests/mcp_extended_tools_integration.rs` — spawn the real `jarvy mcp` subprocess, perform the MCP handshake, send `tools/list` and `tools/call` over JSON-RPC, assert the wire shape. Covers every dispatched tool name.
+- Unit tests in `extended_tools::tests` (library lookup, missing file, parse, templates list, drift baseline absence, services backend absence, audit-emitted-on-dry-run, workspace-containment for absolute / parent-dir / symlink / dotfile).
+- E2E tests in `tests/mcp_extended_tools_integration.rs` — spawn the real `jarvy mcp` subprocess via `JARVY_MCP_WORKSPACE`-pinned harness, perform the MCP handshake, send `tools/list` and `tools/call` over JSON-RPC. Covers every dispatched tool name plus fail-closed-in-non-TTY-mode and over-the-wire workspace-escape refusal for `templates_use` and `services_start`.
 
-**Docs**: section added to `docs/mcp-server.md`.
+**Docs**: section in `docs/mcp-server.md` (workspace + mutation guard documented).
 
 ### Configuration Drift Detection
 

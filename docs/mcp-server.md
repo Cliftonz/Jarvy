@@ -219,14 +219,23 @@ These run without rate limiting or confirmation:
 
 ### Mutating tools
 
-These default to `dry_run: true` (preview only). Set `dry_run: false` and the call goes through the same confirmation flow as `jarvy_install_tool` — prompt on stderr, persistable "always allow" via `~/.jarvy/config.toml`.
+These default to `dry_run: true` (preview only). Set `dry_run: false` and the call goes through the shared mutation guard: rate limit → stderr confirmation prompt → audit log entry → execute. The prompt fails closed in non-interactive mode (stderr not a TTY) and returns `-32005` (user declined) so a headless agent cannot drive a mutation without a human in the loop.
 
 | Tool | Purpose |
 |---|---|
 | `jarvy_ai_hooks_apply` | Provision AI hooks to every configured agent. `dry_run: true` returns counts and would-refuse lists without writing. |
 | `jarvy_mcp_register_apply` | Register MCP servers (Jarvy + allow-listed customs) with every targeted agent. |
-| `jarvy_services_start` | Start the project's docker-compose / Tilt backend. `dry_run: true` reports which backend is detected and whether it's installed without invoking it. |
-| `jarvy_templates_use` | Scaffold a `jarvy.toml` from a built-in template. `dry_run: true` returns the would-be content for the agent to show the user. `force: true` overrides the no-overwrite default. |
+| `jarvy_services_start` | Start the project's docker-compose / Tilt backend. `project_dir` is resolved through the workspace guard (see below) and refused if it escapes the workspace. `dry_run: true` reports which backend is detected and whether it's installed without invoking it. |
+| `jarvy_templates_use` | Scaffold a `jarvy.toml` from a built-in template. `output_path` is resolved through the workspace guard, refusing absolute paths outside the workspace, `..` traversal, and symlink endpoints. On `dry_run: false`, the existing file (if any) is backed up to `<path>.bak` and the new content is written atomically (tempfile → fsync → rename). `force: true` overrides the no-overwrite default. |
+
+### Workspace containment
+
+Caller-supplied paths (`project_dir`, `output_path`) are resolved against an MCP workspace root and refused if they escape it. The workspace is:
+
+- `JARVY_MCP_WORKSPACE` if set (absolute path the host pins explicitly), otherwise
+- the server's current working directory at startup.
+
+The guard canonicalizes the workspace, rejects absolute paths that don't sit under it, refuses any `..` component that would walk above it, and refuses to follow a symlink at the requested endpoint. This applies to both `jarvy_services_start` and `jarvy_templates_use`.
 
 ### Common parameters
 
@@ -326,7 +335,11 @@ Control which tools can be installed:
 
 ### User Confirmation
 
-When `require_confirmation` is enabled (default), actual installations prompt for user confirmation via stderr (not through MCP responses).
+When `require_confirmation` is enabled (default), actual installations prompt for user confirmation via stderr (not through MCP responses). Extended mutating tools (`jarvy_ai_hooks_apply`, `jarvy_mcp_register_apply`, `jarvy_services_start`, `jarvy_templates_use`) use the same prompt and fail closed when stderr is not a TTY.
+
+### Workspace Containment
+
+The server pins a workspace root at startup from `JARVY_MCP_WORKSPACE` (absolute path) or falls back to the cwd. Caller-supplied paths for `jarvy_services_start` (`project_dir`) and `jarvy_templates_use` (`output_path`) are resolved against this root and refused if they escape it (absolute outside, `..` traversal, or a symlink at the endpoint). `jarvy_templates_use` additionally backs up any pre-existing file to `<path>.bak` and writes atomically (tempfile → fsync → rename).
 
 ### Audit Logging
 
