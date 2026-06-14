@@ -470,6 +470,14 @@ pub enum Commands {
         #[clap(short, long, default_value = "./jarvy.toml")]
         file: String,
     },
+    /// Register the Jarvy MCP server with terminal AI agents
+    McpRegister {
+        #[clap(subcommand)]
+        action: McpRegisterAction,
+        /// Path to the configuration file
+        #[clap(short, long, default_value = "./jarvy.toml")]
+        file: String,
+    },
     /// Catch-all for unknown subcommands and their args
     #[clap(external_subcommand)]
     External(Vec<String>),

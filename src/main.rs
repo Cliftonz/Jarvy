@@ -23,6 +23,7 @@ pub mod interactive;
 mod lock;
 pub mod logging;
 mod mcp;
+mod mcp_register;
 mod meta;
 mod net;
 mod network;
@@ -412,6 +413,7 @@ fn dispatch_command(cli: &Cli, global_config: &init::CliConfig) -> i32 {
         }) => handle_migrate(file, *apply, output_format),
         Some(Commands::Schema { output }) => handle_schema(output),
         Some(Commands::AiHooks { action, file }) => commands::run_ai_hooks(action, file),
+        Some(Commands::McpRegister { action, file }) => commands::run_mcp_register(action, file),
         None => {
             interactive::user_select();
             0

@@ -318,6 +318,12 @@ pub struct Config {
     /// single config block.
     #[serde(default, rename = "ai_hooks")]
     pub ai_hooks: Option<crate::ai_hooks::AiHooksConfig>,
+    /// MCP server registration (`[mcp_register]` section). Registers the
+    /// built-in Jarvy MCP server (and optional custom servers) with
+    /// each developer's AI agents so they can discover Jarvy's tools
+    /// without manual setup. Same trust boundary as `[ai_hooks]`.
+    #[serde(default, rename = "mcp_register")]
+    pub mcp_register: Option<crate::mcp_register::McpRegisterConfig>,
 }
 
 /// Custom project commands that override the interactive menu defaults.
@@ -420,6 +426,9 @@ impl Config {
     /// untrusted sources.
     pub fn mark_ai_hooks_remote(&mut self) {
         if let Some(ref mut cfg) = self.ai_hooks {
+            cfg.origin = crate::ai_hooks::ConfigOrigin::Remote;
+        }
+        if let Some(ref mut cfg) = self.mcp_register {
             cfg.origin = crate::ai_hooks::ConfigOrigin::Remote;
         }
     }

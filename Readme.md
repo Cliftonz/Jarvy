@@ -246,6 +246,7 @@ jarvy completions --instructions
 | `jarvy diagnose` | Create a diagnostic bundle for support |
 | `jarvy mcp` | Start the MCP server for AI agent integration |
 | `jarvy ai-hooks apply` | Distribute AI agent guardrails (Claude Code / Cursor / Codex / Windsurf / Cline / Continue) |
+| `jarvy mcp-register apply` | Auto-register Jarvy's MCP server with terminal AI agents so they can discover its tools |
 
 Run `jarvy --help` for the full command reference.
 

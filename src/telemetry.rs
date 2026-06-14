@@ -1444,6 +1444,71 @@ pub fn ai_hook_windows_auto_translated(agent: &str, hook_name: &str) {
 }
 
 // ============================================================================
+// MCP server registration events
+//
+// Same taxonomy shape as `ai_hook.*`: structured fields only, no
+// user-controlled strings in OTLP payloads, per-agent attribution.
+// ============================================================================
+
+pub fn mcp_register_phase_started(agents: usize, servers_count: usize, scope: &str) {
+    if !is_enabled() {
+        return;
+    }
+    tracing::info!(
+        event = "mcp_register.phase_started",
+        agents = %agents,
+        servers_count = %servers_count,
+        scope = %scope,
+    );
+}
+
+pub fn mcp_register_phase_completed(
+    applied: usize,
+    agents_touched: usize,
+    refused_local: usize,
+    refused_remote: usize,
+    failures: usize,
+    duration: Duration,
+) {
+    if !is_enabled() {
+        return;
+    }
+    tracing::info!(
+        event = "mcp_register.phase_completed",
+        applied = %applied,
+        agents_touched = %agents_touched,
+        refused_local = %refused_local,
+        refused_remote = %refused_remote,
+        failures = %failures,
+        duration_ms = %duration.as_millis(),
+    );
+}
+
+pub fn mcp_register_agent_applied(agent: &str, applied: usize, settings_path: &Path) {
+    if !is_enabled() {
+        return;
+    }
+    let redacted_path = redact_path(&settings_path.to_string_lossy());
+    tracing::info!(
+        event = "mcp_register.agent_applied",
+        agent = %agent,
+        applied = %applied,
+        settings_path = %redacted_path,
+    );
+}
+
+pub fn mcp_register_agent_failed(agent: &str, error_type: &str) {
+    if !is_enabled() {
+        return;
+    }
+    tracing::warn!(
+        event = "mcp_register.agent_failed",
+        agent = %agent,
+        error_type = %error_type,
+    );
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 

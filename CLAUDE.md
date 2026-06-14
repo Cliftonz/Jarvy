@@ -388,6 +388,67 @@ jarvy ai-hooks test <name>           # inspect a library hook's scripts
 
 **Docs**: `docs/ai-hooks.md`. **Example**: `examples/ai-hooks/jarvy.toml`.
 
+### MCP Server Registration
+
+Auto-registers the built-in Jarvy MCP server (and optional custom servers) with each developer's AI coding agents so they can discover Jarvy's tools without manual setup. Mirrors the AI hooks architecture and trust model.
+
+**Module**: `src/mcp_register/` — registration provisioning.
+
+**Key Files**:
+- `config.rs` — `McpRegisterConfig`, `JarvyServerOverride`, `McpServerSpec`, `McpAgentTarget`, `McpRegistrationScope`, `McpServerTransport`. Origin-tagged via the shared `ConfigOrigin` from ai_hooks.
+- `error.rs` — `McpRegisterError`; bridges from `AiHookError` so the shared io helpers in `ai_hooks::agents::io` can be reused with `?`.
+- `runner.rs` — `apply` / `check` / `remove` orchestration plus the trust gate (`ConfigOrigin::Remote` cannot ship custom servers, period).
+- `registrars/mod.rs` — `AgentRegistrar` trait, `ResolvedServer`, `ApplyOutcome` / `CheckOutcome` / `RemoveOutcome`, static dispatch table.
+- `registrars/claude_code.rs` — `~/.claude.json` (user) / `.mcp.json` (project); JSON-merge with `_jarvy_managed_servers` marker array.
+- `registrars/cursor.rs` — `~/.cursor/mcp.json` (user) / `.cursor/mcp.json` (project).
+- `registrars/codex.rs` — `~/.codex/config.toml` (user) / `.codex/config.toml` (project) — TOML, not JSON. Uses `toml::Value` round-trip.
+- `registrars/windsurf.rs` — `~/.codeium/windsurf/mcp_config.json` (user only — project requests fall back with warning).
+- `registrars/cline.rs` — VS Code globalStorage path (`~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` on macOS; equivalent on Linux/Windows).
+- `registrars/continue_dev.rs` — Per-server YAML files: `.continue/mcpServers/<name>.jarvy.yaml`. Removal = file deletion.
+- `commands/mcp_register_cmd.rs` — `jarvy mcp-register {list|apply|check|remove}` CLI handler.
+
+**Configuration** (`jarvy.toml`):
+```toml
+[mcp_register]
+agents = ["claude-code", "cursor", "codex", "windsurf", "cline", "continue"]
+scope = "user"                        # user | project
+allow_custom_servers = false          # gate raw [[mcp_register.server]] entries
+
+[mcp_register.jarvy]                  # optional override
+command = "/opt/jarvy/bin/jarvy"
+args = ["mcp"]
+
+[[mcp_register.server]]               # optional; refused unless allow_custom_servers
+name = "github"
+transport = "stdio"
+command = "gh-mcp-server"
+agents = ["claude-code", "cursor"]
+```
+
+**CLI**:
+```bash
+jarvy mcp-register list                  # show config + on-disk state
+jarvy mcp-register apply [--scope user|project]
+jarvy mcp-register check                 # detect drift (exit 1 if drift)
+jarvy mcp-register remove                # strip _jarvy_managed_servers entries
+```
+
+**Trust model**: Identical to ai_hooks. Built-in `jarvy` server always allowed. Custom servers refused unless `allow_custom_servers = true` AND `ConfigOrigin::Local`. Remote configs (fetched via `jarvy setup --from <url>`) cannot enable the flag; the runner refuses every custom entry from them at resolve time.
+
+**Marker scheme**: For JSON-based agents, a `_jarvy_managed_servers: ["jarvy", ...]` array at the root tracks owned server names. Entries themselves stay schema-clean. For Continue.dev, the `.jarvy.yaml` filename suffix is the marker.
+
+**Telemetry events**:
+- `mcp_register.phase_started` — `agents`, `servers_count`, `scope`
+- `mcp_register.phase_completed` — `applied`, `agents_touched`, `refused_local`, `refused_remote`, `failures`, `duration_ms`
+- `mcp_register.agent_applied` — `agent`, `applied`, `settings_path` (redacted)
+- `mcp_register.agent_failed` — `agent`, `error_type` (stable `McpRegisterError::kind()`). Formatted message NOT emitted.
+
+**Integration**: Runs after the AI hooks phase, before the drift snapshot in `jarvy setup`.
+
+**Tests**: 11 unit + 21 integration (`tests/mcp_register_integration.rs`) + 7 CLI e2e (`tests/mcp_register_cli.rs`) + 3 setup-phase. Covers all 6 agents, project + user scope, concurrent stress, corrupt prior settings, symlink refusal, per-agent failure isolation, Codex TOML round-trip, Windsurf project-scope fallback, drift detection round-trip.
+
+**Docs**: `docs/mcp-registration.md`. **Example**: `examples/mcp-register/jarvy.toml`.
+
 ### Configuration Drift Detection
 
 Jarvy can detect when a developer's environment has drifted from the expected configuration after setup.

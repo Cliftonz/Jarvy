@@ -683,6 +683,10 @@ pub fn run_setup(
     // AI agent hook provisioning (Claude Code, Cursor, Codex, Windsurf, ...)
     run_ai_hooks_phase(&config, dry_run);
 
+    // MCP server registration — auto-register `jarvy mcp` with each
+    // configured agent so terminal AIs can discover Jarvy's tools.
+    run_mcp_register_phase(&config, dry_run);
+
     // Environment variable setup
     let env_config = config.get_env();
     let env_settings = &env_config.config;
@@ -1088,6 +1092,97 @@ fn run_ai_hooks_phase(config: &Config, dry_run: bool) {
     }
 }
 
+/// Apply `[mcp_register]` configuration: announce the Jarvy MCP server
+/// (and any opt-in custom servers) to each developer's AI agents so
+/// they can discover and call Jarvy's tools without manual setup.
+fn run_mcp_register_phase(config: &Config, dry_run: bool) {
+    let Some(ref mcp_cfg) = config.mcp_register else {
+        return;
+    };
+    if mcp_cfg.is_empty() {
+        return;
+    }
+    let agent_count = mcp_cfg.unique_agents().len();
+    let servers_count = mcp_cfg.servers.len() + 1; // +1 for the built-in jarvy entry
+    let scope_label = match mcp_cfg.scope {
+        crate::mcp_register::McpRegistrationScope::User => "user",
+        crate::mcp_register::McpRegistrationScope::Project => "project",
+    };
+
+    let _span = tracing::info_span!(
+        "mcp_register",
+        agents = %agent_count,
+        scope = %scope_label,
+        dry_run = %dry_run,
+    )
+    .entered();
+
+    if dry_run {
+        println!("\n=== MCP Registration (dry-run) ===");
+        println!(
+            "[DRY-RUN] Would register {} server(s) with: {:?}",
+            servers_count,
+            mcp_cfg.unique_agents()
+        );
+        return;
+    }
+
+    println!("\n=== MCP Registration ===");
+    let started = std::time::Instant::now();
+    crate::telemetry::mcp_register_phase_started(agent_count, servers_count, scope_label);
+
+    match crate::mcp_register::apply(mcp_cfg) {
+        Ok(report) => {
+            println!(
+                "  Registered {} server(s) across {} agent(s)",
+                report.total_applied(),
+                report.successes.len()
+            );
+            for o in &report.successes {
+                println!("    {:<13} {}", o.agent, o.path.display());
+                for w in &o.warnings {
+                    println!("      warning: {w}");
+                }
+                crate::telemetry::mcp_register_agent_applied(o.agent, o.applied, &o.path);
+            }
+            for (target, e) in &report.failures {
+                eprintln!(
+                    "    {:<13} FAILED ({}): {} — other agents still applied",
+                    target.slug(),
+                    e.kind(),
+                    e
+                );
+                crate::telemetry::mcp_register_agent_failed(target.slug(), e.kind());
+            }
+            if !report.refused_custom.is_empty() {
+                println!(
+                    "  Refused {} custom server(s) (set allow_custom_servers = true to apply)",
+                    report.refused_custom.len()
+                );
+            }
+            if !report.remote_refused.is_empty() {
+                println!(
+                    "  Refused {} custom server(s) from remote-fetched config (trust boundary)",
+                    report.remote_refused.len()
+                );
+            }
+            crate::telemetry::mcp_register_phase_completed(
+                report.total_applied(),
+                report.agents_touched(),
+                report.refused_custom.len(),
+                report.remote_refused.len(),
+                report.failures.len(),
+                started.elapsed(),
+            );
+        }
+        Err(e) => {
+            eprintln!("  Warning: MCP registration failed: {e}");
+            crate::telemetry::mcp_register_agent_failed("global", e.kind());
+            crate::telemetry::mcp_register_phase_completed(0, 0, 0, 0, 1, started.elapsed());
+        }
+    }
+}
+
 /// Auto-start services (`docker compose` / `tilt`) if `[services]` is
 /// configured to do so for this environment. Containment-checked path
 /// resolution lives in `services::detect_backend_with_config`.
@@ -1347,6 +1442,47 @@ mod tests {
             "#,
         );
         run_ai_hooks_phase(&cfg, false);
+    }
+
+    // ---- MCP register phase coverage --------------------------------
+
+    #[test]
+    fn run_mcp_register_phase_skips_when_section_missing() {
+        let cfg = config_from(
+            r#"
+            [provisioner]
+            git = "latest"
+            "#,
+        );
+        run_mcp_register_phase(&cfg, false);
+    }
+
+    #[test]
+    fn run_mcp_register_phase_skips_when_empty() {
+        let cfg = config_from(
+            r#"
+            [provisioner]
+            git = "latest"
+
+            [mcp_register]
+            agents = []
+            "#,
+        );
+        run_mcp_register_phase(&cfg, false);
+    }
+
+    #[test]
+    fn run_mcp_register_phase_dry_run_does_not_write_disk() {
+        let cfg = config_from(
+            r#"
+            [provisioner]
+            git = "latest"
+
+            [mcp_register]
+            agents = ["claude-code"]
+            "#,
+        );
+        run_mcp_register_phase(&cfg, true);
     }
 
     #[test]

@@ -5,6 +5,28 @@
 use clap::Subcommand;
 
 #[derive(Subcommand)]
+pub enum McpRegisterAction {
+    /// Show what's in jarvy.toml + agent → path mapping
+    List {},
+    /// Register the Jarvy MCP server with every targeted agent
+    Apply {
+        /// Override scope: `user` or `project`
+        #[clap(long)]
+        scope: Option<String>,
+    },
+    /// Diff desired vs. on-disk state (exit 1 if drift)
+    Check {
+        #[clap(long)]
+        scope: Option<String>,
+    },
+    /// Strip jarvy-managed entries from every targeted agent
+    Remove {
+        #[clap(long)]
+        scope: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 pub enum AiHooksAction {
     /// List provisioned hooks or the built-in library
     List {

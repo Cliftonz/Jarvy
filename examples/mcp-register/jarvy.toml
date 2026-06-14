@@ -1,0 +1,57 @@
+# MCP Server Registration — make terminal AI agents discover Jarvy
+#
+# After `jarvy setup`, every configured agent (Claude Code, Cursor,
+# Codex CLI, Windsurf, Cline, Continue.dev) will know how to invoke
+# Jarvy's MCP server. From the agent's perspective: a new `jarvy`
+# server appears alongside any other MCP servers the developer has
+# already set up.
+#
+# Run:
+#   jarvy setup --file ./jarvy.toml         # provisions tools + AI hooks + MCP registration
+#   jarvy mcp-register list                 # show what's configured
+#   jarvy mcp-register apply                # re-register without rerunning setup
+#   jarvy mcp-register check                # detect drift (exit 1 if drift)
+#   jarvy mcp-register remove               # strip jarvy-managed entries
+
+[provisioner]
+jarvy = "latest"
+
+[mcp_register]
+# Each agent's MCP config file gets a `jarvy` entry pointing at this
+# binary running its `mcp` subcommand over stdio.
+agents = ["claude-code", "cursor", "codex", "windsurf", "cline", "continue"]
+
+# `user` writes to the developer's home directory; `project` writes
+# into this repo's `.mcp.json` / `.cursor/mcp.json` / `.codex/config.toml`
+# (Windsurf, Cline, Continue silently fall back to user-scope with a
+# warning since their MCP config systems don't support project-scope).
+scope = "user"
+
+# Library-style gate: only the built-in Jarvy server registers by
+# default. Custom servers must opt in here AND come from a local
+# config — remote-fetched configs (`jarvy setup --from <url>`) cannot
+# enable this gate, matching the AI hooks trust boundary.
+allow_custom_servers = false
+
+# Optional: override the Jarvy server's command / args / env. Useful
+# when Jarvy isn't on PATH (e.g. installed under a versioned dir).
+# [mcp_register.jarvy]
+# command = "/opt/jarvy/0.2.0/bin/jarvy"
+# args = ["mcp", "--quiet"]
+# env = { JARVY_HOOK_HOST = "Unix" }
+
+# Optional: register additional MCP servers alongside Jarvy. Each
+# entry is refused unless `allow_custom_servers = true` AND the config
+# is local.
+# [[mcp_register.server]]
+# name = "github"
+# transport = "stdio"
+# command = "gh-mcp-server"
+# # Restrict to a subset of the top-level `agents` list:
+# agents = ["claude-code", "cursor"]
+# env = { GITHUB_TOKEN = "${GITHUB_TOKEN}" }
+#
+# [[mcp_register.server]]
+# name = "postgres"
+# transport = "http"
+# url = "http://localhost:8080/mcp"
