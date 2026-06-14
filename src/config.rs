@@ -556,6 +556,13 @@ impl Config {
         }
     }
 
+    /// Count of tools configured under `[provisioner]`. Used by the MCP
+    /// `jarvy_validate_config` tool to surface a quick health-check
+    /// number without serializing the whole tool table.
+    pub fn tool_configs_len(&self) -> usize {
+        self.tools.len()
+    }
+
     pub fn get_tool_configs(&self) -> HashMap<String, Tool> {
         self.tools
             .iter()

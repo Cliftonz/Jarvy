@@ -323,7 +323,10 @@ fn per_agent_failure_does_not_abort_other_agents() {
         .any(|(t, _)| *t == McpAgentTarget::ClaudeCode);
     let cursor_ok = report.successes.iter().any(|o| o.agent == "cursor");
     assert!(claude_failed, "claude-code should have failed");
-    assert!(cursor_ok, "cursor should have applied despite claude-code failure");
+    assert!(
+        cursor_ok,
+        "cursor should have applied despite claude-code failure"
+    );
     assert!(guard.path().join(".cursor/mcp.json").exists());
 }
 
@@ -347,8 +350,7 @@ fn concurrent_applies_dont_corrupt_settings() {
     assert!(r2.is_ok(), "thread B failed: {r2:?}");
 
     let home = dirs::home_dir().expect("home redirected");
-    let body =
-        fs::read_to_string(home.join(".claude.json")).expect("settings file present");
+    let body = fs::read_to_string(home.join(".claude.json")).expect("settings file present");
     let parsed: serde_json::Value =
         serde_json::from_str(&body).expect("settings file must still parse");
     assert!(parsed.get("mcpServers").is_some());
@@ -368,8 +370,7 @@ fn codex_toml_round_trips_through_apply_then_read() {
     mcp_register::apply(&cfg).expect("apply");
     let path = guard.path().join(".codex/config.toml");
     let body = fs::read_to_string(&path).expect("written");
-    let parsed: toml::Value =
-        toml::from_str(&body).expect("emitted TOML must parse back");
+    let parsed: toml::Value = toml::from_str(&body).expect("emitted TOML must parse back");
     let mcp = parsed
         .as_table()
         .and_then(|t| t.get("mcp_servers"))
@@ -379,18 +380,13 @@ fn codex_toml_round_trips_through_apply_then_read() {
         .get("jarvy")
         .and_then(|v| v.as_table())
         .expect("jarvy entry present");
-    assert_eq!(
-        jarvy.get("command").and_then(|v| v.as_str()),
-        Some("jarvy")
-    );
+    assert_eq!(jarvy.get("command").and_then(|v| v.as_str()), Some("jarvy"));
     let markers = parsed
         .as_table()
         .and_then(|t| t.get("_jarvy_managed_servers"))
         .and_then(|v| v.as_array())
         .expect("marker array present");
-    assert!(markers
-        .iter()
-        .any(|v| v.as_str() == Some("jarvy")));
+    assert!(markers.iter().any(|v| v.as_str() == Some("jarvy")));
 }
 
 #[test]
@@ -429,9 +425,8 @@ fn continue_dev_writes_per_server_yaml_fragment() {
             ..Default::default()
         };
         mcp_register::apply(&cfg)?;
-        let body = fs::read_to_string(
-            tmp_cwd.path().join(".continue/mcpServers/jarvy.jarvy.yaml"),
-        )?;
+        let body =
+            fs::read_to_string(tmp_cwd.path().join(".continue/mcpServers/jarvy.jarvy.yaml"))?;
         assert!(body.contains("schema: v1"));
         assert!(body.contains("- name: \"jarvy\""));
         Ok::<_, Box<dyn std::error::Error>>(())
@@ -461,7 +456,12 @@ fn windsurf_project_scope_falls_back_to_user_with_warning() {
         outcome.warnings
     );
     // User-scope file landed regardless.
-    assert!(guard.path().join(".codeium/windsurf/mcp_config.json").exists());
+    assert!(
+        guard
+            .path()
+            .join(".codeium/windsurf/mcp_config.json")
+            .exists()
+    );
 }
 
 #[test]

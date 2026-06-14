@@ -28,6 +28,7 @@
 pub mod audit;
 pub mod config;
 pub mod error;
+pub mod extended_tools;
 pub mod prompts;
 pub mod resources;
 pub mod safety;

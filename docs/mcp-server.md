@@ -197,6 +197,50 @@ Install a development tool (requires user confirmation).
 
 **Safety Note:** By default, `dry_run` is `true` to prevent accidental installations. Set `dry_run: false` to actually install, which will prompt for user confirmation.
 
+## Extended tools (AI hooks, MCP registration, drift, roles, services, templates, validation)
+
+Beyond the tool-installer family, the MCP server exposes Jarvy's broader subsystems so an AI agent can introspect and drive them directly. All extended tools have the `jarvy_` prefix.
+
+### Read-only tools
+
+These run without rate limiting or confirmation:
+
+| Tool | Purpose |
+|---|---|
+| `jarvy_ai_hooks_list` | Show configured AI hooks in `jarvy.toml`, or pass `library: true` to dump the 16 curated built-in hooks (`block-rm-rf`, `audit-log`, etc.). |
+| `jarvy_ai_hooks_check` | Diff configured AI hooks against each agent's settings file. Returns `missing` + `extra_jarvy` per agent. |
+| `jarvy_mcp_register_list` | Show the configured MCP server registration block. Always reports the built-in `jarvy` server plus any allow-listed custom servers. |
+| `jarvy_mcp_register_check` | Drift detection for MCP registrations across every targeted agent. |
+| `jarvy_drift_check` / `jarvy_drift_status` | Surface the project's drift baseline state (`.jarvy/state.json`) — tools tracked, file count, config hash. |
+| `jarvy_roles_list` / `jarvy_roles_show` | List roles defined in `jarvy.toml` and dump one role's inheritance + tool list. |
+| `jarvy_services_status` | Detect whether the project has docker-compose or Tilt configured and whether the backend is installed. |
+| `jarvy_templates_list` / `jarvy_templates_show` | Enumerate built-in templates (`node-bun`, `python-uv`, `k8s-platform`, ...) and show one template's full tool list + metadata. |
+| `jarvy_validate_config` | Parse `jarvy.toml` and return whether it's valid plus a one-line summary (tool count, which subsystems are configured). Returns `error_type` (`missing` / `io` / `parse`) and `message` on failure. |
+
+### Mutating tools
+
+These default to `dry_run: true` (preview only). Set `dry_run: false` and the call goes through the same confirmation flow as `jarvy_install_tool` — prompt on stderr, persistable "always allow" via `~/.jarvy/config.toml`.
+
+| Tool | Purpose |
+|---|---|
+| `jarvy_ai_hooks_apply` | Provision AI hooks to every configured agent. `dry_run: true` returns counts and would-refuse lists without writing. |
+| `jarvy_mcp_register_apply` | Register MCP servers (Jarvy + allow-listed customs) with every targeted agent. |
+
+### Common parameters
+
+All tools that read project state accept `config_path` (defaulting to `./jarvy.toml`) or `project_dir` (defaulting to cwd). Tools that fail closed when their inputs aren't present return a JSON envelope with `configured: false` or `baseline_exists: false` — never throw a JSON-RPC error for routine "not yet set up" cases.
+
+### Example
+
+```json
+{
+  "name": "jarvy_ai_hooks_list",
+  "arguments": { "library": true }
+}
+```
+
+Returns the curated set of 16 hooks (`block-rm-rf`, `block-secrets-commit`, `audit-log`, ...) so the agent can suggest which to enable for the user.
+
 ## Available MCP Resources
 
 ### jarvy://tools/index

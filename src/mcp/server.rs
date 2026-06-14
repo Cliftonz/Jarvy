@@ -330,6 +330,43 @@ impl McpServer {
                     }]
                 }))
             }
+            // ---- Extended tools (phase 2) -------------------------------
+            "jarvy_ai_hooks_list" => {
+                crate::mcp::extended_tools::handle_ai_hooks_list(params.arguments)
+            }
+            "jarvy_ai_hooks_check" => {
+                crate::mcp::extended_tools::handle_ai_hooks_check(params.arguments)
+            }
+            "jarvy_ai_hooks_apply" => {
+                crate::mcp::extended_tools::handle_ai_hooks_apply(params.arguments)
+            }
+            "jarvy_mcp_register_list" => {
+                crate::mcp::extended_tools::handle_mcp_register_list(params.arguments)
+            }
+            "jarvy_mcp_register_check" => {
+                crate::mcp::extended_tools::handle_mcp_register_check(params.arguments)
+            }
+            "jarvy_mcp_register_apply" => {
+                crate::mcp::extended_tools::handle_mcp_register_apply(params.arguments)
+            }
+            "jarvy_drift_check" => crate::mcp::extended_tools::handle_drift_check(params.arguments),
+            "jarvy_drift_status" => {
+                crate::mcp::extended_tools::handle_drift_status(params.arguments)
+            }
+            "jarvy_roles_list" => crate::mcp::extended_tools::handle_roles_list(params.arguments),
+            "jarvy_roles_show" => crate::mcp::extended_tools::handle_roles_show(params.arguments),
+            "jarvy_services_status" => {
+                crate::mcp::extended_tools::handle_services_status(params.arguments)
+            }
+            "jarvy_templates_list" => {
+                crate::mcp::extended_tools::handle_templates_list(params.arguments)
+            }
+            "jarvy_templates_show" => {
+                crate::mcp::extended_tools::handle_templates_show(params.arguments)
+            }
+            "jarvy_validate_config" => {
+                crate::mcp::extended_tools::handle_validate_config(params.arguments)
+            }
             _ => Err(McpError::method_not_found(format!(
                 "Unknown tool: {}",
                 params.name

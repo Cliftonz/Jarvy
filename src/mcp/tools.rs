@@ -29,7 +29,7 @@ pub struct McpToolDefinition {
 
 /// List all MCP tools exposed by Jarvy
 pub fn list_tools() -> Vec<McpToolDefinition> {
-    vec![
+    let mut tools: Vec<McpToolDefinition> = vec![
         McpToolDefinition {
             name: "jarvy_get_install_instructions".to_string(),
             description: "Get instructions for installing Jarvy itself on any platform. Use this when Jarvy is not yet installed.".to_string(),
@@ -145,7 +145,9 @@ pub fn list_tools() -> Vec<McpToolDefinition> {
                 "required": ["name"]
             }),
         },
-    ]
+    ];
+    tools.extend(crate::mcp::extended_tools::extended_definitions());
+    tools
 }
 
 /// Handle jarvy_get_install_instructions request

@@ -449,6 +449,28 @@ jarvy mcp-register remove                # strip _jarvy_managed_servers entries
 
 **Docs**: `docs/mcp-registration.md`. **Example**: `examples/mcp-register/jarvy.toml`.
 
+### MCP Extended Tools
+
+Phase 2 of the MCP integration: beyond the tool-installer family (`jarvy_list_tools`, `jarvy_install_tool`, ...), the server exposes the broader Jarvy surface so AI agents can introspect AI hooks, MCP registration, drift, roles, services, templates, and config validation directly.
+
+**Module**: `src/mcp/extended_tools.rs` (single file with all definitions + handlers).
+
+**Tools added** (all `jarvy_` prefix):
+- Read-only: `ai_hooks_list`, `ai_hooks_check`, `mcp_register_list`, `mcp_register_check`, `drift_check`, `drift_status`, `roles_list`, `roles_show`, `services_status`, `templates_list`, `templates_show`, `validate_config`
+- Mutating (dry_run = true default): `ai_hooks_apply`, `mcp_register_apply`
+
+**Pattern**: each handler returns an MCP `content` envelope wrapping a JSON object. Read-only tools fail closed with `configured: false` / `baseline_exists: false` envelopes rather than JSON-RPC errors so agents can call them speculatively. Mutating tools default to `dry_run: true` and only require confirmation when set to false (same flow as `jarvy_install_tool`).
+
+**Wiring**:
+- `src/mcp/extended_tools.rs::extended_definitions()` appended to `src/mcp/tools.rs::list_tools()` so `tools/list` advertises them.
+- `src/mcp/server.rs::handle_tools_call` dispatches `jarvy_*` names to the handlers.
+
+**Tests**:
+- 7 unit tests in `extended_tools::tests` (library lookup, missing file, parse, templates list, drift baseline absence, services backend absence).
+- 12 e2e tests in `tests/mcp_extended_tools_integration.rs` — spawn the real `jarvy mcp` subprocess, perform the MCP handshake, send `tools/list` and `tools/call` over JSON-RPC, assert the wire shape. Covers every dispatched tool name.
+
+**Docs**: section added to `docs/mcp-server.md`.
+
 ### Configuration Drift Detection
 
 Jarvy can detect when a developer's environment has drifted from the expected configuration after setup.
