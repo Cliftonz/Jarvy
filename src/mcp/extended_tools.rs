@@ -148,6 +148,18 @@ pub fn extended_definitions() -> Vec<McpToolDefinition> {
                 }
             }),
         ),
+        def(
+            "jarvy_services_start",
+            "Start project services (docker-compose up / tilt up). Defaults to dry_run = true; preview prints what would run. Pass detach = false to run in the foreground (attached).",
+            json!({
+                "type": "object",
+                "properties": {
+                    "project_dir": { "type": "string" },
+                    "dry_run": { "type": "boolean", "description": "Preview only (default true)" },
+                    "detach": { "type": "boolean", "description": "Run detached / in background (default true)" }
+                }
+            }),
+        ),
         // ---- Templates ------------------------------------------------
         def(
             "jarvy_templates_list",
@@ -166,6 +178,20 @@ pub fn extended_definitions() -> Vec<McpToolDefinition> {
                 "type": "object",
                 "properties": {
                     "name": { "type": "string" }
+                },
+                "required": ["name"]
+            }),
+        ),
+        def(
+            "jarvy_templates_use",
+            "Scaffold a jarvy.toml from a built-in template. Defaults to dry_run = true; preview returns the would-be content. Set dry_run = false to write to disk (refuses to overwrite an existing file unless force = true).",
+            json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Template name (run jarvy_templates_list to discover)" },
+                    "output_path": { "type": "string", "description": "Where to write (default ./jarvy.toml)" },
+                    "dry_run": { "type": "boolean" },
+                    "force": { "type": "boolean", "description": "Overwrite an existing file (default false)" }
                 },
                 "required": ["name"]
             }),
@@ -653,6 +679,65 @@ pub fn handle_services_status(arguments: Option<Value>) -> McpResult<Value> {
     }))
 }
 
+#[derive(Deserialize, Default)]
+struct ServicesStartArgs {
+    #[serde(default)]
+    project_dir: Option<String>,
+    #[serde(default)]
+    dry_run: Option<bool>,
+    #[serde(default)]
+    detach: Option<bool>,
+}
+
+pub fn handle_services_start(arguments: Option<Value>) -> McpResult<Value> {
+    let args: ServicesStartArgs = parse(arguments)?;
+    let dir = args
+        .project_dir
+        .clone()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let dry_run = args.dry_run.unwrap_or(true);
+    let detach = args.detach.unwrap_or(true);
+    let Some((backend, config_path)) = crate::services::detect_backend(&dir) else {
+        return envelope(json!({
+            "started": false,
+            "project_dir": dir.display().to_string(),
+            "message": "No docker-compose / Tilt config detected — nothing to start.",
+        }));
+    };
+    let backend_impl = crate::services::get_backend(backend);
+    if !backend_impl.is_installed() {
+        return envelope(json!({
+            "started": false,
+            "backend": format!("{:?}", backend),
+            "config_path": config_path.display().to_string(),
+            "installed": false,
+            "message": "Backend is not installed on this machine; run `jarvy setup` first.",
+        }));
+    }
+    if dry_run {
+        return envelope(json!({
+            "dry_run": true,
+            "backend": format!("{:?}", backend),
+            "config_path": config_path.display().to_string(),
+            "detach": detach,
+            "notes": "Set dry_run to false to actually start. Mutating ops go through the host's stderr confirmation flow.",
+        }));
+    }
+    match backend_impl.start(&config_path, detach) {
+        Ok(result) => envelope(json!({
+            "dry_run": false,
+            "backend": format!("{:?}", result.backend),
+            "config_path": config_path.display().to_string(),
+            "success": result.success,
+            "message": result.message,
+        })),
+        Err(e) => Err(McpError::internal_error(format!(
+            "services::start failed: {e}"
+        ))),
+    }
+}
+
 // ---- Templates -------------------------------------------------------------
 
 #[derive(Deserialize, Default)]
@@ -711,6 +796,68 @@ pub fn handle_templates_show(arguments: Option<Value>) -> McpResult<Value> {
         "tools": full.tools.tools,
         "meta": full.template,
     }))
+}
+
+#[derive(Deserialize)]
+struct TemplatesUseArgs {
+    name: String,
+    #[serde(default)]
+    output_path: Option<String>,
+    #[serde(default)]
+    dry_run: Option<bool>,
+    #[serde(default)]
+    force: Option<bool>,
+}
+
+pub fn handle_templates_use(arguments: Option<Value>) -> McpResult<Value> {
+    let args: TemplatesUseArgs = arguments
+        .ok_or_else(|| McpError::invalid_params("Missing template name"))
+        .and_then(|v| serde_json::from_value(v).map_err(McpError::from))?;
+    let Some(template) = crate::templates::builtin::get_builtin_template(&args.name) else {
+        return Err(McpError::invalid_params(format!(
+            "Unknown template: {}",
+            args.name
+        )));
+    };
+    let dry_run = args.dry_run.unwrap_or(true);
+    let force = args.force.unwrap_or(false);
+    let output = args
+        .output_path
+        .clone()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("jarvy.toml"));
+    let content = template.to_template().to_jarvy_toml();
+    if dry_run {
+        return envelope(json!({
+            "dry_run": true,
+            "template": args.name,
+            "output_path": output.display().to_string(),
+            "tool_count": template.tools.len(),
+            "would_overwrite": output.exists(),
+            "content_preview": content,
+        }));
+    }
+    if output.exists() && !force {
+        return envelope(json!({
+            "dry_run": false,
+            "created": false,
+            "output_path": output.display().to_string(),
+            "error": "file already exists; pass force = true to overwrite",
+        }));
+    }
+    match std::fs::write(&output, &content) {
+        Ok(()) => envelope(json!({
+            "dry_run": false,
+            "created": true,
+            "template": args.name,
+            "output_path": output.display().to_string(),
+            "tool_count": template.tools.len(),
+            "bytes_written": content.len(),
+        })),
+        Err(e) => Err(McpError::internal_error(format!(
+            "templates::use write failed: {e}"
+        ))),
+    }
 }
 
 // ---- Config validation -----------------------------------------------------
@@ -839,5 +986,92 @@ git = "latest"
         .unwrap();
         let text = resp["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("\"backend\": null"));
+    }
+
+    #[test]
+    fn services_start_in_empty_dir_reports_not_started() {
+        let dir = TempDir::new().unwrap();
+        let resp = handle_services_start(Some(json!({
+            "project_dir": dir.path().to_str().unwrap()
+        })))
+        .unwrap();
+        let text = resp["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("\"started\": false"));
+    }
+
+    #[test]
+    fn templates_use_dry_run_returns_preview_without_writing() {
+        let dir = TempDir::new().unwrap();
+        let out = dir.path().join("jarvy.toml");
+        // Pick any name that's guaranteed in the built-in registry.
+        let any_name = crate::templates::builtin::list_builtin_templates()
+            .first()
+            .map(|t| t.name.to_string())
+            .expect("at least one built-in template");
+        let resp = handle_templates_use(Some(json!({
+            "name": any_name,
+            "output_path": out.to_str().unwrap(),
+            "dry_run": true
+        })))
+        .unwrap();
+        let text = resp["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("\"dry_run\": true"));
+        assert!(text.contains("\"content_preview\""));
+        // No write should have occurred.
+        assert!(!out.exists());
+    }
+
+    #[test]
+    fn templates_use_refuses_to_overwrite_without_force() {
+        let dir = TempDir::new().unwrap();
+        let out = dir.path().join("jarvy.toml");
+        std::fs::write(&out, b"existing").unwrap();
+        let any_name = crate::templates::builtin::list_builtin_templates()
+            .first()
+            .map(|t| t.name.to_string())
+            .unwrap();
+        let resp = handle_templates_use(Some(json!({
+            "name": any_name,
+            "output_path": out.to_str().unwrap(),
+            "dry_run": false,
+            "force": false
+        })))
+        .unwrap();
+        let text = resp["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("\"created\": false"));
+        assert!(text.contains("already exists"));
+        // Existing file untouched.
+        assert_eq!(std::fs::read(&out).unwrap(), b"existing");
+    }
+
+    #[test]
+    fn templates_use_writes_when_force_is_set() {
+        let dir = TempDir::new().unwrap();
+        let out = dir.path().join("jarvy.toml");
+        std::fs::write(&out, b"existing").unwrap();
+        let any_name = crate::templates::builtin::list_builtin_templates()
+            .first()
+            .map(|t| t.name.to_string())
+            .unwrap();
+        let resp = handle_templates_use(Some(json!({
+            "name": any_name,
+            "output_path": out.to_str().unwrap(),
+            "dry_run": false,
+            "force": true
+        })))
+        .unwrap();
+        let text = resp["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("\"created\": true"));
+        let body = std::fs::read_to_string(&out).unwrap();
+        assert!(body.contains("[provisioner]") || body.contains("provisioner"));
+    }
+
+    #[test]
+    fn templates_use_unknown_template_returns_error() {
+        let resp = handle_templates_use(Some(json!({
+            "name": "definitely-not-a-real-template"
+        })));
+        let err = resp.unwrap_err();
+        assert!(err.to_string().contains("Unknown template"));
     }
 }

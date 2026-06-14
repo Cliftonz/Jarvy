@@ -225,6 +225,8 @@ These default to `dry_run: true` (preview only). Set `dry_run: false` and the ca
 |---|---|
 | `jarvy_ai_hooks_apply` | Provision AI hooks to every configured agent. `dry_run: true` returns counts and would-refuse lists without writing. |
 | `jarvy_mcp_register_apply` | Register MCP servers (Jarvy + allow-listed customs) with every targeted agent. |
+| `jarvy_services_start` | Start the project's docker-compose / Tilt backend. `dry_run: true` reports which backend is detected and whether it's installed without invoking it. |
+| `jarvy_templates_use` | Scaffold a `jarvy.toml` from a built-in template. `dry_run: true` returns the would-be content for the agent to show the user. `force: true` overrides the no-overwrite default. |
 
 ### Common parameters
 

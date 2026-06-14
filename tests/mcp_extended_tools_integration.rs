@@ -135,8 +135,10 @@ fn tools_list_includes_every_extended_tool() {
         "jarvy_roles_list",
         "jarvy_roles_show",
         "jarvy_services_status",
+        "jarvy_services_start",
         "jarvy_templates_list",
         "jarvy_templates_show",
+        "jarvy_templates_use",
         "jarvy_validate_config",
     ];
     for tool in expected {
@@ -292,6 +294,63 @@ use = "block-rm-rf"
     );
     assert_eq!(result["dry_run"], true);
     assert_eq!(result["would_apply_hooks"], 1);
+}
+
+#[test]
+fn services_start_in_empty_dir_reports_no_backend_via_mcp() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = harness();
+    let result = h.call_tool(
+        "jarvy_services_start",
+        json!({ "project_dir": dir.path().to_str().unwrap() }),
+    );
+    assert_eq!(result["started"], false);
+}
+
+#[test]
+fn templates_use_dry_run_returns_preview_via_mcp() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("jarvy.toml");
+    // Pull the first available template name via the list endpoint so we
+    // don't hard-code one that might be renamed.
+    let mut h = harness();
+    let list = h.call_tool("jarvy_templates_list", json!({}));
+    let first = list["templates"][0]["name"]
+        .as_str()
+        .expect("at least one template")
+        .to_string();
+    let result = h.call_tool(
+        "jarvy_templates_use",
+        json!({
+            "name": first,
+            "output_path": out.to_str().unwrap(),
+            "dry_run": true
+        }),
+    );
+    assert_eq!(result["dry_run"], true);
+    assert!(result["content_preview"].is_string());
+    assert!(!out.exists(), "dry_run must not write");
+}
+
+#[test]
+fn templates_use_writes_when_dry_run_false_and_no_conflict_via_mcp() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("jarvy.toml");
+    let mut h = harness();
+    let list = h.call_tool("jarvy_templates_list", json!({}));
+    let first = list["templates"][0]["name"].as_str().unwrap().to_string();
+    let result = h.call_tool(
+        "jarvy_templates_use",
+        json!({
+            "name": first,
+            "output_path": out.to_str().unwrap(),
+            "dry_run": false
+        }),
+    );
+    assert_eq!(result["created"], true);
+    assert!(out.exists());
+    let body = std::fs::read_to_string(&out).unwrap();
+    assert!(body.contains("provisioner"));
 }
 
 #[test]

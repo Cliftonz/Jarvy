@@ -358,11 +358,17 @@ impl McpServer {
             "jarvy_services_status" => {
                 crate::mcp::extended_tools::handle_services_status(params.arguments)
             }
+            "jarvy_services_start" => {
+                crate::mcp::extended_tools::handle_services_start(params.arguments)
+            }
             "jarvy_templates_list" => {
                 crate::mcp::extended_tools::handle_templates_list(params.arguments)
             }
             "jarvy_templates_show" => {
                 crate::mcp::extended_tools::handle_templates_show(params.arguments)
+            }
+            "jarvy_templates_use" => {
+                crate::mcp::extended_tools::handle_templates_use(params.arguments)
             }
             "jarvy_validate_config" => {
                 crate::mcp::extended_tools::handle_validate_config(params.arguments)
