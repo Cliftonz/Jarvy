@@ -75,6 +75,15 @@ impl CargoHandler {
         }
 
         println!("    Installing {}...", name);
+        // Per-package telemetry — see nuget.rs for the rationale.
+        tracing::info!(
+            event = "package.requested",
+            ecosystem = "cargo",
+            package = %name,
+            version = %spec.version(),
+            platform = std::env::consts::OS,
+        );
+        let started = std::time::Instant::now();
 
         let mut args = vec!["install", name];
 
@@ -99,7 +108,30 @@ impl CargoHandler {
             args.push("--locked");
         }
 
-        run_package_command("cargo", &args, working_dir)
+        match run_package_command("cargo", &args, working_dir) {
+            Ok(()) => {
+                tracing::info!(
+                    event = "package.installed",
+                    ecosystem = "cargo",
+                    package = %name,
+                    version = %version,
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    platform = std::env::consts::OS,
+                );
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!(
+                    event = "package.failed",
+                    ecosystem = "cargo",
+                    package = %name,
+                    version = %version,
+                    error = %e,
+                    platform = std::env::consts::OS,
+                );
+                Err(e)
+            }
+        }
     }
 }
 

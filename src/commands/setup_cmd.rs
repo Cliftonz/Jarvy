@@ -905,6 +905,43 @@ fn emit_telemetry_hint_if_undecided() {
     );
 }
 
+/// Render a sorted, scope-labelled package list for the dry-run preview.
+///
+/// Operators need three things from the preview: (1) which ecosystem,
+/// (2) where the install will land (project-local vs user-global vs
+/// machine-global), (3) which packages by name. All four ecosystems
+/// emit the same shape so a multi-ecosystem `jarvy.toml` previews
+/// consistently.
+///
+/// The `.NET global tool` label is kept verbatim for backward
+/// compatibility with the existing `examples_validation` regression
+/// test that pins the announcement string.
+fn preview_packages<'a, I>(ecosystem: &str, scope_label: &str, names: I)
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut names: Vec<&str> = names.into_iter().collect();
+    names.sort_unstable();
+    let count = names.len();
+    let (label, command_hint) = match ecosystem {
+        ".NET global tool" => (
+            ".NET global tool(s)",
+            " via `dotnet tool update -g`".to_string(),
+        ),
+        other => (
+            if count == 1 { "package" } else { "packages" },
+            format!(" via `{} install`", other),
+        ),
+    };
+    println!(
+        "[DRY-RUN] Would install {} {}{} ({})",
+        count, label, command_hint, scope_label
+    );
+    for name in names {
+        println!("[DRY-RUN]   - {}", name);
+    }
+}
+
 /// Install language-specific packages (npm, pip, cargo, nuget) configured
 /// under the `[npm]` / `[pip]` / `[cargo]` / `[nuget]` sections of
 /// `jarvy.toml`. Extracted from `run_setup` (review item 21) — runs after
@@ -955,29 +992,48 @@ fn run_packages_phase(config: &Config, file: &str, dry_run: bool) {
 
     if dry_run {
         println!("\n=== Package Dependencies (dry-run) ===");
-        if has_npm {
-            println!("[DRY-RUN] Would install npm packages");
+        // Structured event so CI / log scrapers can verify dry-run was
+        // honored without parsing stdout. Carries the package counts
+        // per ecosystem so dashboards can graph dry-run preview volume.
+        tracing::info!(
+            event = "packages.dry_run",
+            npm_count = packages_ref.npm.map(|c| c.packages.len()).unwrap_or(0),
+            pip_count = packages_ref.pip.map(|c| c.packages.len()).unwrap_or(0),
+            cargo_count = packages_ref.cargo.map(|c| c.packages.len()).unwrap_or(0),
+            nuget_count = packages_ref.nuget.map(|c| c.packages.len()).unwrap_or(0),
+        );
+        // Symmetric preview across all four ecosystems: announce the
+        // count + scope label, then list each package by name so the
+        // operator can review what will land BEFORE the real run.
+        // Maintainability F5: nuget had this fidelity, npm/pip/cargo
+        // were one-liners — the asymmetry was misleading.
+        if let Some(npm) = packages_ref.npm {
+            preview_packages(
+                "npm",
+                "project-local",
+                npm.packages.keys().map(String::as_str),
+            );
         }
-        if has_pip {
-            println!("[DRY-RUN] Would install pip packages");
+        if let Some(pip) = packages_ref.pip {
+            preview_packages(
+                "pip",
+                "project-local",
+                pip.packages.keys().map(String::as_str),
+            );
         }
-        if has_cargo {
-            println!("[DRY-RUN] Would install cargo binaries");
+        if let Some(cargo) = packages_ref.cargo {
+            preview_packages(
+                "cargo",
+                "user-global",
+                cargo.packages.keys().map(String::as_str),
+            );
         }
         if let Some(nuget) = packages_ref.nuget {
-            let tool_count = nuget.packages.len();
-            println!(
-                "[DRY-RUN] Would install {} .NET global tool(s) via `dotnet tool update -g` (machine-global)",
-                tool_count
+            preview_packages(
+                ".NET global tool",
+                "machine-global",
+                nuget.packages.keys().map(String::as_str),
             );
-            // List the tool names so the operator can review what would land
-            // in `~/.dotnet/tools/` before approving the real run.
-            let mut names: Vec<&str> = Vec::with_capacity(nuget.packages.len());
-            names.extend(nuget.packages.keys().map(String::as_str));
-            names.sort_unstable();
-            for name in names {
-                println!("[DRY-RUN]   - {}", name);
-            }
         }
     } else {
         println!("\n=== Installing Package Dependencies ===");

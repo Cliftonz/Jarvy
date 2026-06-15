@@ -77,9 +77,44 @@ impl NugetHandler {
         validate_package_version(spec.version(), "[nuget]")?;
 
         println!("    Installing {}...", name);
+        // Emit per-package events through tracing directly — the
+        // subscriber decides whether to forward to OTLP, file, console,
+        // or all three. Mirrors the `tool.requested/installed/failed`
+        // taxonomy but scoped to language packages.
+        tracing::info!(
+            event = "package.requested",
+            ecosystem = "nuget",
+            package = %name,
+            version = %spec.version(),
+            platform = std::env::consts::OS,
+        );
+        let started = std::time::Instant::now();
 
         let args = build_install_args(name, spec.version());
-        run_package_command("dotnet", &args, working_dir)
+        match run_package_command("dotnet", &args, working_dir) {
+            Ok(()) => {
+                tracing::info!(
+                    event = "package.installed",
+                    ecosystem = "nuget",
+                    package = %name,
+                    version = %spec.version(),
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    platform = std::env::consts::OS,
+                );
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!(
+                    event = "package.failed",
+                    ecosystem = "nuget",
+                    package = %name,
+                    version = %spec.version(),
+                    error = %e,
+                    platform = std::env::consts::OS,
+                );
+                Err(e)
+            }
+        }
     }
 }
 

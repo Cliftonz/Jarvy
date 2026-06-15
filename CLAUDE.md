@@ -35,7 +35,7 @@ Jarvy is a cross-platform CLI tool that provisions development environments from
   - `logs_cmd.rs`, `ticket_cmd.rs` - Logging and debug ticket commands (PRD-050)
 - **`src/remote.rs`** - Remote config fetching with caching (`fetch_remote_config`, `transform_github_url`)
 - **`src/interactive.rs`** - Interactive menu for users who run `jarvy` without subcommand
-- **`src/config.rs`** - Parses `jarvy.toml` using serde. Supports simple (`git = "2.40"`) and detailed (`git = { version = "2.40", version_manager = true }`) formats
+- **`src/config.rs`** - Parses `jarvy.toml` using serde. Supports simple (`git = "2.40"`) and detailed (`git = { version = "2.40", version_manager = true }`) formats. **Top-level sections live in `TOP_LEVEL_SECTIONS` (canonical const) which `validate.rs` consumes** — adding a new field to `Config` without updating both is rejected at compile time by the destructure test `config::tests::top_level_sections_matches_config_fields`
 - **`src/roles/`** - Role-based configurations with inheritance (PRD-033). Key files: `definition.rs` (types), `resolver.rs` (inheritance), `commands.rs` (CLI)
 - **`src/tools/registry.rs`** - Global `OnceLock<RwLock<HashMap>>` registry mapping tool names to handler functions
 - **`src/tools/common.rs`** - Shared utilities: `Os` enum, `InstallError` type, `run()`, `has()`, `cmd_satisfies()`, package manager detection
@@ -185,6 +185,26 @@ jarvy setup --role <name>           # Override role for single run
 
 **Module**: `src/roles/` - Role definitions, resolution with inheritance, and CLI commands.
 
+### Project Commands
+
+The `[commands]` section in `jarvy.toml` lets a project expose scripts to the interactive menu:
+
+```toml
+[commands]
+run = "dotnet run"
+test = "dotnet test"
+setup = "dotnet restore"
+# Anything beyond run/test/setup is captured as an "extra" and shown
+# as "Run `<name>`" in the interactive menu.
+format = "dotnet csharpier ."
+migrate = "dotnet ef database update"
+publish = "dotnet publish -c Release"
+```
+
+**Module**: `src/config.rs::CommandsConfig` (struct), `src/interactive.rs` (menu surface).
+
+**Shape**: `run`, `test`, `setup` are well-known fields. Anything else is captured via `#[serde(flatten)] extras: HashMap<String, String>` so unknown keys don't drop on the floor. The interactive menu lists each extra as `Run \`<name>\``.
+
 ### Language Package Dependencies
 
 Jarvy supports installing language-specific packages alongside CLI tools via `[npm]`, `[pip]`, `[cargo]`, and `[nuget]` sections.
@@ -240,11 +260,15 @@ dotnet-format = "latest"
 - Supports `--system-site-packages`
 
 **.NET global tools** (`[nuget]`):
-- Installs CLI binaries via `dotnet tool update -g <name>` (the `update` verb is idempotent — `install -g` errors when the tool is already present).
+- Installs CLI binaries via `dotnet tool update -g <name>` (the `update` verb is idempotent — `install -g` errors when the tool is already present). The argv contract is pinned by `nuget::tests::build_install_args_table`.
 - Scope is .NET global tools only. Project-level NuGet PackageReferences (the deps in a `.csproj` / `Directory.Packages.props`) are NOT managed here — those are restored by `dotnet restore` during build.
-- Same `validate_package_name` / `validate_package_version` guards as other ecosystems: refuses leading-`-` names (cargo / npm / dotnet would honor them as flags), URL schemes, and shell-meta chars.
+- Same `validate_package_name` / `validate_package_version` guards as other ecosystems: refuses leading-`-` names (cargo / npm / dotnet would honor them as flags), URL schemes, shell-meta chars, AND control bytes (ESC / BEL / DEL / NUL — closes the ANSI-injection primitive a hostile `jarvy.toml` could land in the dry-run preview).
 
-**Integration**: Package installation runs after tool hooks and before environment setup in `jarvy setup`. Order: npm → pip → cargo → nuget.
+**Validation parity**: `jarvy validate` runs `validate_package_name` / `validate_package_version` on every `[npm]/[pip]/[cargo]/[nuget]` entry (`validate.rs::validate_package_section`). Reserved section knobs (`venv`, `package_manager`, `from_lockfile`, `locked`, ...) are skipped — only entries that would become `<pkg-manager> install <name>` arguments are checked.
+
+**Borrowed access**: `Config::packages_ref() -> PackagesConfigRef<'_>` is the read-only path (`run_packages_phase` uses this). `Config::get_packages_config()` returns an owned, fully-cloned `PackagesConfig` and is retained only for callers that need ownership.
+
+**Integration**: Package installation runs after tool hooks and before environment setup in `jarvy setup`. Order: npm → pip → cargo → nuget. The whole phase is wrapped in `tracing::info_span!("packages", ...)` and emits `packages.phase_started` / `packages.phase_completed` structured events; each handler emits `package.requested` / `package.installed` / `package.failed` per tool (see Telemetry → Event Taxonomy).
 
 ### Git Configuration
 
@@ -642,8 +666,16 @@ jarvy telemetry preview       # Show what events would be sent
 | `tool.installed`   | per successful install                | Setup phase                                  |
 | `tool.failed`      | per failed install                    | Setup phase                                  |
 | `tool.unsupported` | setup unknown-tool loop + `--request` | Uniform field shape across both call sites   |
+| `tool.already_installed` | skip-detection path             | `install_path`, `detection_method`, `prompted_user` |
 | `setup.started` / `setup.completed` | run lifecycle        | Carries duration, counts                     |
 | `hook.started` / `hook.completed` / `hook.failed` / `hook.timeout` | per hook | |
+| `packages.phase_started` / `packages.phase_completed` | run_packages_phase | Carries `dry_run`, `npm`, `pip`, `cargo`, `nuget` booleans, `duration_ms` |
+| `packages.dry_run` | dry-run preview entry             | Carries per-ecosystem `*_count` |
+| `packages.install_failed` | install_packages outer error  | One per ecosystem on failure |
+| `package.requested` | per-package install entry (cargo, nuget) | Fields: `ecosystem`, `package`, `version`, `platform` |
+| `package.installed` | per-package install success         | Adds `duration_ms` |
+| `package.failed`   | per-package install failure          | Routed to `error!` level; `error` is redacted |
+| `package_command.failed` | run_package_command non-zero exit | Adds `stderr_tail` (last 4KB of subprocess stderr) |
 
 `tool.unsupported` fields (uniform across setup and `--request`):
 ```

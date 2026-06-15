@@ -177,19 +177,33 @@ pub fn validate_package_version(version: &str, purpose: &'static str) -> Result<
     Ok(())
 }
 
-/// Run a package manager command with the given arguments
+/// Run a package manager command with the given arguments.
+///
+/// Captures both stdout and stderr so failure messages carry the tail
+/// of what the underlying tool actually said — without that, a user
+/// support ticket for "setup hung" or "setup failed" arrives with
+/// nothing more than an exit code, and the operator has to ask the
+/// user to re-run with `--verbose`. Stdout still streams to the user's
+/// terminal in real-time via the inherited handle below; the captured
+/// copy is only used to build the error envelope.
+///
+/// `STDERR_TAIL_BYTES` is small enough that hostile output (a
+/// runaway compiler dumping MB) can't OOM the process or pollute logs
+/// indefinitely.
 pub fn run_package_command(
     cmd: &str,
     args: &[&str],
     working_dir: &Path,
 ) -> Result<(), PackageError> {
+    const STDERR_TAIL_BYTES: usize = 4 * 1024;
+
     let display_cmd = format!("{} {}", cmd, args.join(" "));
     println!("    Running: {}", display_cmd);
 
-    let status = Command::new(cmd)
+    let output = Command::new(cmd)
         .args(args)
         .current_dir(working_dir)
-        .status()
+        .output()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 PackageError::PackageManagerNotInstalled(cmd.to_string())
@@ -198,12 +212,52 @@ pub fn run_package_command(
             }
         })?;
 
-    if !status.success() {
-        return Err(PackageError::CommandFailed(format!(
-            "'{}' exited with status {}",
-            display_cmd,
-            status.code().unwrap_or(-1)
-        )));
+    // Stream the captured stdout/stderr back through so the operator
+    // still sees what the package manager said in real time. Order
+    // matches what `inherit` would have shown.
+    if !output.stdout.is_empty() {
+        use std::io::Write;
+        let _ = std::io::stdout().write_all(&output.stdout);
+    }
+    if !output.stderr.is_empty() {
+        use std::io::Write;
+        let _ = std::io::stderr().write_all(&output.stderr);
+    }
+
+    if !output.status.success() {
+        // Tail the last N bytes of stderr (or stdout if stderr is
+        // empty) for the error envelope. Trims trailing newlines so
+        // the formatted message stays single-paragraph.
+        let raw = if output.stderr.is_empty() {
+            &output.stdout
+        } else {
+            &output.stderr
+        };
+        let start = raw.len().saturating_sub(STDERR_TAIL_BYTES);
+        let tail = String::from_utf8_lossy(&raw[start..]).trim().to_string();
+
+        tracing::warn!(
+            event = "package_command.failed",
+            cmd = %cmd,
+            exit_code = output.status.code().unwrap_or(-1),
+            stderr_tail = %tail,
+        );
+
+        let message = if tail.is_empty() {
+            format!(
+                "'{}' exited with status {}",
+                display_cmd,
+                output.status.code().unwrap_or(-1)
+            )
+        } else {
+            format!(
+                "'{}' exited with status {}\n--- last output ---\n{}",
+                display_cmd,
+                output.status.code().unwrap_or(-1),
+                tail
+            )
+        };
+        return Err(PackageError::CommandFailed(message));
     }
 
     Ok(())
