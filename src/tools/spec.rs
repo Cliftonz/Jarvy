@@ -873,6 +873,18 @@ pub fn list_tool_names() -> Vec<String> {
     iter_tool_names().map(str::to_string).collect()
 }
 
+/// Look up the `category:` field set on a tool's `ToolSpec`. Returns
+/// `None` when the tool isn't in the registry or its spec doesn't
+/// set a category. Used by telemetry call sites so `tool.installed`
+/// / `tool.failed` events carry a category label without forcing
+/// every event emission to know the tool ontology.
+pub fn get_tool_category(name: &str) -> Option<&'static str> {
+    let lower = name.to_ascii_lowercase();
+    iter_tools()
+        .find(|e| e.spec.name.eq_ignore_ascii_case(&lower))
+        .and_then(|e| e.spec.category)
+}
+
 /// Render the canonical `define_tool!` template — re-exported from
 /// the dep-free `jarvy-templates` crate. Both `cargo-jarvy new-tool`
 /// and `jarvy tools --request` call the same implementation, so the

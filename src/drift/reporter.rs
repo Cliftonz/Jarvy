@@ -1,6 +1,6 @@
 //! Drift report formatting and output
 
-use super::{DriftReport, DriftStatus, VersionDirection};
+use super::{DriftReport, DriftStatus, MissingTool, VersionDirection};
 
 /// Report formatter for drift detection results
 pub struct DriftReporter;
@@ -55,19 +55,34 @@ impl DriftReporter {
             }
         }
 
-        // Missing tools
+        // Missing tools, grouped by `ToolSpec.category` so an operator
+        // advising "your messaging stack is half-installed" can see
+        // the grouping at a glance. Within a group, the older flat
+        // rendering is preserved. (Obs F6 — out-of-scope follow-up.)
         if !report.missing_tools.is_empty() {
             println!("\n\x1b[1mMissing Tools:\x1b[0m");
+            let mut by_category: std::collections::BTreeMap<&'static str, Vec<&MissingTool>> =
+                std::collections::BTreeMap::new();
             for tool in &report.missing_tools {
-                let fixable = if tool.auto_fixable {
-                    " \x1b[36m[auto-fixable]\x1b[0m"
-                } else {
-                    ""
-                };
-                println!(
-                    "  \x1b[31m✗\x1b[0m {} (expected {}){}",
-                    tool.tool, tool.expected_version, fixable
-                );
+                let category =
+                    crate::tools::spec::get_tool_category(&tool.tool).unwrap_or("uncategorized");
+                by_category.entry(category).or_default().push(tool);
+            }
+            for (category, tools) in &by_category {
+                if by_category.len() > 1 {
+                    println!("  \x1b[2m[{}]\x1b[0m", category);
+                }
+                for tool in tools {
+                    let fixable = if tool.auto_fixable {
+                        " \x1b[36m[auto-fixable]\x1b[0m"
+                    } else {
+                        ""
+                    };
+                    println!(
+                        "  \x1b[31m✗\x1b[0m {} (expected {}){}",
+                        tool.tool, tool.expected_version, fixable
+                    );
+                }
             }
         }
 

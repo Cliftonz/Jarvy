@@ -305,13 +305,29 @@ pub fn use_template(name: &str, output: Option<PathBuf>) -> TemplateUseResult {
 
     // Write file
     match fs::write(&output_path, &content) {
-        Ok(()) => TemplateUseResult {
-            template_name: name.to_string(),
-            output_path: Some(output_path.display().to_string()),
-            tool_count: template.tools.len(),
-            created: true,
-            error: None,
-        },
+        Ok(()) => {
+            // Emit a structured event so support can answer "which
+            // orgs materialized this template before <bug fix>"
+            // without parsing stdout. Pre-existing templates didn't
+            // fire this event; the messaging review (Obs F4) called
+            // it out and the diff backfills it for every template
+            // path (built-in + user-defined).
+            tracing::info!(
+                event = "template.materialized",
+                template = %name,
+                category = %template.category,
+                tool_count = template.tools.len(),
+                source = "builtin",
+                output_path = %output_path.display(),
+            );
+            TemplateUseResult {
+                template_name: name.to_string(),
+                output_path: Some(output_path.display().to_string()),
+                tool_count: template.tools.len(),
+                created: true,
+                error: None,
+            }
+        }
         Err(e) => TemplateUseResult {
             template_name: name.to_string(),
             output_path: None,

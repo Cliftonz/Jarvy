@@ -535,10 +535,12 @@ pub fn tool_installed(tool: &str, version: &str, package_manager: &str, duration
     }
 
     let duration_ms = duration.as_millis() as u64;
+    let category = crate::tools::spec::get_tool_category(tool).unwrap_or("uncategorized");
     tracing::info!(
         event = "tool.installed",
         tool = %tool,
         version = %version,
+        category = %category,
         package_manager = %package_manager,
         duration_ms = %duration_ms,
         platform = %env::consts::OS,
@@ -551,8 +553,12 @@ pub fn tool_installed(tool: &str, version: &str, package_manager: &str, duration
                 KeyValue::new("pm", package_manager.to_string()),
                 KeyValue::new("platform", env::consts::OS.to_string()),
                 KeyValue::new("status", "success"),
+                KeyValue::new("category", category.to_string()),
             ];
             metrics.tool_installs.add(1, &attrs);
+            // Histogram label set excludes `status` and `category` to
+            // keep cardinality bounded; duration distribution by
+            // tool+pm+platform is what dashboards want.
             metrics
                 .install_duration
                 .record(duration.as_secs_f64(), &attrs[..3]);
@@ -634,11 +640,13 @@ pub fn tool_failed_with_kind(tool: &str, version: &str, error_kind: &str, error:
     }
 
     let redacted_error = redact_sensitive(error);
+    let category = crate::tools::spec::get_tool_category(tool).unwrap_or("uncategorized");
 
     tracing::error!(
         event = "tool.failed",
         tool = %tool,
         version = %version,
+        category = %category,
         error_kind = %error_kind,
         error = %redacted_error,
         platform = %env::consts::OS,
@@ -653,6 +661,7 @@ pub fn tool_failed_with_kind(tool: &str, version: &str, error_kind: &str, error:
                     KeyValue::new("platform", env::consts::OS.to_string()),
                     KeyValue::new("status", "failed"),
                     KeyValue::new("error_kind", error_kind.to_string()),
+                    KeyValue::new("category", category.to_string()),
                 ],
             );
             metrics
