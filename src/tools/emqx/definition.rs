@@ -11,7 +11,9 @@ define_tool!(EMQX, {
     command: "emqx",
     macos: { brew: "emqx" },
     linux: { uniform: "emqx" },
-    // No first-party winget manifest; download installer from emqx.io.
+    // No first-party winget manifest as of 2026-06; download
+    // installer from https://www.emqx.com/en/downloads.
+    category: "messaging",
 });
 
 #[cfg(test)]
@@ -21,7 +23,11 @@ mod tests {
     #[test]
     fn emqx_registration_shape() {
         assert_eq!(EMQX.command, "emqx");
+        assert_eq!(EMQX.category, Some("messaging"));
         let mac = EMQX.macos.expect("emqx must support macOS");
         assert_eq!(mac.brew, Some("emqx"));
+        let linux = EMQX.linux.expect("emqx must support Linux");
+        assert_eq!(linux.apt, Some("emqx"));
+        assert!(EMQX.windows.is_none(), "no first-party winget manifest");
     }
 }

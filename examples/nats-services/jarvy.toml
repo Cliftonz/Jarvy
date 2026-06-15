@@ -36,12 +36,16 @@ grpcurl = "latest"       # often pairs with NATS for gRPC service interop
 post_setup = """
 # Spin up a local NATS server in JetStream mode for development.
 # Production runs the same binary in a cluster — same image, same config shape.
-echo 'NATS ready:'
-echo '  Start broker:   nats-server -js'
-echo '  Subscribe:      nats sub ">"'
-echo '  Publish:        nats pub orders.new \\'{"id": 42}\\''
-echo '  JetStream:      nats stream add ORDERS --subjects "orders.>"'
-echo '  Bootstrap auth: nsc add operator MyOp && nsc add account MyAcc'
+#
+# WARNING: this template uses port 4222 (NATS broker). Do not combine
+# with templates that also bind 4222, or with `mosquitto`/`emqx` which
+# both default to MQTT port 1883 (they collide with each other).
+echo "NATS ready:"
+echo "  Start broker:   nats-server -js"
+echo "  Subscribe:      nats sub '>'"
+echo "  Publish:        nats pub orders.new '{\\"id\\": 42}'"
+echo "  JetStream:      nats stream add ORDERS --subjects 'orders.>'"
+echo "  Bootstrap auth: nsc add operator MyOp && nsc add account MyAcc"
 """
 
 [env.vars]

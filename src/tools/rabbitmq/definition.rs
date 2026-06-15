@@ -11,7 +11,11 @@ define_tool!(RABBITMQ, {
     command: "rabbitmq-server",
     macos: { brew: "rabbitmq" },
     linux: { uniform: "rabbitmq-server" },
-    windows: { winget: "Pivotal.RabbitMQ" },
+    // No first-party winget manifest as of 2026-06; the prior
+    // `Pivotal.RabbitMQ` id never existed (the Pivotal publisher
+    // namespace is unclaimed). Windows users: install from
+    // https://www.rabbitmq.com/install-windows.html.
+    category: "messaging",
 });
 
 #[cfg(test)]
@@ -21,9 +25,11 @@ mod tests {
     #[test]
     fn rabbitmq_registration_shape() {
         assert_eq!(RABBITMQ.command, "rabbitmq-server");
+        assert_eq!(RABBITMQ.category, Some("messaging"));
         let mac = RABBITMQ.macos.expect("rabbitmq must support macOS");
         assert_eq!(mac.brew, Some("rabbitmq"));
-        let win = RABBITMQ.windows.expect("rabbitmq must support Windows");
-        assert_eq!(win.winget, Some("Pivotal.RabbitMQ"));
+        let linux = RABBITMQ.linux.expect("rabbitmq must support Linux");
+        assert_eq!(linux.apt, Some("rabbitmq-server"));
+        assert!(RABBITMQ.windows.is_none(), "no first-party winget manifest");
     }
 }

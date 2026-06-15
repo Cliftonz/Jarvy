@@ -11,8 +11,11 @@ use crate::define_tool;
 define_tool!(KAF, {
     command: "kaf",
     macos: { brew: "kaf" },
-    linux: { uniform: "kaf" },
-    // No first-party winget manifest; left None on Windows.
+    // Linux: no distro package; install via Linuxbrew or release binary.
+    linux: { brew: "kaf" },
+    // No first-party winget manifest; install from
+    // https://github.com/birdayz/kaf/releases.
+    category: "messaging",
 });
 
 #[cfg(test)]
@@ -22,7 +25,11 @@ mod tests {
     #[test]
     fn kaf_registration_shape() {
         assert_eq!(KAF.command, "kaf");
+        assert_eq!(KAF.category, Some("messaging"));
         let mac = KAF.macos.expect("kaf must support macOS");
         assert_eq!(mac.brew, Some("kaf"));
+        let linux = KAF.linux.expect("kaf must support Linux");
+        assert_eq!(linux.brew, Some("kaf"));
+        assert!(KAF.windows.is_none(), "no first-party winget manifest");
     }
 }

@@ -143,7 +143,10 @@ pub mod ncdu;
 pub mod nerdctl;
 pub mod ngrok;
 pub mod nim;
-pub mod nk;
+// `nk` removed (security review F2): the `nats-io/nats-tools` brew tap
+// does not contain `nk.rb`, no Debian / RHEL package by that name
+// exists, and the `Synadia.NK` winget id was never claimed in
+// microsoft/winget-pkgs. Re-add when upstream ships a real package.
 pub mod nmap;
 pub mod node;
 pub mod noseyparker;

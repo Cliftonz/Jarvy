@@ -12,6 +12,7 @@ define_tool!(MOSQUITTO, {
     macos: { brew: "mosquitto" },
     linux: { uniform: "mosquitto" },
     windows: { winget: "EclipseFoundation.Mosquitto" },
+    category: "messaging",
 });
 
 #[cfg(test)]
@@ -21,9 +22,16 @@ mod tests {
     #[test]
     fn mosquitto_registration_shape() {
         assert_eq!(MOSQUITTO.command, "mosquitto");
+        assert_eq!(MOSQUITTO.category, Some("messaging"));
         let mac = MOSQUITTO.macos.expect("mosquitto must support macOS");
         assert_eq!(mac.brew, Some("mosquitto"));
+        let linux = MOSQUITTO.linux.expect("mosquitto must support Linux");
+        assert_eq!(linux.apt, Some("mosquitto"));
         let win = MOSQUITTO.windows.expect("mosquitto must support Windows");
-        assert_eq!(win.winget, Some("EclipseFoundation.Mosquitto"));
+        assert_eq!(
+            win.winget,
+            Some("EclipseFoundation.Mosquitto"),
+            "winget id verified against microsoft/winget-pkgs"
+        );
     }
 }

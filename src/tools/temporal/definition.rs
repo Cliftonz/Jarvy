@@ -12,8 +12,13 @@ use crate::define_tool;
 define_tool!(TEMPORAL, {
     command: "temporal",
     macos: { brew: "temporal" },
-    linux: { uniform: "temporal" },
-    windows: { winget: "Temporal.TemporalCLI" },
+    // Linux: install via Linuxbrew or release binary; no native
+    // distro package.
+    linux: { brew: "temporal" },
+    // No first-party winget manifest as of 2026-06; the prior
+    // `Temporal.TemporalCLI` id was never claimed. Windows users:
+    // install from https://github.com/temporalio/cli/releases.
+    category: "workflow",
 });
 
 #[cfg(test)]
@@ -23,7 +28,11 @@ mod tests {
     #[test]
     fn temporal_registration_shape() {
         assert_eq!(TEMPORAL.command, "temporal");
+        assert_eq!(TEMPORAL.category, Some("workflow"));
         let mac = TEMPORAL.macos.expect("temporal must support macOS");
         assert_eq!(mac.brew, Some("temporal"));
+        let linux = TEMPORAL.linux.expect("temporal must support Linux");
+        assert_eq!(linux.brew, Some("temporal"));
+        assert!(TEMPORAL.windows.is_none(), "no first-party winget manifest");
     }
 }

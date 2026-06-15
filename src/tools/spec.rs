@@ -382,6 +382,19 @@ impl ToolSpec {
                     "Homebrew not found. Install https://brew.sh and re-run.",
                 ));
             }
+            // Recent Homebrew versions refuse third-party tap formulae
+            // unless the tap was previously trusted via `brew tap`. The
+            // formula identifier `org/tap/name` carries exactly two
+            // slashes; auto-tap when we see that shape so a fresh box
+            // doesn't surface a confusing "untrusted tap" error.
+            if formula.matches('/').count() == 2 {
+                let tap_path: String = formula.split('/').take(2).collect::<Vec<_>>().join("/");
+                // Soft-fail: a non-zero `brew tap` exit means the tap is
+                // already added or the network is unreachable — either
+                // way, let the subsequent `brew install` produce the
+                // canonical error message.
+                let _ = run("brew", &["tap", &tap_path]);
+            }
             run("brew", &["install", formula])?;
             return Ok(());
         }
@@ -404,6 +417,13 @@ impl ToolSpec {
         // Fallback to Linuxbrew if available
         if let Some(brew_pkg) = linux.brew {
             if has("brew") {
+                // Same auto-tap behavior as the macOS path — see
+                // `install_macos` for the rationale.
+                if brew_pkg.matches('/').count() == 2 {
+                    let tap_path: String =
+                        brew_pkg.split('/').take(2).collect::<Vec<_>>().join("/");
+                    let _ = run("brew", &["tap", &tap_path]);
+                }
                 run("brew", &["install", brew_pkg])?;
                 return Ok(());
             }

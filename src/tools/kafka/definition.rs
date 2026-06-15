@@ -10,16 +10,23 @@
 //! The `command:` is `kafka-topics` (one of the bundled scripts) —
 //! `kafka` itself isn't a binary, the distribution exposes its
 //! functionality through ~30 separate scripts. Picking
-//! `kafka-topics` because it's the most-invoked one and is always
-//! present.
+//! `kafka-topics` because it's the most-invoked one.
+//!
+//! Note: drift detection runs `kafka-topics --version`; broker-only
+//! installs without the bundled scripts will register as missing.
 
 use crate::define_tool;
 
 define_tool!(KAFKA, {
     command: "kafka-topics",
     macos: { brew: "kafka" },
-    linux: { uniform: "kafka" },
-    windows: { winget: "Apache.Kafka" },
+    // Linux: Apache Kafka isn't packaged in mainstream distros.
+    // Install via Linuxbrew or the upstream tarball.
+    linux: { brew: "kafka" },
+    // No first-party winget manifest as of 2026-06; the prior
+    // `Apache.Kafka` id was never claimed. Windows users: install
+    // from https://kafka.apache.org/downloads.
+    category: "messaging",
 });
 
 #[cfg(test)]
@@ -29,7 +36,11 @@ mod tests {
     #[test]
     fn kafka_registration_shape() {
         assert_eq!(KAFKA.command, "kafka-topics");
+        assert_eq!(KAFKA.category, Some("messaging"));
         let mac = KAFKA.macos.expect("kafka must support macOS");
         assert_eq!(mac.brew, Some("kafka"));
+        let linux = KAFKA.linux.expect("kafka must support Linux");
+        assert_eq!(linux.brew, Some("kafka"));
+        assert!(KAFKA.windows.is_none(), "no first-party winget manifest");
     }
 }
