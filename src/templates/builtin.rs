@@ -314,6 +314,24 @@ pub const BUILTIN_TEMPLATES: &[BuiltinTemplate] = &[
             ("redis", "latest"),
         ],
     },
+    // Messaging
+    BuiltinTemplate {
+        name: "nats-services",
+        description: "NATS-based microservices toolkit (broker, CLI, auth, gRPC, Docker)",
+        category: "Backend",
+        tools: &[
+            ("git", "latest"),
+            ("docker", "latest"),
+            ("jq", "latest"),
+            ("ripgrep", "latest"),
+            ("httpie", "latest"),
+            ("gh", "latest"),
+            ("nats", "latest"),
+            ("nats_server", "latest"),
+            ("nsc", "latest"),
+            ("grpcurl", "latest"),
+        ],
+    },
     // Data & ML
     BuiltinTemplate {
         name: "python-ml",

@@ -43,6 +43,7 @@ cp examples/<template>/jarvy.toml /path/to/your/project/
 | [`dotnet-mvc/`](dotnet-mvc/jarvy.toml) | ASP.NET Core MVC web app (Razor views + EF Core) |
 | [`dotnet-azure/`](dotnet-azure/jarvy.toml) | ASP.NET Core + Azure cloud-native (`azd`, Bicep, `az`, GitVersion) |
 | [`dotnet-microservices/`](dotnet-microservices/jarvy.toml) | Distributed .NET microservices (Dapr + gRPC + SQL Server + Redis) |
+| [`nats-services/`](nats-services/jarvy.toml) | NATS-based microservices (broker, CLI, `nsc` auth, gRPC) — language-agnostic |
 
 ### Multi-Service
 

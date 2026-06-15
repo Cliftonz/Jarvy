@@ -1,0 +1,65 @@
+# NATS-based microservices toolkit
+# Run: jarvy setup
+#
+# Language-agnostic baseline for a NATS messaging stack: broker, CLI,
+# decentralized auth (`nsc`), and gRPC tooling for service interop
+# testing. Add your language toolchain (node / go / dotnet / python /
+# rust) by editing the [provisioner] block — NATS has first-class
+# client SDKs for all of them.
+
+[privileges]
+use_sudo = false
+
+[provisioner]
+git = "latest"
+docker = "latest"
+jq = "latest"
+ripgrep = "latest"
+httpie = "latest"
+gh = "latest"
+
+# NATS messaging stack
+nats = "latest"          # CLI: nats pub/sub, JetStream mgmt, replay
+nats_server = "latest"   # local broker (Core + JetStream + KV + ObjectStore)
+nsc = "latest"           # decentralized auth — operators/accounts/users
+grpcurl = "latest"       # often pairs with NATS for gRPC service interop
+
+# --- Add your language SDK ---
+# Uncomment one of the following:
+# node = "20"            # @nats-io/nats client
+# go = "latest"          # github.com/nats-io/nats.go
+# dotnet = "latest"      # NATS.Client (NuGet)
+# python = "latest"      # nats-py
+# rust = "latest"        # async-nats
+
+[hooks]
+post_setup = """
+# Spin up a local NATS server in JetStream mode for development.
+# Production runs the same binary in a cluster — same image, same config shape.
+echo 'NATS ready:'
+echo '  Start broker:   nats-server -js'
+echo '  Subscribe:      nats sub ">"'
+echo '  Publish:        nats pub orders.new \\'{"id": 42}\\''
+echo '  JetStream:      nats stream add ORDERS --subjects "orders.>"'
+echo '  Bootstrap auth: nsc add operator MyOp && nsc add account MyAcc'
+"""
+
+[env.vars]
+# Default URL the NATS CLI + most SDKs probe before falling back to localhost.
+NATS_URL = "nats://localhost:4222"
+
+[commands]
+# Start the broker in JetStream mode (`-js`) for persistence + KV + ObjectStore.
+broker = "nats-server -js"
+# Reactive subscribe to everything — useful during dev to see what's flowing.
+watch = "nats sub '>'"
+# Inspect JetStream state.
+streams = "nats stream ls"
+consumers = "nats consumer ls"
+# Roundtrip a benchmark — 100k 256-byte messages.
+bench = "nats bench --pub 1 --sub 1 --msgs 100000 --size 256 perf.test"
+
+[drift]
+enabled = true
+version_policy = "minor"
+track_files = ["docker-compose.yml", "nats-server.conf", ".jwt", "operator.jwt"]
