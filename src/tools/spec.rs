@@ -914,16 +914,39 @@ pub fn get_tool_spec(name: &str) -> Option<&'static ToolSpec> {
     if name.is_empty() {
         return None;
     }
-    if name
+    let key_owned;
+    let key: &str = if name
         .bytes()
         .all(|b| b.is_ascii_lowercase() || b == b'-' || b.is_ascii_digit())
     {
-        // Hot path: caller already passed lowercase; avoid allocating.
-        map.get(name).copied()
+        name
     } else {
-        let lowered = name.to_ascii_lowercase();
-        map.get(&lowered).copied()
+        key_owned = name.to_ascii_lowercase();
+        key_owned.as_str()
+    };
+    if let Some(spec) = map.get(key).copied() {
+        return Some(spec);
     }
+    // Tolerate the natural user form: every NATS doc shows
+    // `nats-server` (hyphen) but `define_tool!(NATS_SERVER, ...)`
+    // stringifies as `nats_server` (underscore). Without this fallback
+    // `validate` would accept the hyphen form (it has its own aliasing
+    // — see `commands::validate::validate_tools`) while
+    // `check_tools_parallel` would emit `tool.unsupported` for the same
+    // name — a user-visible divergence found during v0.2.0-rc.1 soak.
+    if key.contains('-') {
+        let alias = key.replace('-', "_");
+        if let Some(spec) = map.get(&alias).copied() {
+            return Some(spec);
+        }
+    }
+    if key.contains('_') {
+        let alias = key.replace('_', "-");
+        if let Some(spec) = map.get(&alias).copied() {
+            return Some(spec);
+        }
+    }
+    None
 }
 
 /// Get the default hook for a tool by name, if one exists for the current platform.
@@ -1564,6 +1587,46 @@ pub fn tool_has_any_dependencies(tool_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: `validate` used to accept the natural hyphen form
+    /// `nats-server` (because `commands::validate::validate_tools`
+    /// applies dash↔underscore aliasing) while `setup`'s version-check
+    /// path emitted `tool.unsupported` for the same name because
+    /// `get_tool_spec` was strict on the registered identifier. Found
+    /// during v0.2.0-rc.1 soak. Pin the aliasing here so the two
+    /// paths stay in sync.
+    #[test]
+    fn get_tool_spec_tolerates_hyphen_underscore_aliasing() {
+        // `nats_server` is registered as the underscore form.
+        let underscore = get_tool_spec("nats_server");
+        assert!(
+            underscore.is_some(),
+            "registered form must resolve directly"
+        );
+        // Hyphen form should resolve to the same spec.
+        let hyphen = get_tool_spec("nats-server");
+        assert!(
+            hyphen.is_some(),
+            "hyphen form must resolve via dash↔underscore aliasing"
+        );
+        // And both must point at the same ToolSpec.
+        assert!(std::ptr::eq(
+            underscore.unwrap() as *const _,
+            hyphen.unwrap() as *const _
+        ));
+    }
+
+    #[test]
+    fn check_tool_version_resolves_hyphen_aliases() {
+        // The end-to-end behavior: `check_tool_version("nats-server", ...)`
+        // must return `known: true` so the setup path doesn't emit a
+        // misleading `tool.unsupported` event.
+        let status = check_tool_version("nats-server", "latest");
+        assert!(
+            status.known,
+            "nats-server (hyphen) must be known via aliasing"
+        );
+    }
 
     // ----- render_tool_template direct coverage -----
     //
