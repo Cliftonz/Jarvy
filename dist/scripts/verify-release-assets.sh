@@ -28,6 +28,12 @@ WORKDIR="$(mktemp -d -t jarvy-verify-XXXXXX)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
 VERSION="${TAG#v}"
+# The compiled binary's CARGO_PKG_VERSION is the Cargo.toml core version
+# (e.g. 0.2.0), not the tag (e.g. 0.2.0-rc.1). Pre-release suffixes are tag-only
+# in this project — see commit b723f86. Strip the -<prerelease> suffix for the
+# `--version` probe; the rc identity is established by tag + signature, not by
+# self-reported version string.
+VERSION_CORE="${VERSION%%-*}"
 ASSETS_DIR="$WORKDIR/assets"
 mkdir -p "$ASSETS_DIR"
 
@@ -195,10 +201,10 @@ else
     BIN="$(find "$EXTRACT/data" -type f -name 'jarvy' -perm -u+x | head -1)"
     [[ -n "$BIN" ]] || fail "no jarvy binary inside $(basename "$CANDIDATE")"
     reported="$("$BIN" --version 2>&1 | head -1)"
-    if [[ "$reported" != *"$VERSION"* ]]; then
-      fail "$BIN --version reported '$reported', expected to contain '$VERSION'"
+    if [[ "$reported" != *"$VERSION_CORE"* ]]; then
+      fail "$BIN --version reported '$reported', expected to contain '$VERSION_CORE'"
     fi
-    ok "$(basename "$CANDIDATE") binary reports: $reported"
+    ok "$(basename "$CANDIDATE") binary reports: $reported (core version $VERSION_CORE matched)"
   fi
 fi
 
