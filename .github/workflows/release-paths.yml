@@ -144,11 +144,16 @@ jobs:
           # permissive — release.yml might name them
           # jarvy-<triple>.<ext>, jarvy_<version>_<triple>.<ext>, or
           # jarvy_<triple>_<version>.<ext>; all three work.
+          #
+          # Use endswith/contains rather than regex test() to avoid double-
+          # escaping the regex anchor through bash → jq → JSON-string layers
+          # (an earlier `test("...\$")` form failed with "failed to parse jq
+          # expression" because `\$` isn't a valid JSON escape).
           count_for() {
             local tag="$1"
             gh release view "$tag" --repo "${{ github.repository }}" \
               --json assets \
-              --jq "[.assets[].name | select(test(\"${TRIPLE}.*\\\\.${EXT}\\$\"))] | length"
+              --jq "[.assets[].name | select(contains(\"$TRIPLE\")) | select(endswith(\".$EXT\"))] | length"
           }
           NM1_HAS=$(count_for "$NM1")
           TARGET_HAS=$(count_for "$TARGET")
@@ -172,8 +177,8 @@ jobs:
           set -euo pipefail
           ASSET=$(gh release view "$NM1" --repo "${{ github.repository }}" \
             --json assets \
-            --jq "[.assets[].name | select(test(\"${TRIPLE}.*\\\\.${EXT}\\$\"))] | .[0]")
-          [ -n "$ASSET" ] || { echo "::error::No N-1 asset matching ${TRIPLE}*.${EXT}"; exit 1; }
+            --jq "[.assets[].name | select(contains(\"$TRIPLE\")) | select(endswith(\".$EXT\"))] | .[0]")
+          [ -n "$ASSET" ] || { echo "::error::No N-1 asset matching *${TRIPLE}*.${EXT}"; exit 1; }
 
           mkdir -p _nm1 && cd _nm1
           gh release download "$NM1" --repo "${{ github.repository }}" \
@@ -398,7 +403,7 @@ jobs:
             local tag="$1"
             gh release view "$tag" --repo "${{ github.repository }}" \
               --json assets \
-              --jq "[.assets[].name | select(test(\"${TRIPLE}.*\\\\.${EXT}\\$\"))] | length"
+              --jq "[.assets[].name | select(contains(\"$TRIPLE\")) | select(endswith(\".$EXT\"))] | length"
           }
           NM2_HAS=$(count_for "$NM2")
           TARGET_HAS=$(count_for "$TARGET")
@@ -422,7 +427,7 @@ jobs:
           set -euo pipefail
           ASSET=$(gh release view "$NM2" --repo "${{ github.repository }}" \
             --json assets \
-            --jq "[.assets[].name | select(test(\"${TRIPLE}.*\\\\.${EXT}\\$\"))] | .[0]")
+            --jq "[.assets[].name | select(contains(\"$TRIPLE\")) | select(endswith(\".$EXT\"))] | .[0]")
           mkdir -p _nm2 && cd _nm2
           gh release download "$NM2" --repo "${{ github.repository }}" \
             --pattern "$ASSET" --dir .
