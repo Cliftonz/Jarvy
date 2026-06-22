@@ -197,9 +197,10 @@ Skip this path for patch bumps — patch bumps from N-1 cover the same surface.
 Automated coverage: same workflow as Path 2 (`release-paths.yml`, job
 `path-3`). The job auto-resolves N-2 as the latest stable strictly below
 `v<major>.<minor-1>.0` (or the major-2 line for major bumps) and skips with
-a `::notice::` when no eligible N-2 exists. For v0.2.0 this is auto-skipped
-(no v0.0.x). First real run will be the v0.3.0 cut, with N-2 = v0.1.x. Same
-bootstrap caveat as Path 2 applies until #30 ships tarballs.
+a `::notice::` when no eligible N-2 exists. For v0.2.0 the resolver picks
+v0.0.5 (verified in smoke run 27921489172), so this path WILL fire for real
+the moment tarballs ship — same bootstrap caveat as Path 2 applies until
+#30 closes.
 
 Pass criteria: same as Path 2 plus state file migrates from N-2 directly to rc
 (skipping the N-1 schema if any).
