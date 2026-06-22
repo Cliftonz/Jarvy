@@ -182,7 +182,13 @@ mod tests {
     use super::*;
 
     #[test]
+    #[serial_test::serial(proxy_env)]
     fn test_resolver_no_config() {
+        // env_proxy() reads HTTP(S)_PROXY first; without an EnvGuard,
+        // a CI runner (or a parallel test mutating proxy env vars)
+        // can leak into this assertion. Guard + serial keep the test
+        // hermetic.
+        let _guard = EnvGuard::new(PROXY_ENV_VARS);
         let resolver = ProxyResolver::new(None);
         let resolved = resolver.resolve_for_tool("git");
         assert!(!resolved.has_proxy());
@@ -190,7 +196,9 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(proxy_env)]
     fn test_resolver_global_config() {
+        let _guard = EnvGuard::new(PROXY_ENV_VARS);
         let config = NetworkConfig {
             https_proxy: Some("http://proxy:8080".to_string()),
             ..Default::default()
@@ -205,7 +213,9 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(proxy_env)]
     fn test_resolver_tool_override() {
+        let _guard = EnvGuard::new(PROXY_ENV_VARS);
         let git_override = NetworkOverride {
             https_proxy: Some("http://git-proxy:8888".to_string()),
             ..Default::default()
@@ -232,7 +242,9 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(proxy_env)]
     fn test_resolver_tool_no_proxy_all() {
+        let _guard = EnvGuard::new(PROXY_ENV_VARS);
         let git_override = NetworkOverride {
             no_proxy_all: true,
             ..Default::default()
