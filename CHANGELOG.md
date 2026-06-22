@@ -27,7 +27,168 @@ for the full release process and
 [`docs/release-quirks-jarvy.md`](https://github.com/bearbinary/jarvy/blob/main/docs/release-quirks-jarvy.md)
 for divergences from generic release skills.
 
-## [v0.1.1] — Fix crates.io publish pipeline (2026-05-27)
+## [v0.2.0] — Tooling breadth, MCP surface, AI hooks, release-soak hardening (2026-06-22)
+
+First minor release in the v0.x line. Bigger than its predecessor — 32
+commits adding two new tool ecosystems (NATS messaging, .NET / NuGet), a
+significant MCP tool surface, AI-hooks distribution to six coding agents,
+auto-registration of the Jarvy MCP server, and the release-soak CI gates
+that catch regressions before promotion. Soaked as `v0.2.0-rc.1` →
+`-rc.2` over 2026-06-16 → 2026-06-22; soak record in
+[#25](https://github.com/bearbinary/Jarvy/issues/25).
+
+### Known limitation — binary self-update gate ships in bootstrap mode
+
+The Path 2/3/4 (upgrade / skip-version / rollback) CI gate is live but
+[#30](https://github.com/bearbinary/Jarvy/issues/30) is open: `release.yml`
+does not yet emit `.tar.gz` / `.zip` binary tarballs as release assets, so
+the `BinaryInstaller` self-update path has nothing to consume. Users on a
+package-manager path (Homebrew, cargo, apt, dnf, pacman, winget,
+Chocolatey, scoop, AUR) update normally. Users on the binary fallback see
+"No binary for this platform" — same documented gap as v0.1.x. Tracked for
+v0.3.0.
+
+### Added
+
+- **NATS messaging toolchain (4 tools).** `nats-server`, `nats` CLI, `nsc`
+  (account credentials), plus a `nats-services` built-in template that
+  wires a working three-service mesh into a fresh `jarvy.toml`.
+- **.NET / NuGet ecosystem.** New `[nuget]` package section + `NugetHandler`
+  with end-to-end dry-run + install support. 5 .NET dev tools (full set
+  validated against upstream channel docs), 5 .NET-flavored templates, 5
+  example configs, and `grpcurl` for grpc service introspection.
+- **12 queuing / messaging tools across two batches.** First batch: 6
+  workflow + broker tools. Second batch: `pulsar`, `kaf`, `kafkactl`,
+  `emqx`, `argo` (Workflows CLI), `kn` (Knative CLI). Tools without
+  first-party Windows manifests omit the `winget` block entirely rather
+  than ship placeholder IDs that could be hijacked under
+  supply-chain attack (see Security).
+- **Extended MCP tool surface.** AI hooks, MCP register, drift, roles,
+  services, templates, validation — all exposed over MCP. Mutating tools
+  (`services_start`, `templates_use`) gated by `gate_mutation` +
+  `MutationCtx`: rate limit → stderr TTY confirm → audit log. Workspace
+  containment enforced by `safety::resolve_within_workspace` (canonical-
+  root check; refuses `..`, absolute escapes, endpoint symlinks).
+- **`ai_hooks` distribution to six AI coding agents.** Curated guardrail
+  hooks (the "don't `rm -rf` your homedir", "respect .gitignore",
+  "stop-on-tests" class of safeguard) provisioned uniformly to Claude
+  Code, Cursor, Codex, Windsurf, Cline, and Continue. Bash → PowerShell
+  translation on Windows handled in-process so the same hook YAML works
+  cross-platform.
+- **`mcp_register` auto-registration to the same six agents.** One-shot
+  setup that places the Jarvy MCP server entry in each agent's config
+  with the correct stdio invocation, so users don't have to copy-paste
+  per-agent boilerplate. Trust-gated: only the built-in `jarvy` server
+  registers from a remote config unless `allow_custom_servers = true`.
+- **Telemetry category plumbing.** `category` field travels through every
+  `tool.requested` / `tool.installed` / `tool.failed` event, plus
+  `template.materialized`. Operators can graph "what fraction of NATS
+  rollouts succeeded?" without pivoting on tool name.
+- **`tool.already_installed` event.** Surfaces the skip path with
+  `install_path`, `detection_method`, `prompted_user` fields — previously
+  invisible in telemetry, now visible.
+- **Telemetry `error_kind` discrimination.** `tool.failed` carries an
+  `error_kind` enum (`tap_fetch`, `command_failed`, `permission_denied`,
+  …) so an operator can split "the brew tap was unreachable" from "the
+  binary install actually broke".
+- **Drift report category grouping.** Tools group by category in human
+  output (`messaging`, `workflow`, `runtime`, …) instead of one flat
+  list, making diff review tractable at scale.
+- **CI: Path 8 asset download sweep workflow.** `.github/workflows/verify-release.yml`
+  fetches every release asset, verifies HTTP 200, sha256 against
+  `SHA256SUMS.txt`, cosign signature, SBOM well-formedness, and asserts
+  the `.deb`-extracted binary's `--version` matches the tag's core version.
+  Auto-fires on `release: published` and weekly to catch asset rot.
+- **CI: Path 2/3/4 release-paths validation workflow.** `.github/workflows/release-paths.yml`
+  exercises upgrade-from-N-1, skip-version-from-N-2, and rollback flows
+  on macOS arm64 / Ubuntu 22.04 / Windows. Runs in bootstrap mode until
+  #30 ships tarballs; auto-tightens to hard-fail after.
+- **CI: one-shot winget submission helper.** For first-time Jarvy.Jarvy
+  publisher onboarding.
+
+### Changed
+
+- **Dash ↔ underscore tool aliasing is now uniform.** `nats-server` and
+  `nats_server` resolve to the same tool in three places that previously
+  diverged: `registry::get_tool()`, `commands::validate::validate_tools`,
+  and `tools::spec::get_tool_spec()`. The third site was the sev-2 found
+  during rc.1 soak and fixed in rc.2 — `validate` accepted `nats-server`
+  but `setup --dry-run` reported `tool.unsupported` for the same name.
+- **Brew tap auto-tap.** When `macos.brew` (or `linux.brew` fallback) is
+  `org/tap/formula` form (exactly two slashes), install path runs
+  `brew tap org/tap` first so a fresh box doesn't surface an "untrusted
+  tap" error. Soft-fail; already-tapped is not a blocker.
+- **`jarvy validate` and `jarvy setup --dry-run` now surface `[nuget]`.**
+  Previously the new section silently dropped from the validate report —
+  users would think their NuGet packages were configured when they
+  weren't.
+- **`publish-packages.yml` decouples downstream channels from crates.io.**
+  Previously a transient crates.io publish failure left winget / chocolatey
+  / homebrew unsynced. Each channel now has independent secret gates and
+  failure modes.
+- **Release binary `--version` comparison uses core version, not full
+  tag.** rc tags like `v0.2.0-rc.2` build binaries that report
+  `jarvy 0.2.0` (no prerelease suffix); the verify-release step now
+  matches on core only.
+
+### Fixed
+
+- **Drop placeholder Windows package IDs from tool definitions.**
+  Six tools previously listed placeholder `winget` IDs like
+  `Pivotal.RabbitMQ` for upstream namespaces that the publisher had not
+  actually claimed. Any party who registered that publisher could ship
+  a malicious installer pinned by `winget install -e --id`. Replaced
+  with explicit `// No first-party winget manifest as of YYYY-MM` notes;
+  `tool.unsupported` telemetry fires in place at runtime.
+- **Telemetry gate respects `[telemetry] enabled = false`.** Every
+  `package.*` / `packages.*` / `package_command.failed` event reads
+  `observability::telemetry_gate::is_enabled()` before emitting. Prior
+  implementation leaked package events to OTLP when telemetry was
+  disabled but an endpoint was set for unrelated reasons. Broke the
+  documented opt-in contract.
+- **MCP safety boundary applies to extended mutating tools.** The new
+  drift/roles/templates/services tools all run through
+  `resolve_within_workspace` — a path containing `..` or an absolute
+  escape that lands outside the workspace root canonicalizes to a
+  refusal, not a silent file write.
+- **De-flaked `telemetry_smoke` integration test.** Ephemeral port +
+  `#[serial]` annotation + 30s timeout, replacing the prior flaky
+  hardcoded port that intermittently lost to other tests' bound
+  sockets.
+- **Mass conversion of ~200 `_registered_returns_some` tautology tests
+  to `_registration_shape` tests.** The old tests verified
+  `Some(_).is_some()` after registration — a tautology that always
+  passed even when the underlying `ToolSpec` was structurally broken.
+  Replaced with shape-asserting tests that fail when a tool's platform
+  matrix degrades.
+
+### Security
+
+- **Supply-chain: no more placeholder winget IDs.** See Fixed above.
+- **Package-name validation.** `validate_package_name` /
+  `validate_package_version` refuse leading-`-`, URL schemes, shell-meta,
+  and control bytes (ESC/BEL/DEL/NUL — closes ANSI injection in dry-run
+  preview). `jarvy validate` runs them on every `[npm]/[pip]/[cargo]/[nuget]`
+  entry.
+- **Remote-config trust narrowing only.** `ConfigOrigin::Remote` tags
+  remote-fetched configs; `allow_custom_commands`, `allow_custom_servers`,
+  `allow_remote` (packages), and telemetry endpoint override are all
+  refused for remote configs. Library hooks and the built-in `jarvy` MCP
+  server remain trustable; user-authored extensions do not.
+
+### Impact on v0.1.x users
+
+- **Cargo (`cargo install jarvy`)** — resolves to v0.2.0; no breaking API
+  surface in command flags. Existing `jarvy.toml` parses unchanged.
+- **`.deb` / `.rpm` / `.dmg` / `.msi` / `.AppImage`** — install normally
+  from the GitHub release.
+- **Homebrew, install.sh, install.ps1** — still broken pending #30,
+  same as v0.1.x. No regression; no improvement.
+- **`jarvy update`** — package-manager paths upgrade fine. Binary
+  fallback returns the documented "No binary for this platform" — same
+  state as v0.1.x, tracked in #30.
+
+
 
 Patch release closing the crates.io gap that v0.1.0 left open. No
 runtime code changes — release-pipeline metadata only.
