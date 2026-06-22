@@ -21,10 +21,11 @@ fn run_sync() -> i32 {
     match registry_remote::run_sync() {
         Ok(report) => {
             println!();
-            println!("✓ Registry sync complete");
+            println!("[ok] Registry sync complete");
             println!("  Source:           {}", report.registry_url);
             println!("  Tools synced:     {}", report.tools_synced);
             println!("  Tools removed:    {}", report.tools_removed);
+            println!("  Duration:         {}ms", report.duration_ms);
             println!(
                 "  Signature:        {}",
                 if report.signature_verified {
@@ -39,6 +40,11 @@ fn run_sync() -> i32 {
         }
         Err(e) => {
             eprintln!("Registry sync failed: {}", e);
+            tracing::error!(
+                event = "registry.cli.sync_failed",
+                error_kind = error_kind(&e),
+                error = %e,
+            );
             // Map the most common failures to specific exit codes; fall
             // back to CONFIG_ERROR for everything else (matches the
             // "config-shaped failure" semantics callers already handle).
@@ -48,6 +54,22 @@ fn run_sync() -> i32 {
                 _ => error_codes::CONFIG_ERROR,
             }
         }
+    }
+}
+
+/// Classify a `SyncError` for the `error_kind` tracing field. Keeps the
+/// label set bounded so OTLP labels don't cardinality-bomb.
+fn error_kind(e: &registry_remote::SyncError) -> &'static str {
+    use registry_remote::SyncError as E;
+    match e {
+        E::NotConfigured => "not_configured",
+        E::UnsafeConfig(_) => "unsafe_config",
+        E::Fetch(_) => "fetch",
+        E::Manifest(_) => "manifest",
+        E::Cache(_) => "cache",
+        E::Signature(_) => "signature",
+        E::CosignBackend(_) => "cosign",
+        E::ShaMismatch { .. } => "sha_mismatch",
     }
 }
 

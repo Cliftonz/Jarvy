@@ -33,11 +33,17 @@ pub const SUPPORTED_SCHEMA_VERSION: u32 = 1;
 pub enum ManifestError {
     #[error("manifest parse failed: {0}")]
     Parse(#[from] serde_json::Error),
+    #[error("manifest body is not valid utf-8")]
+    InvalidEncoding,
     #[error(
-        "manifest schema version {found} is newer than supported version {supported}; \
-         upgrade jarvy to use this registry"
+        "manifest schema version {found} is unsupported (expected {supported}); \
+         {hint}"
     )]
-    UnsupportedSchema { found: u32, supported: u32 },
+    UnsupportedSchema {
+        found: u32,
+        supported: u32,
+        hint: &'static str,
+    },
     #[error("manifest tool entry {name:?} has invalid path {path:?}: {reason}")]
     InvalidPath {
         name: String,
@@ -73,10 +79,22 @@ impl Manifest {
     pub fn parse(body: &str) -> Result<Self, ManifestError> {
         let manifest: Manifest = serde_json::from_str(body)?;
 
+        // schema_version == 0 is reserved (it's the default for any future
+        // sentinel like "draft/do-not-load"); refuse explicitly so the
+        // current SUPPORTED_SCHEMA_VERSION isn't accidentally compatible
+        // with a zero-valued draft manifest.
+        if manifest.schema_version == 0 {
+            return Err(ManifestError::UnsupportedSchema {
+                found: 0,
+                supported: SUPPORTED_SCHEMA_VERSION,
+                hint: "schema_version 0 is reserved; the registry must set a positive version",
+            });
+        }
         if manifest.schema_version > SUPPORTED_SCHEMA_VERSION {
             return Err(ManifestError::UnsupportedSchema {
                 found: manifest.schema_version,
                 supported: SUPPORTED_SCHEMA_VERSION,
+                hint: "upgrade jarvy to use this registry",
             });
         }
 
@@ -188,7 +206,23 @@ mod tests {
             valid_sha()
         );
         let err = Manifest::parse(&body).unwrap_err();
-        assert!(matches!(err, ManifestError::UnsupportedSchema { .. }));
+        assert!(matches!(
+            err,
+            ManifestError::UnsupportedSchema { found: 99, .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_schema_version_zero() {
+        let body = format!(
+            r#"{{"schema_version": 0, "tools": [{{"name": "f", "path": "tools/f.toml", "sha256": "{}"}}]}}"#,
+            valid_sha()
+        );
+        let err = Manifest::parse(&body).unwrap_err();
+        assert!(matches!(
+            err,
+            ManifestError::UnsupportedSchema { found: 0, .. }
+        ));
     }
 
     #[test]

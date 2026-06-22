@@ -1,34 +1,44 @@
-//! Sync orchestrator: fetch → verify → cache.
+//! Sync orchestrator: fetch → verify → stage → atomic-swap.
 //!
 //! Flow (read top-to-bottom):
 //!
-//! 1. Load `RegistryConfig` from `~/.jarvy/config.toml`. If absent or
-//!    disabled, refuse with a clear error.
+//! 1. Load `RegistryConfig` from `~/.jarvy/config.toml`. Refuse if
+//!    absent / disabled / unsafe-shaped (non-HTTPS, unanchored regex).
 //! 2. Fetch `<base>/manifest.json` + `.sig` + `.pem` companions.
-//! 3. Stage all three on disk, then call cosign-verify-blob against the
-//!    configured identity-regexp + OIDC issuer. Refuse if it fails
-//!    (unless `require_signature = false`).
-//! 4. Parse the manifest, validate every entry.
-//! 5. For each tool entry: fetch the TOML, sha256-verify against the
-//!    manifest, write into the cache.
-//! 6. Wipe any stale tool TOMLs that were removed upstream.
-//! 7. Write `meta.json` with `last_synced_at`.
+//! 3. Stage all three as `*.unverified` files; cosign-verify the
+//!    `.unverified` manifest against the configured identity-regexp +
+//!    OIDC issuer. Refuse if verification fails (unless
+//!    `require_signature = false`). Promote `.unverified` → canonical
+//!    name only after verification passes — the prior known-good
+//!    manifest stays in place until that point.
+//! 4. Parse the manifest; validate every entry wholesale.
+//! 5. Fresh staging dir `tools.new/`. Per tool: fetch, sha256-verify,
+//!    write into staging.
+//! 6. After all tools land successfully, atomic-swap `tools.new/` into
+//!    place of `tools/`. The prior `tools/` is removed only after the
+//!    new one is in place.
+//! 7. Write `meta.json` with `last_synced_at_unix`, `duration_ms`,
+//!    `tools_count`, `signature_verified`.
 //!
-//! Each step is fail-fast — a single failure aborts the whole sync and
-//! leaves the prior cache state untouched. A partial sync would leave
-//! the runtime in an inconsistent state where some tools point at the
-//! new manifest's versions but others are stale; better to keep the
-//! known-good cache and report a clear failure.
+//! Each step is fail-fast — a single failure aborts the sync and
+//! leaves the prior cache state untouched. The previous wipe-then-write
+//! shape violated this invariant (the wipe ran before tool fetches, so
+//! a failed first-tool-fetch left the cache empty). The staging-dir
+//! pattern preserves the invariant for real.
 
 use std::collections::HashSet;
-use std::time::SystemTime;
+use std::fmt::Write as _;
+use std::time::{Instant, SystemTime};
 use thiserror::Error;
 
 use super::cache::{self, CacheError};
 use super::config::RegistryConfig;
 use super::fetch::{self, FetchError, MAX_MANIFEST_BYTES, MAX_SIG_BYTES, MAX_TOOL_BYTES};
 use super::manifest::{Manifest, ManifestError};
-use crate::update::signature::{SignatureOutcome, VerifyError, signature_outcome_is_acceptable};
+use crate::update::signature::{
+    SignatureOutcome, VerifyError, signature_outcome_is_acceptable,
+    verify_sigstore_signature_with_identity,
+};
 
 #[derive(Debug, Error)]
 pub enum SyncError {
@@ -36,6 +46,8 @@ pub enum SyncError {
         "registry not configured — set [registry] url and enabled = true in ~/.jarvy/config.toml"
     )]
     NotConfigured,
+    #[error("registry config is unsafe: {0}")]
+    UnsafeConfig(String),
     #[error("fetch error: {0}")]
     Fetch(#[from] FetchError),
     #[error("manifest parse error: {0}")]
@@ -54,8 +66,6 @@ pub enum SyncError {
         expected: String,
         actual: String,
     },
-    #[error("manifest fetched as text but is not valid utf-8")]
-    ManifestNotUtf8,
 }
 
 /// Summary returned to the CLI handler so it can print a human report.
@@ -64,7 +74,10 @@ pub struct SyncReport {
     pub tools_synced: usize,
     pub tools_removed: usize,
     pub signature_verified: bool,
+    /// Registry URL with any embedded credentials stripped — safe to
+    /// surface in CLI output, meta.json, and tracing events.
     pub registry_url: String,
+    pub duration_ms: u64,
 }
 
 /// Run a full sync. Returns the report or the first error.
@@ -74,161 +87,275 @@ pub fn run_sync() -> Result<SyncReport, SyncError> {
 }
 
 /// Run a sync against an explicit config. Kept separate from `run_sync`
-/// for testability — callers in tests can hand-build a `RegistryConfig`
-/// pointing at a local mock URL.
+/// so tests can hand-build a `RegistryConfig` pointing at a local mock
+/// server without round-tripping through the real `~/.jarvy/config.toml`.
 pub fn run_sync_with_config(cfg: &RegistryConfig) -> Result<SyncReport, SyncError> {
+    let started_at = Instant::now();
+
     if !cfg.is_active() {
+        emit(|| {
+            tracing::warn!(
+                event = "registry.sync.failed",
+                stage = "preflight",
+                reason = "not_configured"
+            );
+        });
         return Err(SyncError::NotConfigured);
     }
+    if let Err(reason) = cfg.validate_safety() {
+        emit(|| {
+            tracing::error!(
+                event = "registry.sync.failed",
+                stage = "preflight",
+                reason = "unsafe_config",
+                detail = %reason,
+            );
+        });
+        return Err(SyncError::UnsafeConfig(reason));
+    }
 
-    // 1. Fetch + stage manifest + signature companions.
-    let manifest_bytes = fetch::fetch_bounded(&cfg.manifest_url(), MAX_MANIFEST_BYTES)?;
+    let redacted_url = crate::network::redact_credentials(&cfg.url).into_owned();
+    emit(|| {
+        tracing::info!(
+            event = "registry.sync.started",
+            registry_url = %redacted_url,
+            require_signature = cfg.require_signature,
+        );
+    });
+
+    // -- 1. Fetch manifest + cosign companions into *.unverified files.
+    //
+    // We do NOT touch the canonical `manifest.json` / `manifest.json.sig`
+    // / `manifest.json.pem` paths until cosign verification passes. A
+    // failed verify therefore leaves the prior known-good triplet in
+    // place — preserving the doc-comment invariant.
+    let manifest_bytes = fetch_with_event(&cfg.manifest_url(), MAX_MANIFEST_BYTES, &redacted_url)?;
     let cache_root = cache::cache_root()?;
     let manifest_path = cache_root.join("manifest.json");
     let sig_path = cache_root.join("manifest.json.sig");
     let pem_path = cache_root.join("manifest.json.pem");
+    let manifest_unverified = cache_root.join("manifest.json.unverified");
+    let sig_unverified = cache_root.join("manifest.json.sig.unverified");
+    let pem_unverified = cache_root.join("manifest.json.pem.unverified");
+    cache::write_atomic(&manifest_unverified, &manifest_bytes)?;
 
-    cache::write_atomic(&manifest_path, &manifest_bytes)?;
-
-    // 2. Verify signature (or accept unsigned if explicitly allowed).
+    // -- 2. Verify signature (or accept unsigned if explicitly allowed).
     let signature_verified = if cfg.require_signature {
-        let sig_bytes = fetch::fetch_bounded(&cfg.signature_url(), MAX_SIG_BYTES)?;
-        let pem_bytes = fetch::fetch_bounded(&cfg.certificate_url(), MAX_SIG_BYTES)?;
-        cache::write_atomic(&sig_path, &sig_bytes)?;
-        cache::write_atomic(&pem_path, &pem_bytes)?;
+        let sig_bytes = fetch_with_event(&cfg.signature_url(), MAX_SIG_BYTES, &redacted_url)?;
+        let pem_bytes = fetch_with_event(&cfg.certificate_url(), MAX_SIG_BYTES, &redacted_url)?;
+        cache::write_atomic(&sig_unverified, &sig_bytes)?;
+        cache::write_atomic(&pem_unverified, &pem_bytes)?;
 
-        let outcome = verify_with_identity(
-            &manifest_path,
+        // verify_sigstore_signature_with_identity looks for sig + pem
+        // siblings of the file path it's given. Stage them under the
+        // same .unverified.* prefix so it finds them without
+        // overwriting the canonical pair.
+        let outcome = verify_sigstore_signature_with_identity(
+            &manifest_unverified,
             &cfg.signature_identity_regexp,
             &cfg.signature_oidc_issuer,
         )?;
         if let Err(reason) = signature_outcome_is_acceptable(&outcome, false) {
+            // Clean up the unverified staging files so a re-run starts
+            // fresh; don't leave attacker bytes on disk.
+            let _ = std::fs::remove_file(&manifest_unverified);
+            let _ = std::fs::remove_file(&sig_unverified);
+            let _ = std::fs::remove_file(&pem_unverified);
+            emit(|| {
+                tracing::error!(
+                    event = "registry.sync.signature_refused",
+                    registry_url = %redacted_url,
+                    identity_regexp = %cfg.signature_identity_regexp,
+                    oidc_issuer = %cfg.signature_oidc_issuer,
+                    reason = %reason,
+                );
+            });
             return Err(SyncError::Signature(reason));
         }
+        // Promote .unverified → canonical AFTER the verify succeeds.
+        std::fs::rename(&manifest_unverified, &manifest_path).map_err(CacheError::from)?;
+        std::fs::rename(&sig_unverified, &sig_path).map_err(CacheError::from)?;
+        std::fs::rename(&pem_unverified, &pem_path).map_err(CacheError::from)?;
         matches!(outcome, SignatureOutcome::Verified)
     } else {
+        // require_signature=false is the documented escape hatch. Stderr
+        // warning AND structured tracing event so a fleet operator can
+        // detect machines running with signature checks disabled.
         eprintln!(
-            "jarvy: WARNING — registry signature verification disabled (require_signature=false); \
-             only safe for local development against trusted mirrors"
+            "jarvy: WARNING — registry signature verification disabled \
+             (require_signature=false); only safe for local development against \
+             trusted mirrors"
         );
+        emit(|| {
+            tracing::warn!(
+                event = "registry.signature_disabled",
+                registry_url = %redacted_url,
+            );
+        });
+        // Promote the manifest to the canonical path even without verify
+        // so subsequent runs / status can read it.
+        std::fs::rename(&manifest_unverified, &manifest_path).map_err(CacheError::from)?;
         false
     };
 
-    // 3. Parse manifest. Validation rejects malformed entries wholesale.
+    // -- 3. Parse manifest. Validation rejects malformed entries wholesale.
     let manifest_str =
-        std::str::from_utf8(&manifest_bytes).map_err(|_| SyncError::ManifestNotUtf8)?;
-    let manifest = Manifest::parse(manifest_str)?;
+        std::str::from_utf8(&manifest_bytes).map_err(|_| ManifestError::InvalidEncoding)?;
+    let manifest = Manifest::parse(manifest_str).inspect_err(|e| {
+        emit(|| {
+            tracing::error!(
+                event = "registry.sync.failed",
+                stage = "manifest_parse",
+                error = %e,
+            );
+        });
+    })?;
 
-    // 4. Snapshot pre-existing tools so we can count removals after.
+    // -- 4. Snapshot pre-existing tool filenames so we can count removals.
     let pre_existing = list_cached_tool_files()?;
 
-    // 5. Fetch + sha-verify each tool TOML and write into cache.
-    cache::wipe_tools_dir()?;
-    let mut written_count = 0;
-    let mut written_filenames: HashSet<String> = HashSet::new();
-    let tools_dir = cache::tools_dir()?;
+    // -- 5. Per-tool fetch + sha-verify into a fresh STAGING dir.
+    //
+    // The staging dir is wiped fresh at entry; the active tools/ dir is
+    // left alone. A failure during the loop leaves staging behind to be
+    // cleaned up on the next sync (next fresh_staging_tools_dir wipes it).
+    let staging = cache::fresh_staging_tools_dir()?;
+    let mut written_filenames: HashSet<String> = HashSet::with_capacity(manifest.tools.len());
+    let mut sha_buf = String::with_capacity(64);
+    let mut filename_buf = String::with_capacity(64);
     for entry in &manifest.tools {
         let url = cfg.tool_url(&entry.path);
-        let body = fetch::fetch_bounded(&url, MAX_TOOL_BYTES)?;
-        let actual_sha = sha256_hex(&body);
-        if actual_sha != entry.sha256 {
+        let body = fetch_with_event(&url, MAX_TOOL_BYTES, &redacted_url)?;
+        sha_buf.clear();
+        sha256_hex_into(&body, &mut sha_buf);
+        if sha_buf != entry.sha256 {
+            emit(|| {
+                tracing::error!(
+                    event = "registry.sync.sha_mismatch",
+                    tool = %entry.name,
+                    url = %url,
+                    expected = %entry.sha256,
+                    actual = %sha_buf,
+                );
+            });
             return Err(SyncError::ShaMismatch {
                 name: entry.name.clone(),
                 expected: entry.sha256.clone(),
-                actual: actual_sha,
+                actual: sha_buf.clone(),
             });
         }
 
-        // File on disk is `<tool-name>.toml`, NOT the manifest's path —
-        // collapsing nested manifest paths into a flat `tools/` dir
-        // keeps the plugin loader's walk shallow and predictable.
-        let filename = format!("{}.toml", entry.name);
-        let dest = tools_dir.join(&filename);
+        // File on disk is `<tool-name>.toml` — collapsing manifest paths
+        // into a flat staging/ keeps the plugin loader's walk shallow.
+        filename_buf.clear();
+        write!(filename_buf, "{}.toml", entry.name).expect("write to String never fails");
+        let dest = staging.join(&filename_buf);
         cache::write_atomic(&dest, &body)?;
-        written_filenames.insert(filename);
-        written_count += 1;
+        emit(|| {
+            tracing::debug!(
+                event = "registry.sync.tool.synced",
+                tool = %entry.name,
+                bytes = body.len() as u64,
+            );
+        });
+        written_filenames.insert(filename_buf.clone());
     }
 
+    // -- 6. Atomic-swap staging → active. From this point on the new set
+    //       is live; pre_existing − written = removed.
+    cache::swap_staging_into_tools_dir()?;
     let removed_count = pre_existing
         .iter()
         .filter(|f| !written_filenames.contains(*f))
         .count();
 
-    // 6. Mark sync complete.
+    // -- 7. Mark sync complete.
+    let duration_ms = started_at.elapsed().as_millis() as u64;
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let meta = serde_json::json!({
+    let meta_payload = serde_json::json!({
         "last_synced_at_unix": now,
-        "registry_url": cfg.url,
-        "tools_count": written_count,
+        "registry_url": redacted_url,
+        "tools_count": manifest.tools.len(),
+        "tools_removed": removed_count,
         "signature_verified": signature_verified,
+        "duration_ms": duration_ms,
     });
-    cache::write_meta(&meta.to_string())?;
+    let meta_path = cache::cache_root()?.join("meta.json");
+    cache::write_atomic(&meta_path, meta_payload.to_string().as_bytes())?;
+
+    emit(|| {
+        tracing::info!(
+            event = "registry.sync.completed",
+            registry_url = %redacted_url,
+            tools_synced = manifest.tools.len(),
+            tools_removed = removed_count,
+            signature_verified = signature_verified,
+            duration_ms = duration_ms,
+        );
+    });
 
     Ok(SyncReport {
-        tools_synced: written_count,
+        tools_synced: manifest.tools.len(),
         tools_removed: removed_count,
         signature_verified,
-        registry_url: cfg.url.clone(),
+        registry_url: redacted_url,
+        duration_ms,
     })
 }
 
-/// Hex-encode the sha256 of a byte slice. Lowercase to match the
-/// manifest invariant.
-fn sha256_hex(bytes: &[u8]) -> String {
+/// Bounded HTTPS fetch + structured tracing event around each call.
+fn fetch_with_event(
+    url: &str,
+    max_bytes: u64,
+    redacted_registry: &str,
+) -> Result<Vec<u8>, SyncError> {
+    emit(|| {
+        tracing::debug!(
+            event = "registry.fetch.start",
+            url = %url,
+            max_bytes = max_bytes,
+        );
+    });
+    match fetch::fetch_bounded(url, max_bytes) {
+        Ok(bytes) => {
+            emit(|| {
+                tracing::debug!(
+                    event = "registry.fetch.completed",
+                    url = %url,
+                    bytes = bytes.len() as u64,
+                );
+            });
+            Ok(bytes)
+        }
+        Err(e) => {
+            emit(|| {
+                tracing::warn!(
+                    event = "registry.fetch.failed",
+                    url = %url,
+                    registry_url = %redacted_registry,
+                    error = %e,
+                );
+            });
+            Err(SyncError::Fetch(e))
+        }
+    }
+}
+
+/// Hex-encode the sha256 of a byte slice into a pre-allocated `String`.
+/// Caller is responsible for clearing the buffer between iterations.
+/// Single allocation per call (the buffer's existing capacity) — replaces
+/// the per-byte `format!`-into-`collect` shape which allocated 32 short
+/// strings + a final concat per tool.
+fn sha256_hex_into(bytes: &[u8], out: &mut String) {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(bytes);
-    let out = h.finalize();
-    out.iter().map(|b| format!("{:02x}", b)).collect()
-}
-
-/// Thin wrapper around `verify_sigstore_signature` that lets us swap
-/// the identity-regexp + issuer instead of relying on the update-path's
-/// hardcoded Jarvy-release identity.
-fn verify_with_identity(
-    manifest_path: &std::path::Path,
-    identity_regexp: &str,
-    oidc_issuer: &str,
-) -> Result<SignatureOutcome, VerifyError> {
-    // Reuse the public cosign helpers from src/update/signature.rs but
-    // call cosign with explicit identity/issuer flags. Mirrors the
-    // pattern the update installer uses; just identity-pinned to the
-    // registry repo instead of the Jarvy release workflow.
-    use std::process::Command;
-
-    let sig_path = manifest_path.with_extension("json.sig");
-    let pem_path = manifest_path.with_extension("json.pem");
-
-    if !sig_path.exists() || !pem_path.exists() {
-        return Ok(SignatureOutcome::SignatureFilesMissing);
-    }
-
-    if Command::new("cosign").arg("version").output().is_err() {
-        return Ok(SignatureOutcome::CosignMissing);
-    }
-
-    let output = Command::new("cosign")
-        .arg("verify-blob")
-        .arg("--signature")
-        .arg(&sig_path)
-        .arg("--certificate")
-        .arg(&pem_path)
-        .arg("--certificate-identity-regexp")
-        .arg(identity_regexp)
-        .arg("--certificate-oidc-issuer")
-        .arg(oidc_issuer)
-        .arg(manifest_path)
-        .output()
-        .map_err(VerifyError::Io)?;
-
-    if output.status.success() {
-        Ok(SignatureOutcome::Verified)
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        Ok(SignatureOutcome::Rejected(stderr))
+    let digest = h.finalize();
+    for b in digest.iter() {
+        write!(out, "{b:02x}").expect("write to String never fails");
     }
 }
 
@@ -236,20 +363,31 @@ fn verify_with_identity(
 /// count removals (manifest dropped these between syncs).
 fn list_cached_tool_files() -> Result<Vec<String>, CacheError> {
     let dir = cache::tools_dir()?;
-    let mut out = Vec::new();
-    if dir.exists() {
-        for entry in std::fs::read_dir(&dir)? {
-            let entry = entry?;
-            if entry.file_type()?.is_file() {
-                if let Some(name) = entry.file_name().to_str() {
-                    if name.ends_with(".toml") {
-                        out.push(name.to_string());
-                    }
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::with_capacity(64);
+    for entry in std::fs::read_dir(&dir)? {
+        let entry = entry?;
+        if entry.file_type()?.is_file() {
+            if let Some(name) = entry.file_name().to_str() {
+                if name.ends_with(".toml") {
+                    out.push(name.to_string());
                 }
             }
         }
     }
     Ok(out)
+}
+
+/// Tracing-emit helper. Gates every event on the global telemetry gate
+/// per CLAUDE.md (the same contract `packages.*` events follow). When
+/// telemetry is disabled at the user-config layer, registry events
+/// don't leak to OTLP.
+fn emit<F: FnOnce()>(f: F) {
+    if crate::observability::telemetry_gate::is_enabled() {
+        f();
+    }
 }
 
 #[cfg(test)]
@@ -279,17 +417,40 @@ mod tests {
     }
 
     #[test]
-    fn sha256_hex_is_lowercase_64_chars() {
-        let sha = sha256_hex(b"abc");
-        assert_eq!(sha.len(), 64);
-        assert!(
-            sha.chars()
-                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
-        );
-        // Known sha256("abc")
+    fn run_sync_refuses_http_url() {
+        let cfg = RegistryConfig {
+            url: "http://example.com/r/".into(),
+            enabled: true,
+            ..Default::default()
+        };
+        let err = run_sync_with_config(&cfg).unwrap_err();
+        assert!(matches!(err, SyncError::UnsafeConfig(_)));
+    }
+
+    #[test]
+    fn run_sync_refuses_unanchored_identity_regex() {
+        let cfg = RegistryConfig {
+            url: "https://example.com/r/".into(),
+            enabled: true,
+            signature_identity_regexp: "github.com/x/.*".into(),
+            ..Default::default()
+        };
+        let err = run_sync_with_config(&cfg).unwrap_err();
+        assert!(matches!(err, SyncError::UnsafeConfig(_)));
+    }
+
+    #[test]
+    fn sha256_hex_into_known_value() {
+        let mut buf = String::with_capacity(64);
+        sha256_hex_into(b"abc", &mut buf);
         assert_eq!(
-            sha,
+            buf,
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(buf.len(), 64);
+        assert!(
+            buf.chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
         );
     }
 }

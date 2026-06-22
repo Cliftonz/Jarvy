@@ -6,10 +6,15 @@
 use serde::{Deserialize, Serialize};
 
 /// Default Sigstore identity-regexp expected on the manifest signature.
-/// Points at the canonical `bearbinary/jarvy-tools` repo. Self-hosted
-/// registries override this in the user's config.
-pub const DEFAULT_IDENTITY_REGEXP: &str =
-    r"^https://github\.com/bearbinary/jarvy-tools/\.github/workflows/.*\.yml@refs/heads/main$";
+/// Pins to a SPECIFIC workflow (`sign-manifest.yml`) on a SPECIFIC ref
+/// (`refs/heads/main`) of the canonical `bearbinary/jarvy-tools` repo —
+/// not `.*\.yml` as in earlier drafts. A `.*` pattern would let any
+/// workflow on the canonical repo's main branch (ci-helper.yml,
+/// dependabot scripts, etc.) sign a hostile manifest using the repo's
+/// OIDC token, which is a weaker control than the cross-repo branch
+/// protection on `main` alone. Self-hosted registries override this to
+/// pin to their own org/repo + workflow file.
+pub const DEFAULT_IDENTITY_REGEXP: &str = r"^https://github\.com/bearbinary/jarvy-tools/\.github/workflows/sign-manifest\.yml@refs/heads/main$";
 
 /// Default OIDC issuer for the GitHub Actions OIDC provider.
 pub const DEFAULT_OIDC_ISSUER: &str = "https://token.actions.githubusercontent.com";
@@ -74,6 +79,10 @@ impl Default for RegistryConfig {
 impl RegistryConfig {
     /// Read the `[registry]` section from `~/.jarvy/config.toml`. Returns
     /// `None` if the file or section is absent.
+    ///
+    /// Project-level `jarvy.toml` is intentionally NOT consulted — a
+    /// hostile project config must not be able to subscribe the runtime
+    /// to an attacker registry. Trust narrowing per CLAUDE.md.
     pub fn load() -> Option<Self> {
         let path = crate::paths::config_toml().ok()?;
         let content = std::fs::read_to_string(&path).ok()?;
@@ -89,6 +98,39 @@ impl RegistryConfig {
     /// True if the registry is configured AND opted in.
     pub fn is_active(&self) -> bool {
         self.enabled && !self.url.is_empty()
+    }
+
+    /// Reject a config whose URL or signing identity is shaped in a way
+    /// that would weaken signature verification. Called before any
+    /// network I/O. Returns `Err(reason)` if the config is unsafe.
+    ///
+    /// Specifically:
+    /// - URL must be `https://`. An `http://` typo would downgrade the
+    ///   transport silently; refuse at parse rather than at fetch time.
+    /// - `signature_identity_regexp` must start with `^` and end with
+    ///   `$` so a substring match (e.g. accidentally pasted unanchored
+    ///   snippet) can't accept attacker-controlled identities.
+    /// - `signature_oidc_issuer` must start with `https://`.
+    pub fn validate_safety(&self) -> Result<(), String> {
+        if !self.url.starts_with("https://") {
+            return Err(format!("registry.url must be https://, got {:?}", self.url));
+        }
+        if self.require_signature {
+            let r = &self.signature_identity_regexp;
+            if !r.starts_with('^') || !r.ends_with('$') {
+                return Err(format!(
+                    "registry.signature_identity_regexp must be fully anchored \
+                     (start with ^ and end with $); got {r:?}",
+                ));
+            }
+            if !self.signature_oidc_issuer.starts_with("https://") {
+                return Err(format!(
+                    "registry.signature_oidc_issuer must be https://, got {:?}",
+                    self.signature_oidc_issuer
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Manifest URL = `<base>/manifest.json`. Tolerates a trailing slash
