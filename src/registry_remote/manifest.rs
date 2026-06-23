@@ -22,6 +22,7 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use thiserror::Error;
 
 /// Current manifest schema version. Jarvy refuses to load a manifest
@@ -64,47 +65,157 @@ pub struct Manifest {
     pub tools: Vec<ToolEntry>,
 }
 
+/// Public manifest tool entry. Field validation runs during deserialize
+/// (single pass) via the `#[serde(try_from)]` adapter below; typed
+/// errors are recovered through the `LAST_VALIDATION_ERROR` thread-local
+/// sidechannel. Direct construction in test code goes through
+/// [`ToolEntry::for_test`] which skips validation.
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(try_from = "RawToolEntry")]
 pub struct ToolEntry {
     pub name: String,
     pub path: String,
     pub sha256: String,
 }
 
+/// Verbatim shape of a tool entry as it appears in the manifest JSON.
+/// Used only as a deserialize-target; the `TryFrom` impl below converts
+/// it to a validated `ToolEntry`.
+#[derive(Deserialize)]
+struct RawToolEntry {
+    name: String,
+    path: String,
+    sha256: String,
+}
+
+thread_local! {
+    /// Per-thread sidechannel for typed `ManifestError` values raised
+    /// during deserialization. Set by `TryFrom<RawToolEntry>`; drained
+    /// by `Manifest::parse` after `serde_json::from_str` returns.
+    ///
+    /// **Why this exists.** Serde's `try_from` attribute requires the
+    /// `TryFrom::Error` type to implement `Display`; serde then converts
+    /// it via `<D::Error as serde::de::Error>::custom(error)`, which
+    /// flattens the error into a string. There is no public API to
+    /// recover the original typed error from a `serde_json::Error` —
+    /// the variant is structurally erased. The sidechannel preserves
+    /// the typed variant so `Manifest::parse` can return the same
+    /// `ManifestError::InvalidName/Path/Sha256` shape it did before the
+    /// switch to single-pass validation. Per-thread by design — `parse`
+    /// is sync and runs on the calling thread, so each thread has its
+    /// own cell and there's no cross-thread leak.
+    static LAST_VALIDATION_ERROR: RefCell<Option<ManifestError>> =
+        const { RefCell::new(None) };
+}
+
+fn stash_validation_error(e: ManifestError) -> String {
+    let msg = e.to_string();
+    LAST_VALIDATION_ERROR.with(|cell| {
+        // First-error-wins: if a prior entry already failed in this
+        // parse call, keep its error. Matches the pre-refactor
+        // "first invalid entry aborts" behavior.
+        let mut slot = cell.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(e);
+        }
+    });
+    msg
+}
+
+impl TryFrom<RawToolEntry> for ToolEntry {
+    /// `String` (which is `Display`) so serde can wrap us in
+    /// `D::Error::custom`. The typed error is in the thread-local cell.
+    type Error = String;
+
+    fn try_from(raw: RawToolEntry) -> Result<Self, Self::Error> {
+        if let Err(e) = validate_name(&raw.name) {
+            return Err(stash_validation_error(e));
+        }
+        if let Err(e) = validate_path(&raw.name, &raw.path) {
+            return Err(stash_validation_error(e));
+        }
+        if let Err(e) = validate_sha256(&raw.name, &raw.sha256) {
+            return Err(stash_validation_error(e));
+        }
+        Ok(ToolEntry {
+            name: raw.name,
+            path: raw.path,
+            sha256: raw.sha256,
+        })
+    }
+}
+
+#[cfg(test)]
+impl ToolEntry {
+    /// Test-only direct constructor that skips validation. Used by
+    /// fixtures that already know the shape is valid.
+    #[allow(dead_code)]
+    pub(crate) fn for_test(name: &str, path: &str, sha256: &str) -> Self {
+        Self {
+            name: name.into(),
+            path: path.into(),
+            sha256: sha256.into(),
+        }
+    }
+}
+
 impl Manifest {
     /// Parse a manifest body. Validates schema version + every entry's
-    /// fields before returning — a manifest with one bad row is rejected
-    /// wholesale rather than letting partial registration leave the cache
-    /// in a half-trusted state.
+    /// fields in a single pass — entry validation runs inside
+    /// `TryFrom<RawToolEntry>` during deserialization, so a malformed
+    /// manifest bails on the first bad row without ever populating the
+    /// `tools` vec. A typed `ManifestError::InvalidName/Path/Sha256`
+    /// surfaces via the thread-local sidechannel; only a true JSON
+    /// shape error returns `ManifestError::Parse`.
     pub fn parse(body: &str) -> Result<Self, ManifestError> {
-        let manifest: Manifest = serde_json::from_str(body)?;
+        // Drain the sidechannel BEFORE the parse so any leftover from a
+        // panicked prior call doesn't bleed into this one.
+        LAST_VALIDATION_ERROR.with(|cell| {
+            cell.borrow_mut().take();
+        });
 
-        // schema_version == 0 is reserved (it's the default for any future
-        // sentinel like "draft/do-not-load"); refuse explicitly so the
-        // current SUPPORTED_SCHEMA_VERSION isn't accidentally compatible
-        // with a zero-valued draft manifest.
-        if manifest.schema_version == 0 {
-            return Err(ManifestError::UnsupportedSchema {
-                found: 0,
-                supported: SUPPORTED_SCHEMA_VERSION,
-                hint: "schema_version 0 is reserved; the registry must set a positive version",
-            });
-        }
-        if manifest.schema_version > SUPPORTED_SCHEMA_VERSION {
-            return Err(ManifestError::UnsupportedSchema {
-                found: manifest.schema_version,
-                supported: SUPPORTED_SCHEMA_VERSION,
-                hint: "upgrade jarvy to use this registry",
-            });
-        }
+        let result = serde_json::from_str::<Manifest>(body);
 
-        for entry in &manifest.tools {
-            validate_name(&entry.name)?;
-            validate_path(&entry.name, &entry.path)?;
-            validate_sha256(&entry.name, &entry.sha256)?;
-        }
+        // If the parse failed, prefer a stashed typed error over the
+        // opaque `serde_json::Error`. The `take()` clears the cell so
+        // subsequent calls start clean.
+        match result {
+            Ok(manifest) => {
+                // Defensive: a successful parse with no typed error
+                // should never have left anything in the cell, but
+                // clear it anyway.
+                LAST_VALIDATION_ERROR.with(|cell| {
+                    cell.borrow_mut().take();
+                });
 
-        Ok(manifest)
+                // schema_version == 0 is reserved (sentinel for any
+                // future "draft / do-not-load"); refuse explicitly so
+                // the current SUPPORTED_SCHEMA_VERSION isn't accidentally
+                // compatible with a zero-valued draft manifest.
+                if manifest.schema_version == 0 {
+                    return Err(ManifestError::UnsupportedSchema {
+                        found: 0,
+                        supported: SUPPORTED_SCHEMA_VERSION,
+                        hint: "schema_version 0 is reserved; the registry must set a positive version",
+                    });
+                }
+                if manifest.schema_version > SUPPORTED_SCHEMA_VERSION {
+                    return Err(ManifestError::UnsupportedSchema {
+                        found: manifest.schema_version,
+                        supported: SUPPORTED_SCHEMA_VERSION,
+                        hint: "upgrade jarvy to use this registry",
+                    });
+                }
+                Ok(manifest)
+            }
+            Err(serde_err) => {
+                if let Some(typed) = LAST_VALIDATION_ERROR.with(|cell| cell.borrow_mut().take()) {
+                    Err(typed)
+                } else {
+                    Err(ManifestError::Parse(serde_err))
+                }
+            }
+        }
     }
 }
 
@@ -336,5 +447,84 @@ mod tests {
         );
         let m = Manifest::parse(&body).expect("no length cap on tool name today");
         assert_eq!(m.tools[0].name.len(), 2048);
+    }
+
+    /// Sidechannel regression: after a parse that failed via the
+    /// typed-error path, the thread-local must be drained so the next
+    /// parse starts clean. Without the drain, a stale error from the
+    /// previous call would surface in place of a fresh `Parse` error.
+    #[test]
+    fn sidechannel_drains_between_calls() {
+        // First call: validation failure stashes a typed error.
+        let bad = format!(
+            r#"{{"schema_version": 1, "tools": [{{"name": "f", "path": "../boom.toml", "sha256": "{}"}}]}}"#,
+            valid_sha()
+        );
+        let err = Manifest::parse(&bad).unwrap_err();
+        assert!(matches!(err, ManifestError::InvalidPath { .. }));
+
+        // Second call: valid body must parse cleanly. If the cell
+        // weren't drained, the prior error would resurface (because
+        // serde succeeds and the cell holds a stale value).
+        let good = format!(
+            r#"{{"schema_version": 1, "tools": [{{"name": "g", "path": "tools/g.toml", "sha256": "{}"}}]}}"#,
+            valid_sha()
+        );
+        let m = Manifest::parse(&good).expect("valid body parses despite prior failure");
+        assert_eq!(m.tools.len(), 1);
+        assert_eq!(m.tools[0].name, "g");
+
+        // Third call: a JSON shape error (not a validator failure)
+        // surfaces as `Parse`, not as any stale typed error.
+        let shape_err = Manifest::parse("not json at all").unwrap_err();
+        assert!(
+            matches!(shape_err, ManifestError::Parse(_)),
+            "JSON shape error must come through Parse; got {shape_err:?}"
+        );
+    }
+
+    /// First-error-wins. A manifest with two invalid entries surfaces
+    /// the first one's typed variant. Serde stops on the first failure,
+    /// so only the first stash survives.
+    #[test]
+    fn first_invalid_entry_wins() {
+        let body = format!(
+            r#"{{"schema_version": 1, "tools": [
+              {{"name": "ok", "path": "tools/ok.toml", "sha256": "{}"}},
+              {{"name": "bad-path", "path": "/abs.toml", "sha256": "{}"}},
+              {{"name": "Bad/Name", "path": "tools/x.toml", "sha256": "{}"}}
+            ]}}"#,
+            valid_sha(),
+            valid_sha(),
+            valid_sha()
+        );
+        let err = Manifest::parse(&body).unwrap_err();
+        // Second entry fails first (absolute path); the third entry's
+        // invalid name never gets a chance to be stashed.
+        assert!(
+            matches!(err, ManifestError::InvalidPath { ref name, .. } if name == "bad-path"),
+            "expected InvalidPath on bad-path entry; got {err:?}"
+        );
+    }
+
+    /// Sidechannel is per-thread. A worker thread doing its own parse
+    /// must not see the foreground thread's stashed error.
+    #[test]
+    fn sidechannel_is_per_thread() {
+        let foreground_bad = format!(
+            r#"{{"schema_version": 1, "tools": [{{"name": "f", "path": "/abs.toml", "sha256": "{}"}}]}}"#,
+            valid_sha()
+        );
+        let foreground_err = Manifest::parse(&foreground_bad).unwrap_err();
+        assert!(matches!(foreground_err, ManifestError::InvalidPath { .. }));
+
+        let good = format!(
+            r#"{{"schema_version": 1, "tools": [{{"name": "g", "path": "tools/g.toml", "sha256": "{}"}}]}}"#,
+            valid_sha()
+        );
+        let handle = std::thread::spawn(move || Manifest::parse(&good));
+        let result = handle.join().expect("worker did not panic");
+        let manifest = result.expect("worker parse must succeed");
+        assert_eq!(manifest.tools.len(), 1);
     }
 }
