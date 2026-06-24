@@ -68,30 +68,31 @@ const TRUSTED_CA_BUNDLE_DIRS: &[&str] = &[
 /// any auto flow, so attacker-controlled bytes cannot land there
 /// without explicit user action.
 fn ca_bundle_path_is_trusted(path: &str) -> bool {
+    use std::path::{Path, PathBuf};
+
     if std::env::var("JARVY_ALLOW_CUSTOM_CA")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
         .unwrap_or(false)
     {
         return true;
     }
-    let canon = std::fs::canonicalize(path)
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| path.to_string());
+    let canon: PathBuf = std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
+    let canon_str = canon.to_string_lossy();
     if TRUSTED_CA_BUNDLE_DIRS
         .iter()
-        .any(|dir| canon.starts_with(dir))
+        .any(|dir| canon_str.starts_with(dir))
     {
         return true;
     }
     if let Ok(jarvy_dir) = crate::paths::jarvy_home() {
         let curated_ca_dir = jarvy_dir.join("ca");
-        if let Some(curated_str) = curated_ca_dir.to_str() {
-            // Require trailing `/` so `~/.jarvy/ca-attacker/` doesn't slip
-            // past with a `starts_with(~/.jarvy/ca)` check.
-            let prefix = format!("{curated_str}/");
-            if canon.starts_with(&prefix) || canon == curated_str {
-                return true;
-            }
+        // `Path::starts_with` is component-aware and cross-platform —
+        // rejects `~/.jarvy/ca-attacker/` (sibling-prefix attack) and
+        // honors backslash separators on Windows. Earlier
+        // `format!("{prefix}/")` shape was Unix-only and silently
+        // hard-failed every Windows tag-push CI run since v0.2.0-rc.1.
+        if Path::new(&canon).starts_with(&curated_ca_dir) {
+            return true;
         }
     }
     false

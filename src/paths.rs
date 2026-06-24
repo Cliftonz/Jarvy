@@ -185,13 +185,21 @@ mod tests {
         // Serialized via #[serial(jarvy_home_env)] so concurrent tests
         // (e.g., ticket::bundler::tests::test_bundler_new which reads
         // tickets_dir()) don't observe our temporarily-set JARVY_HOME.
+        //
+        // Use an OS-appropriate absolute path under the platform tempdir.
+        // `/tmp/jarvy-test-override` is NOT absolute on Windows (no drive
+        // letter), so `is_safe_jarvy_home` rejected it and the test
+        // hard-failed on every Windows tag-push CI run — silent tech debt
+        // since v0.2.0-rc.1. `std::env::temp_dir()` resolves correctly
+        // on every platform.
+        let override_path = std::env::temp_dir().join("jarvy-test-override");
         let prev = std::env::var("JARVY_HOME").ok();
         #[allow(unsafe_code)]
         unsafe {
-            std::env::set_var("JARVY_HOME", "/tmp/jarvy-test-override");
+            std::env::set_var("JARVY_HOME", &override_path);
         }
         let p = jarvy_home().unwrap();
-        assert_eq!(p, PathBuf::from("/tmp/jarvy-test-override"));
+        assert_eq!(p, override_path);
 
         // Cleanup.
         #[allow(unsafe_code)]
