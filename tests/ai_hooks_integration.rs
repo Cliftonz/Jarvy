@@ -512,7 +512,7 @@ fn concurrent_applies_against_same_settings_all_land() {
     // to the PID + nanos tempfile suffix in agents::io::tempfile_path.
     // Last writer wins on the final entry list, but neither call should
     // error and the final file must remain valid JSON.
-    let _guard = HomeGuard::new();
+    let guard = HomeGuard::new();
     let cfg_a = AiHooksConfig {
         agents: vec![AgentTarget::ClaudeCode],
         scope: HookScope::User,
@@ -533,8 +533,14 @@ fn concurrent_applies_against_same_settings_all_land() {
     assert!(r2.is_ok(), "concurrent apply B failed: {r2:?}");
 
     // Settings file is parseable JSON (no torn file from racing renames).
-    let home = dirs::home_dir().expect("home redirected by HomeGuard");
-    let body = std::fs::read_to_string(home.join(".claude").join("settings.json"))
+    //
+    // Read via `guard.path()` rather than `dirs::home_dir()`: on
+    // Windows the latter calls `SHGetKnownFolderPath(FOLDERID_Profile)`
+    // (Win32 API) which ignores env vars, so it returns the real user
+    // profile, not the HomeGuard tempdir. `ai_hooks::home_or_err`
+    // honors env vars on every platform, so the apply() calls above
+    // wrote inside `guard.path()`.
+    let body = std::fs::read_to_string(guard.path().join(".claude").join("settings.json"))
         .expect("settings file present");
     let parsed: serde_json::Value =
         serde_json::from_str(&body).expect("settings file must be valid JSON");
@@ -544,15 +550,30 @@ fn concurrent_applies_against_same_settings_all_land() {
 #[test]
 #[serial_test::serial(home_env)]
 fn home_guard_isolation_smoke() {
-    // Tripwire: confirm HomeGuard truly redirects per-thread. If a
-    // future refactor breaks isolation we want this to fail loudly
-    // before downstream tests start corrupting each other.
+    // Tripwire: confirm HomeGuard truly redirects the home resolution
+    // used by ai_hooks. If a future refactor breaks isolation we want
+    // this to fail loudly before downstream tests start corrupting
+    // each other.
+    //
+    // We assert via the env-var contract HomeGuard establishes, not
+    // via `dirs::home_dir()`, because on Windows `dirs::home_dir()`
+    // calls `SHGetKnownFolderPath(FOLDERID_Profile)` (Win32 API) and
+    // IGNORES env vars — so this used to silently fail on Windows
+    // tag-push CI. `ai_hooks::home_or_err` is the actual resolver
+    // the writers go through, and it honors env vars by design.
     let guard = HomeGuard::new();
-    let observed = dirs::home_dir().expect("home present");
+    #[cfg(windows)]
+    let observed = std::env::var_os("USERPROFILE")
+        .map(std::path::PathBuf::from)
+        .expect("HomeGuard must set USERPROFILE on Windows");
+    #[cfg(not(windows))]
+    let observed = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .expect("HomeGuard must set HOME on Unix");
     assert_eq!(
         observed,
         guard.path(),
-        "HomeGuard must redirect dirs::home_dir() for the current thread"
+        "HomeGuard must redirect the home-env-var the ai_hooks resolver consults"
     );
 }
 
