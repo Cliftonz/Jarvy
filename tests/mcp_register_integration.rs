@@ -335,7 +335,7 @@ fn per_agent_failure_does_not_abort_other_agents() {
 fn concurrent_applies_dont_corrupt_settings() {
     // Tempfile names include pid+nanos so concurrent writers don't race
     // on the same `.jarvy.tmp.` path. Final JSON must parse.
-    let _guard = HomeGuard::new();
+    let guard = HomeGuard::new();
     let cfg_a = McpRegisterConfig {
         agents: vec![McpAgentTarget::ClaudeCode],
         scope: McpRegistrationScope::User,
@@ -349,8 +349,13 @@ fn concurrent_applies_dont_corrupt_settings() {
     assert!(r1.is_ok(), "thread A failed: {r1:?}");
     assert!(r2.is_ok(), "thread B failed: {r2:?}");
 
-    let home = dirs::home_dir().expect("home redirected");
-    let body = fs::read_to_string(home.join(".claude.json")).expect("settings file present");
+    // Read via guard.path(), not dirs::home_dir() — on Windows the
+    // latter is Win32-API-based and ignores env vars, so it returns
+    // the real user profile while mcp_register writes into the
+    // env-var-resolved tempdir. Same shape as the parallel fix in
+    // tests/ai_hooks_integration.rs.
+    let body = fs::read_to_string(guard.path().join(".claude.json"))
+        .expect("settings file present");
     let parsed: serde_json::Value =
         serde_json::from_str(&body).expect("settings file must still parse");
     assert!(parsed.get("mcpServers").is_some());
@@ -494,16 +499,17 @@ fn agents_narrowing_restricts_custom_server() {
 #[test]
 #[serial_test::serial(home_env)]
 fn re_apply_after_drift_brings_settings_back_to_clean() {
-    let _guard = HomeGuard::new();
+    let guard = HomeGuard::new();
     let cfg = McpRegisterConfig {
         agents: vec![McpAgentTarget::ClaudeCode],
         scope: McpRegistrationScope::User,
         ..Default::default()
     };
     mcp_register::apply(&cfg).expect("first apply");
-    // Mutate on-disk file to simulate drift.
-    let home = dirs::home_dir().unwrap();
-    let path = home.join(".claude.json");
+    // Mutate on-disk file to simulate drift. Use guard.path() not
+    // dirs::home_dir() — Windows dirs::home_dir() ignores env vars
+    // (Win32 API) and would point at the real user profile.
+    let path = guard.path().join(".claude.json");
     fs::write(&path, b"{ \"hello\": \"world\" }").unwrap();
     // Re-apply restores jarvy entry without nuking the unrelated key.
     mcp_register::apply(&cfg).expect("second apply");
