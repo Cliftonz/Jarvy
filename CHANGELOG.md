@@ -27,6 +27,118 @@ for the full release process and
 [`docs/release-quirks-jarvy.md`](https://github.com/bearbinary/jarvy/blob/main/docs/release-quirks-jarvy.md)
 for divergences from generic release skills.
 
+## [v0.2.1] — Registry pull QA suite + sync.rs supply-chain fixes (2026-06-25)
+
+Patch release on the v0.2.x line. Dominantly defensive: a comprehensive
+end-to-end QA suite for the `jarvy registry sync` feature shipped in
+v0.2.0, plus the two real bugs that suite caught in the supply-chain
+verification path. Also closes Windows test-isolation tech debt that had
+been silently red on every tag-push CI run going back to v0.2.0-rc.1.
+Soaked as `v0.2.1-rc.1` → `-rc.8` over 2026-06-24 → 2026-06-25; soak
+record in [#39](https://github.com/bearbinary/Jarvy/issues/39).
+
+The two registry-sync bug fixes are the user-impacting items. Operators
+running `jarvy registry sync` against a cosign-signed manifest in v0.2.0
+were getting fail-CLOSED behavior that looked correct on the surface
+(verification rejected) but happened for the wrong reason (the sig/pem
+staging paths never matched what `cosign verify-blob` looked for), so
+the actual signature was never checked. The second fix closes a window
+where a malformed manifest body could be promoted to the canonical
+`manifest.json` path before validation rejected it — a subsequent
+`jarvy registry status` would then dump the invalid bytes verbatim.
+Both shipped silently in v0.2.0 because the original PR only had
+in-process tests of `run_sync_with_config`; the new e2e suite drives
+the real binary against a programmable mock registry + cosign shim and
+is what surfaced them.
+
+### Known limitation — bootstrap-mode gates carry forward
+
+Same status as v0.2.0: [#30](https://github.com/bearbinary/Jarvy/issues/30)
+is still open, so the Path 2/3/4 (upgrade / skip-version / rollback) CI
+gate still runs in bootstrap mode. No regression vs v0.2.0; the gap
+closes when tarballs ship.
+
+### Added
+
+- **Comprehensive registry-pull QA suite** (~1900 LOC across 4 new test
+  files). End-to-end lifecycle (configure → sync → status → clear),
+  cosign signature path with a FakeCosign shim, resilience (oversized
+  manifest, truncated body, HTTP 500, parallel-fetch stress, recovery
+  after prior failed sync, duplicate names, invalid UTF-8, unparseable
+  TOML), and tracing-event regression guards that pin
+  `registry.sync.{started,completed,sha_mismatch,signature_disabled,failed}`
+  by name + level + field shape against the documented OTEL taxonomy.
+  Replaces the prior in-process-only coverage that missed the
+  staging-path bug.
+
+### Fixed
+
+- **Registry `cosign verify-blob` actually verifies now.** Prior to this
+  release, `verify_sigstore_signature_with_identity` looked for
+  `manifest.json.unverified.{sig,pem}` as siblings of the staged
+  manifest, but the orchestrator wrote them at
+  `manifest.json.{sig,pem}.unverified`. Cosign returned
+  `SignatureFilesMissing` on every invocation, which `signature_outcome_is_acceptable`
+  correctly rejected — so the failure mode was fail-CLOSED ("sync
+  refused") rather than silent-bypass, but no signature was ever
+  actually checked. Staging now uses the path shape cosign's extension
+  derivation expects.
+- **Malformed manifest bodies no longer poison the cache.** Previously,
+  `sync.rs` wrote `manifest.json.unverified` to disk and then promoted
+  to the canonical `manifest.json` BEFORE parsing the bytes. A non-UTF-8
+  or syntactically invalid manifest would error out of sync but leave
+  the canonical file populated with the bad bytes, which
+  `jarvy registry status` then printed verbatim. Manifest is now parsed
+  in-memory before any disk write; promotion happens only after a
+  successful parse.
+- **Windows test-isolation tech debt cleared across the suite.** Eight
+  previously-silent Windows-only test failures (`paths::tests`,
+  `network::propagate::tests`, `update::installer::tests`, plus 12
+  `ai_hooks_integration` + 2 `mcp_register_integration` tests) had
+  been red on every tag-push CI run since v0.2.0-rc.1 because (a) test
+  helpers hard-coded `/tmp` paths that aren't absolute on Windows,
+  (b) `Path::starts_with` is component-aware but string-prefix checks
+  with `format!("{prefix}/")` weren't, (c) `dirs::home_dir()` on
+  Windows is Win32-API-backed and ignores HOME/USERPROFILE env vars
+  (so test sandboxes had no effect), and (d) `cosign` discovery only
+  knew about `.exe`, not `.cmd`/`.bat`. All fixed; the Test workflow
+  now runs Windows-green on every tag push. v0.2.0 stable shipped with
+  these failures as inherited sev-2.
+- **Test-mode bypass for `jarvy audit`.** `audit::run_one_scanner` now
+  honors `JARVY_FAST_TEST=1` (the documented test-mode contract for
+  "skip external command execution") and returns synthetic "not
+  available" results. The test for this code path went from 683s to
+  1.7s locally.
+
+### Changed
+
+- **Registry CLI + cache events now route through `telemetry_gate::emit`.**
+  Closes the opt-in contract for the `registry.*` event family — v0.2.0
+  leaked `registry.cli.sync_failed`, `registry.cache.swap_failed`, and
+  the `registry.cache.index_*` events to OTLP even when the user had
+  set `telemetry.enabled = false`. Matches the contract already
+  documented for the `package.*` event family.
+- **CI Test workflow on `cargo-nextest`.** Switched from `cargo test`
+  to `cargo nextest run --all-features --no-fail-fast`. Process-level
+  parallelism per test; the Windows lane went from ~14 min to ~3-4 min
+  warm-cache. Also dropped `--show-output` (Windows terminal I/O sink)
+  and `--verbose` from `cargo check`.
+- **CI actions on Node 24.** Bumped `actions/checkout` v4→v7,
+  `actions/upload-artifact` v4→v7.0.1, `actions/deploy-pages` v4→v5,
+  `softprops/action-gh-release` v2.2.1→v3.0.0,
+  `KSXGitHub/github-actions-deploy-aur` v2.7.2→v4.1.3. Clears the
+  Node 20 deprecation warnings the runner had been forcing through.
+
+### Tooling
+
+- **Cursor + JetBrains Toolbox Linux install support** ([#35](https://github.com/bearbinary/Jarvy/pull/35)).
+  Both were macOS+Windows only in v0.2.0; Linux now lands via tarball
+  fallback paths.
+- **9 networking tools** ([#36](https://github.com/bearbinary/Jarvy/pull/36)):
+  `cloudflared`, `headscale`, `nebula`, `netbird`, `openvpn`,
+  `tailscale`, `twingate`, `wireguard-tools`, `zerotier`. Covers VPN +
+  overlay-mesh stacks for both home-lab and corp deployments.
+
 ## [v0.2.0] — Tooling breadth, MCP surface, AI hooks, release-soak hardening (2026-06-22)
 
 First minor release in the v0.x line. Bigger than its predecessor — 32
@@ -1150,6 +1262,8 @@ and reserve room for 0.1.0 as the first feature-complete milestone.
 - Workspace lint configuration; Rust 2024 edition; MSRV 1.85
 
 [Unreleased]: https://github.com/bearbinary/jarvy/compare/v0.1.0...HEAD
+[v0.2.1]: https://github.com/bearbinary/jarvy/releases/tag/v0.2.1
+[v0.2.0]: https://github.com/bearbinary/jarvy/releases/tag/v0.2.0
 [v0.1.0]: https://github.com/bearbinary/jarvy/releases/tag/v0.1.0
 [v0.0.5]: https://github.com/bearbinary/jarvy/releases/tag/v0.0.5
 [v0.0.4]: https://github.com/bearbinary/jarvy/releases/tag/v0.0.4
