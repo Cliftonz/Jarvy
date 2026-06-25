@@ -1324,9 +1324,47 @@ fn run_ai_hooks_phase(config: &Config, dry_run: bool) {
 /// Apply `[mcp_register]` configuration: announce the Jarvy MCP server
 /// (and any opt-in custom servers) to each developer's AI agents so
 /// they can discover and call Jarvy's tools without manual setup.
+///
+/// Default-on: when `config.mcp_register` is absent, auto-detect which
+/// agents the user already has installed (via
+/// `crate::mcp_register::auto_detect_agents`) and synthesize a
+/// minimal opt-out config (built-in `jarvy` server only, user scope,
+/// no custom servers). Skip the auto-default in dry-run, test mode,
+/// unattended CI / AI sandboxes, and when the user has set
+/// `JARVY_MCP_REGISTER=0`. A one-line stderr disclosure surfaces the
+/// agents that landed so the developer sees what was written and how
+/// to opt out — same pattern as the telemetry default-on disclosure.
 fn run_mcp_register_phase(config: &Config, dry_run: bool) {
-    let Some(ref mcp_cfg) = config.mcp_register else {
-        return;
+    // Locally-owned config when we synthesize the default — keeps the
+    // `&McpRegisterConfig` borrow lifetime simple in both branches.
+    let synthesized: Option<crate::mcp_register::McpRegisterConfig> = if config
+        .mcp_register
+        .is_none()
+        && should_auto_register(dry_run)
+    {
+        let detected = crate::mcp_register::auto_detect_agents();
+        if detected.is_empty() {
+            None
+        } else {
+            let agents_label = detected
+                .iter()
+                .map(|a| a.slug())
+                .collect::<Vec<_>>()
+                .join(", ");
+            eprintln!(
+                "\nNote: registering Jarvy MCP server with detected AI agents: {agents_label}.\n      Disable: set JARVY_MCP_REGISTER=0, or add `[mcp_register] agents = []` to jarvy.toml.\n      Details: https://jarvy.dev/mcp-registration/"
+            );
+            crate::telemetry::mcp_register_auto_detected(&detected);
+            Some(crate::mcp_register::synthesize_auto_register(detected))
+        }
+    } else {
+        None
+    };
+
+    let mcp_cfg = match (config.mcp_register.as_ref(), synthesized.as_ref()) {
+        (Some(cfg), _) => cfg,
+        (None, Some(cfg)) => cfg,
+        (None, None) => return,
     };
     if mcp_cfg.is_empty() {
         return;
@@ -1410,6 +1448,39 @@ fn run_mcp_register_phase(config: &Config, dry_run: bool) {
             crate::telemetry::mcp_register_phase_completed(0, 0, 0, 0, 1, started.elapsed());
         }
     }
+}
+
+/// Decide whether to auto-register the Jarvy MCP server when the
+/// project's `jarvy.toml` has no `[mcp_register]` block. Skip in
+/// every "this isn't a developer doing setup" context: dry-run,
+/// `JARVY_TEST_MODE=1` (integration tests), `cfg(test)` (unit tests
+/// that drive the function directly), `JARVY_MCP_REGISTER=0` (user
+/// override), and seamless / auto-detected sandboxes (Codespaces,
+/// Claude Code, devcontainers — multi-tenant base images shouldn't
+/// silently write to `~/.cursor` etc.). Forced sandbox
+/// (`JARVY_SANDBOX=1` without auto-detection) is intentionally NOT
+/// in this gate so users on a real machine who set the env var for
+/// a single command don't get their MCP config silently changed,
+/// but a hostile dotfile-driven `JARVY_SANDBOX=1` also doesn't get
+/// to suppress an opt-out the user actually wanted — same
+/// `is_seamless_auto`-only posture as the telemetry CI auto-disable.
+fn should_auto_register(dry_run: bool) -> bool {
+    if dry_run {
+        return false;
+    }
+    if cfg!(test) {
+        return false;
+    }
+    if std::env::var("JARVY_TEST_MODE").as_deref() == Ok("1") {
+        return false;
+    }
+    if std::env::var("JARVY_MCP_REGISTER").as_deref() == Ok("0") {
+        return false;
+    }
+    if crate::sandbox::is_seamless_auto() {
+        return false;
+    }
+    true
 }
 
 /// Auto-start services (`docker compose` / `tilt`) if `[services]` is

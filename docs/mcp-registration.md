@@ -7,7 +7,12 @@ description: "Auto-register the Jarvy MCP server (and optional custom servers) w
 
 Jarvy already ships a Model Context Protocol server (`jarvy mcp`, see [the MCP server guide](mcp-server.md)). The problem: a terminal AI agent like Claude Code or Cursor won't *invoke* that server unless someone has told it to. Telling every developer to hand-edit `~/.claude.json` or `~/.cursor/mcp.json` to add the right `mcpServers` entry doesn't scale.
 
-The `[mcp_register]` block in `jarvy.toml` solves the discovery problem. After `jarvy setup`, every targeted agent has a `jarvy` entry in its MCP config file pointing at this binary's `mcp` subcommand over stdio. From the agent's perspective: a new MCP server appears alongside whatever the developer had configured before.
+`jarvy setup` solves this two ways:
+
+1. **Default-on auto-detect** (no config needed). When a project's `jarvy.toml` has no `[mcp_register]` block, Jarvy detects which AI agents the user already has installed (by checking for `~/.claude.json`, `~/.cursor/`, `~/.codex/`, `~/.codeium/windsurf/`, `~/.continue/`) and synthesizes a user-scope registration for the built-in `jarvy` server. A one-line stderr disclosure surfaces the detected agents and the disable path. Skipped in CI, unattended sandboxes (Codespaces, Claude Code, devcontainers), dry-run, test mode, and when `JARVY_MCP_REGISTER=0` is set. Cline is excluded from auto-detect — its config lives in a VS Code globalStorage path that varies per OS / VS Code variant and false-positives on bare VS Code installs. Project-config opt-in remains the explicit path for Cline.
+2. **Explicit `[mcp_register]` block** (project- or user-scope, custom servers, agent allowlist). Use this when you want project-scope registration (commits a `.mcp.json` / `.cursor/mcp.json` / `.codex/config.toml` inside the repo) or you need fields beyond the default-on shape — extra MCP servers, a binary-path override for the `jarvy` server, Cline support, etc.
+
+After `jarvy setup`, every targeted agent has a `jarvy` entry in its MCP config file pointing at this binary's `mcp` subcommand over stdio. From the agent's perspective: a new MCP server appears alongside whatever the developer had configured before.
 
 Jarvy writes each registration to the **native MCP config file** of every agent you target:
 

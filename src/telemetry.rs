@@ -1576,6 +1576,26 @@ pub fn mcp_register_phase_started(agents: usize, servers_count: usize, scope: &s
     );
 }
 
+/// Record that `jarvy setup` synthesized a default `[mcp_register]`
+/// because the project's `jarvy.toml` had no block AND the user had
+/// at least one AI agent installed on disk. Emitted once per setup
+/// invocation that auto-registered. Counts + agent slugs let on-call
+/// graph "how many users are on the default opt-out path vs. an
+/// explicit project block" and which agents are most commonly
+/// auto-detected.
+pub fn mcp_register_auto_detected(detected: &[crate::mcp_register::McpAgentTarget]) {
+    if !is_enabled() {
+        return;
+    }
+    let slugs: Vec<&str> = detected.iter().map(|a| a.slug()).collect();
+    tracing::info!(
+        event = "mcp_register.auto_detected",
+        count = %detected.len(),
+        agents = %slugs.join(","),
+        platform = %env::consts::OS,
+    );
+}
+
 pub fn mcp_register_phase_completed(
     applied: usize,
     agents_touched: usize,

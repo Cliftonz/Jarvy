@@ -122,6 +122,7 @@ OTEL-based, **opt-out by default**. Config in `~/.jarvy/config.toml::[telemetry]
 | `ai_hook.windows_auto_translated` | Bash→PowerShell xlat | `agent`, `hook_name` |
 | `mcp_register.phase_started` / `mcp_register.phase_completed` | apply phase | `agents`, `applied`, `refused_local`, `refused_remote`, `failures`, `duration_ms` |
 | `mcp_register.agent_applied` / `mcp_register.agent_failed` | per agent | `agent_failed`: `error_type` only |
+| `mcp_register.auto_detected` | `jarvy setup` synthesizes a default `[mcp_register]` because the project had no block and at least one AI agent was detected on disk | `count`, `agents` (comma-joined slugs), `platform`. Does NOT fire when an explicit `[mcp_register]` block is present, in dry-run, in test mode, in seamless / CI sandboxes, or when `JARVY_MCP_REGISTER=0`. |
 | `registry.sync.started` / `registry.sync.completed` | `jarvy registry sync` lifecycle | `registry_url` (redacted), `require_signature`, `tools_synced`, `tools_removed`, `signature_verified`, `duration_ms` |
 | `registry.sync.failed` | preflight + per-stage error returns | `stage = "preflight" \| "manifest_parse" \| ...`, `reason` (when preflight), `error` |
 | `registry.sync.signature_refused` | cosign verification rejected | `registry_url`, `identity_regexp`, `oidc_issuer`, `reason` |

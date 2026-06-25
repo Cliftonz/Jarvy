@@ -123,3 +123,29 @@ RUST_BACKTRACE = "1"
 [env.config]
 generate_dotenv = false
 update_rc = false
+
+# =============================================================================
+# MCP Server Registration
+#
+# Auto-register the Jarvy MCP server (`jarvy mcp` over stdio) with each
+# contributor's terminal AI agent on `jarvy setup`. The server exposes
+# Jarvy's tools (list_tools, check_tool, install_tool, drift, roles,
+# templates, services, …) so an agent in this repo can reason about
+# and operate on the dev environment without manual config.
+#
+# scope = "project" writes a `.mcp.json` / `.cursor/mcp.json` /
+# `.codex/config.toml` inside this repo (committed alongside the rest
+# of the dev environment), so every clone gets the same MCP entry
+# automatically — no per-developer setup required. User-authored
+# entries in the same file are preserved via the
+# `_jarvy_managed_servers` tracking list.
+#
+# `allow_custom_servers = false` keeps the library posture: only the
+# built-in `jarvy` server registers. Remote-fetched configs would be
+# refused at the trust boundary either way (see
+# docs/mcp-registration.md).
+# =============================================================================
+[mcp_register]
+agents = ["claude-code", "cursor", "codex"]
+scope = "project"
+allow_custom_servers = false
