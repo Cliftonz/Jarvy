@@ -33,6 +33,9 @@ exclude = [
     "^https://github\\.com/.+/edit/",
     # The site's own canonical (it's a build artifact)
     "^https://docs\\.jarvy\\.dev",
+    # OpenSSF Scorecards site — intermittent connection failures from CI
+    # runners (DNS / TLS handshake flake). Link is real, just flaky.
+    "^https?://securityscorecards\\.dev",
 ]
 
 # Be patient with rate-limited domains.

@@ -47,6 +47,7 @@ Installers:
     InstallerLocale: en-US
     Scope: machine
     UpgradeBehavior: install
-    ProductCode: PRODUCTCODE_PLACEHOLDER
+    # ProductCode is populated by wingetcreate from the MSI at submission
+    # time. Do not hand-edit; leave omitted in this reference template.
 ManifestType: singleton
 ManifestVersion: 1.6.0
