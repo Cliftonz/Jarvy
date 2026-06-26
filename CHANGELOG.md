@@ -27,6 +27,77 @@ for the full release process and
 [`docs/release-quirks-jarvy.md`](https://github.com/Cliftonz/jarvy/blob/main/docs/release-quirks-jarvy.md)
 for divergences from generic release skills.
 
+## [v0.3.0] — Repo relocation to Cliftonz + MCP auto-register default-on (2026-06-26)
+
+First release under the new canonical home, `github.com/Cliftonz/Jarvy`.
+The repository was transferred from the `bearbinary` org; the old URL
+continues to auto-redirect for git and HTTP traffic, but signing and
+package metadata now point at the new owner. Existing users on v0.2.x
+do not need to re-clone — `git pull` will follow the redirect — but the
+cosign cert-identity baked into v0.3.0 is anchored to `Cliftonz/jarvy`
+and will reject artifacts signed under the old subject. There is no
+backwards-compatible overlap window; this is a clean cut.
+
+Bundled with the move: `[mcp_register]` now opts in by default when
+`jarvy setup` runs against a project with no explicit block, the
+`scripts/bootstrap.sh` one-command onboarding is now the canonical
+entry point for contributors, and two CI bugs that surfaced during the
+v0.2.2 publish (missing Linux tarballs for AUR/chocolatey, parent-vs-
+templates version gating) are fixed.
+
+### Changed — repository home
+
+- **Repository relocated to `github.com/Cliftonz/Jarvy`.** All in-tree
+  references — Cargo.toml `repository`, install scripts, package
+  manifests (Homebrew, AUR, RPM, Debian, winget, chocolatey, Helm),
+  documentation URLs, CODEOWNERS, FUNDING — rewritten in a single
+  sweep. Cosign cert-identity regex anchored to the new owner; releases
+  signed under `bearbinary/jarvy` will no longer verify. GitHub Pages
+  (`jarvy.dev`), crates.io ownership (`jarvy`, `jarvy-templates`), and
+  Actions secrets carried over via the transfer. CODEOWNERS team
+  syntax (`@bearbinary/maintainers`) collapsed to `@Cliftonz` since the
+  new home is a user account, not an org.
+
+### Added
+
+- **`[mcp_register]` default-on auto-register.** `jarvy setup` now
+  synthesizes a default `[mcp_register]` block when the project has no
+  explicit block and at least one supported AI agent (Claude Code,
+  Cursor, Codex, Windsurf, Cline, Continue) is detected on disk. The
+  built-in `jarvy` MCP server is registered against each detected agent
+  with project scope (this repo only), not user scope. Fires the
+  `mcp_register.auto_detected` telemetry event with `count`, `agents`,
+  `platform`. Suppressed in dry-run, test mode, seamless / CI sandboxes,
+  and when `JARVY_MCP_REGISTER=0`. Explicit blocks always win.
+
+### Fixed
+
+- **AUR and chocolatey downstream publish unblocked.** The v0.2.2
+  release workflow built macOS+Windows artifacts but skipped the Linux
+  tarballs that AUR `PKGBUILD-bin` and chocolatey's MSI bundler expect
+  (CPMR0041). The release matrix now produces
+  `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` tarballs
+  alongside the existing platforms, so the downstream publish step
+  finds its inputs.
+- **`jarvy-templates` publish gate now reads the templates crate's own
+  version.** Before this fix, the publish workflow keyed off the parent
+  `jarvy` crate's version, which meant a parent-only release would
+  attempt to re-publish a `jarvy-templates` version that already
+  existed on crates.io (and fail). The workflow now reads
+  `crates/jarvy-templates/Cargo.toml::version` and only publishes when
+  that specific version is new.
+
+### Docs
+
+- **`scripts/bootstrap.sh` is now the canonical one-command onboarding
+  path.** End-user repos integrating Jarvy should copy it into their
+  own `scripts/` so contributors run `./scripts/bootstrap.sh` to
+  install Jarvy (via `dist/scripts/install.sh`) and execute `jarvy
+  setup` against the repo-root `jarvy.toml`. Idempotent. Flags:
+  `--no-setup`, `--channel <stable|beta|nightly>`, passthrough args to
+  `jarvy setup`. Quickstart and contributor docs updated to surface
+  this over hand-rolled curl-pipe + `cargo install` snippets.
+
 ## [v0.2.2] — Opt-out telemetry default + P0 seamless-gate fix (2026-06-25)
 
 Patch release on the v0.2.x line, but a behavior-significant one: the
@@ -1363,6 +1434,7 @@ and reserve room for 0.1.0 as the first feature-complete milestone.
 - Workspace lint configuration; Rust 2024 edition; MSRV 1.85
 
 [Unreleased]: https://github.com/Cliftonz/jarvy/compare/v0.2.2...HEAD
+[v0.3.0]: https://github.com/Cliftonz/Jarvy/releases/tag/v0.3.0
 [v0.2.2]: https://github.com/Cliftonz/jarvy/releases/tag/v0.2.2
 [v0.2.1]: https://github.com/Cliftonz/jarvy/releases/tag/v0.2.1
 [v0.2.0]: https://github.com/Cliftonz/jarvy/releases/tag/v0.2.0
