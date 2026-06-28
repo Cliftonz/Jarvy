@@ -58,7 +58,7 @@ pub use manifest::{
 
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use thiserror::Error;
 
@@ -131,10 +131,18 @@ pub struct SyncReport {
     pub signature_verified: bool,
 }
 
+/// Entries stored in the process cache: (manifest URL, shared manifest).
+type CacheEntries = Vec<(String, Arc<Manifest>)>;
+
 /// Process-wide cache of fetched manifests, keyed by URL. Populated
 /// lazily on first `sync()` for each URL. Survives the process lifetime
 /// — no TTL — because the disk-cache layer handles staleness.
-static MANIFEST_CACHE: Mutex<Option<Vec<(String, Manifest)>>> = Mutex::new(None);
+///
+/// Each manifest is held behind `Arc<Manifest>` so the resolvers can
+/// snapshot the cache (cheap `Arc::clone` per entry), release the
+/// mutex, then walk items without contending the lock for the
+/// duration of the scan (perf P1, review item 20).
+static MANIFEST_CACHE: Mutex<Option<CacheEntries>> = Mutex::new(None);
 
 /// Fetch + cache the manifest at `source.url`. Returns a `SyncReport`
 /// describing what was synced. On network failure, falls back to the
@@ -253,15 +261,19 @@ pub fn sync(source: &LibrarySource) -> Result<SyncReport, LibraryError> {
         }
     };
 
-    // Populate the process cache.
-    let mut cache_guard = MANIFEST_CACHE.lock().unwrap_or_else(|p| p.into_inner());
-    let entries = cache_guard.get_or_insert_with(Vec::new);
-    if let Some(slot) = entries.iter_mut().find(|(u, _)| *u == source.url) {
-        slot.1 = manifest.clone();
-    } else {
-        entries.push((source.url.clone(), manifest.clone()));
+    // Populate the process cache. Wrap in Arc so resolvers can snapshot
+    // the cache cheaply (per perf P1, review item 20).
+    let manifest_arc = Arc::new(manifest);
+    {
+        let mut cache_guard = MANIFEST_CACHE.lock().unwrap_or_else(|p| p.into_inner());
+        let entries = cache_guard.get_or_insert_with(Vec::new);
+        if let Some(slot) = entries.iter_mut().find(|(u, _)| *u == source.url) {
+            slot.1 = Arc::clone(&manifest_arc);
+        } else {
+            entries.push((source.url.clone(), Arc::clone(&manifest_arc)));
+        }
     }
-    drop(cache_guard);
+    let manifest = manifest_arc;
 
     let mut ai_hook_count = 0;
     let mut mcp_server_count = 0;
@@ -380,50 +392,47 @@ fn canonicalize_manifest_url(url: &str) -> String {
 /// the built-in `crate::ai_hooks::LIBRARY` first so name collisions
 /// favor the canonical Jarvy-shipped entry.
 pub fn resolve_hook(name: &str) -> Option<LibraryHookItem> {
-    with_cache(|entries| {
-        for (_, manifest) in entries {
-            for item in &manifest.items {
-                if let LibraryItem::AiHook(h) = item {
-                    if h.name == name {
-                        return Some(h.clone());
-                    }
+    let snapshot = snapshot_manifests();
+    for manifest in &snapshot {
+        for item in &manifest.items {
+            if let LibraryItem::AiHook(h) = item {
+                if h.name == name {
+                    return Some(h.clone());
                 }
             }
         }
-        None
-    })
+    }
+    None
 }
 
 /// Look up an MCP server by name across every cached library.
 pub fn resolve_mcp_server(name: &str) -> Option<LibraryMcpItem> {
-    with_cache(|entries| {
-        for (_, manifest) in entries {
-            for item in &manifest.items {
-                if let LibraryItem::McpServer(s) = item {
-                    if s.name == name {
-                        return Some(s.clone());
-                    }
+    let snapshot = snapshot_manifests();
+    for manifest in &snapshot {
+        for item in &manifest.items {
+            if let LibraryItem::McpServer(s) = item {
+                if s.name == name {
+                    return Some(s.clone());
                 }
             }
         }
-        None
-    })
+    }
+    None
 }
 
 /// Look up a skill by name across every cached library.
 pub fn resolve_skill(name: &str) -> Option<LibrarySkillItem> {
-    with_cache(|entries| {
-        for (_, manifest) in entries {
-            for item in &manifest.items {
-                if let LibraryItem::Skill(s) = item {
-                    if s.name == name {
-                        return Some(s.clone());
-                    }
+    let snapshot = snapshot_manifests();
+    for manifest in &snapshot {
+        for item in &manifest.items {
+            if let LibraryItem::Skill(s) = item {
+                if s.name == name {
+                    return Some(s.clone());
                 }
             }
         }
-        None
-    })
+    }
+    None
 }
 
 /// Summary view of every cached library — used by `jarvy library list`.
@@ -438,29 +447,28 @@ pub struct CachedLibrary {
 
 #[allow(dead_code)] // Reserved for `jarvy library list` (PRD-054 phase 6)
 pub fn list_cached() -> Vec<CachedLibrary> {
-    with_cache(|entries| {
-        entries
-            .iter()
-            .map(|(url, m)| {
-                let mut ai = 0;
-                let mut mcp = 0;
-                let mut sk = 0;
-                for item in &m.items {
-                    match item {
-                        LibraryItem::AiHook(_) => ai += 1,
-                        LibraryItem::McpServer(_) => mcp += 1,
-                        LibraryItem::Skill(_) => sk += 1,
-                    }
+    let snapshot = snapshot_entries();
+    snapshot
+        .into_iter()
+        .map(|(url, m)| {
+            let mut ai = 0;
+            let mut mcp = 0;
+            let mut sk = 0;
+            for item in &m.items {
+                match item {
+                    LibraryItem::AiHook(_) => ai += 1,
+                    LibraryItem::McpServer(_) => mcp += 1,
+                    LibraryItem::Skill(_) => sk += 1,
                 }
-                CachedLibrary {
-                    url: url.clone(),
-                    publisher: m.publisher.clone(),
-                    description: m.description.clone(),
-                    item_counts: (ai, mcp, sk),
-                }
-            })
-            .collect()
-    })
+            }
+            CachedLibrary {
+                url,
+                publisher: m.publisher.clone(),
+                description: m.description.clone(),
+                item_counts: (ai, mcp, sk),
+            }
+        })
+        .collect()
 }
 
 /// Wipe the process cache. Used by tests and by `jarvy library clean`.
@@ -470,14 +478,27 @@ pub fn clear_cache() {
     *guard = None;
 }
 
-fn with_cache<T>(f: impl FnOnce(&[(String, Manifest)]) -> T) -> T
-where
-    T: Default,
-{
+/// Snapshot just the `Arc<Manifest>` handles, drop the lock, then let
+/// callers walk items without contending the mutex (perf P1, review
+/// item 20). Each entry is a cheap atomic refcount bump.
+fn snapshot_manifests() -> Vec<Arc<Manifest>> {
     let guard = MANIFEST_CACHE.lock().unwrap_or_else(|p| p.into_inner());
     match guard.as_deref() {
-        Some(entries) => f(entries),
-        None => T::default(),
+        Some(entries) => entries.iter().map(|(_, m)| Arc::clone(m)).collect(),
+        None => Vec::new(),
+    }
+}
+
+/// Snapshot including URLs — needed by `list_cached`. Pays one URL
+/// clone per entry plus the Arc bumps, then releases the lock.
+fn snapshot_entries() -> Vec<(String, Arc<Manifest>)> {
+    let guard = MANIFEST_CACHE.lock().unwrap_or_else(|p| p.into_inner());
+    match guard.as_deref() {
+        Some(entries) => entries
+            .iter()
+            .map(|(u, m)| (u.clone(), Arc::clone(m)))
+            .collect(),
+        None => Vec::new(),
     }
 }
 

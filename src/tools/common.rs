@@ -358,6 +358,37 @@ pub fn require_any<'a>(
     Err(InstallError::Prereq(remediation))
 }
 
+/// Process-wide cache of `<cmd> --version` stdout. Probing version is
+/// the second-largest fork source after `has()` because every tool's
+/// presence-check + every `cmd_satisfies` lookup re-forks `<cmd>
+/// --version`. For a 30-tool batch with several version requirements
+/// per cmd, that's another 30-60 forks. Cache the raw stdout once per
+/// command (perf P1, review item 21) and let `cmd_satisfies` reuse it.
+fn version_cache() -> &'static std::sync::RwLock<std::collections::HashMap<String, Option<String>>>
+{
+    static CACHE: std::sync::OnceLock<
+        std::sync::RwLock<std::collections::HashMap<String, Option<String>>>,
+    > = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()))
+}
+
+fn cmd_version_output(cmd: &str) -> Option<String> {
+    if let Ok(read) = version_cache().read() {
+        if let Some(hit) = read.get(cmd) {
+            return hit.clone();
+        }
+    }
+    let probed = Command::new(cmd)
+        .arg("--version")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+    if let Ok(mut write) = version_cache().write() {
+        write.insert(cmd.to_string(), probed.clone());
+    }
+    probed
+}
+
 /// Check if a command's version satisfies the given requirement.
 ///
 /// Uses proper semantic versioning comparison instead of substring matching.
@@ -368,11 +399,10 @@ pub fn require_any<'a>(
 /// - `">= 3.10"`: Minimum version
 /// - `">= 3.10, < 4.0"`: Range expression
 pub fn cmd_satisfies(cmd: &str, requirement: &str) -> bool {
-    if let Ok(out) = Command::new(cmd).arg("--version").output() {
-        let version_output = String::from_utf8_lossy(&out.stdout);
-        return super::version::version_satisfies(&version_output, requirement);
+    match cmd_version_output(cmd) {
+        Some(out) => super::version::version_satisfies(&out, requirement),
+        None => false,
     }
-    false
 }
 
 pub fn plan_sudo_attempts(use_sudo: Option<bool>, sudo_available: bool) -> Vec<bool> {
@@ -405,14 +435,7 @@ pub enum PackageManager {
 
 #[cfg(target_os = "linux")]
 pub fn detect_linux_pm() -> Option<PackageManager> {
-    use std::{fs, process::Command};
-    let has = |c| {
-        Command::new(c)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    };
+    use std::fs;
 
     // (Optional) use /etc/os-release to bias choices when you need vendor repos
     // ID / ID_LIKE fields are the standard signals.  [oai_citation:0‡Freedesktop](https://www.freedesktop.org/software/systemd/man/os-release.html?utm_source=chatgpt.com) [oai_citation:1‡Debian Manpages](https://manpages.debian.org/trixie/systemd/os-release.5.en.html?utm_source=chatgpt.com)
@@ -441,15 +464,6 @@ pub fn detect_linux_pm() -> Option<PackageManager> {
 
 #[cfg(target_os = "freebsd")]
 pub fn detect_bsd_pm() -> Option<PackageManager> {
-    use std::process::Command;
-    let has = |c| {
-        Command::new(c)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    };
-
     if has("pkg") {
         return Some(PackageManager::Pkg);
     }
