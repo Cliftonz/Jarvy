@@ -35,6 +35,23 @@ pub fn parse_source(url: &str) -> Result<SourceScheme, LibraryError> {
     if let Some(rest) = url.strip_prefix("git+https://") {
         return parse_git(&format!("https://{rest}"), url);
     }
+    if let Some(rest) = url.strip_prefix("git+file://") {
+        // Loopback-test-only bypass mirroring `fetch::insecure_loopback_allowed`.
+        // Production users have no way to enable this; integration + E2E
+        // tests opt in via JARVY_LIBRARY_ALLOW_INSECURE_GIT=1 plus a
+        // local repo path. Anything else is refused as a typo / hostile
+        // URL the same way `http://` is refused for manifests.
+        if std::env::var_os("JARVY_LIBRARY_ALLOW_INSECURE_GIT").is_none() {
+            return Err(LibraryError::Parse {
+                url: url.to_string(),
+                source: serde::de::Error::custom(
+                    "git+file:// is refused in production; \
+                     set JARVY_LIBRARY_ALLOW_INSECURE_GIT=1 for local tests only",
+                ),
+            });
+        }
+        return parse_git(&format!("file://{rest}"), url);
+    }
     if let Some(rest) = url.strip_prefix("github:") {
         // github:owner/repo@ref#subpath → https://github.com/owner/repo.git@ref#subpath
         let (path, suffix) = split_suffix(rest);
@@ -110,9 +127,13 @@ fn parse_git(https_url: &str, original_url: &str) -> Result<SourceScheme, Librar
         }
     };
 
-    // The repo half MUST still be an https:// URL after the @ trim.
-    // Anything else means the URL was malformed.
-    if !repo.starts_with("https://") {
+    // The repo half MUST still be an https:// URL after the @ trim
+    // — unless the loopback-test bypass is active, in which case
+    // file:// (pointing at a local repo) is also allowed.
+    let loopback_allowed = std::env::var_os("JARVY_LIBRARY_ALLOW_INSECURE_GIT").is_some();
+    let is_https = repo.starts_with("https://");
+    let is_local_file = loopback_allowed && repo.starts_with("file://");
+    if !is_https && !is_local_file {
         return Err(LibraryError::Parse {
             url: original_url.to_string(),
             source: serde::de::Error::custom("git source repo URL must be HTTPS"),
