@@ -7,7 +7,7 @@
 //! cannot reach for it because tests assert non-loopback URLs are
 //! refused even with the env var set.
 
-use std::io::Read;
+use crate::net::bounded_fetch::{BoundedFetchConfig, BoundedFetchErrorKind, bounded_fetch};
 use thiserror::Error;
 
 /// Manifest response cap. Larger than the tools-registry cap because a
@@ -37,74 +37,37 @@ pub enum FetchError {
     NonHttps(String),
 }
 
-/// Fetch a URL into a bounded byte buffer. Refuses non-HTTPS URLs
-/// unless the loopback-test bypass is active.
+/// Fetch a URL into a bounded byte buffer. Refuses non-HTTPS URLs unless
+/// the loopback-test bypass (env `JARVY_LIBRARY_ALLOW_INSECURE_FETCH` plus
+/// a loopback host) is active. Delegates to `net::bounded_fetch` so the
+/// HTTPS-only refusal, bounded-read, and loopback-parser logic stays in
+/// exactly one place (maint P1, review item 18).
 pub fn fetch_bounded(url: &str, max_bytes: u64) -> Result<Vec<u8>, FetchError> {
-    if !url.starts_with("https://") && !insecure_loopback_allowed(url) {
-        return Err(FetchError::NonHttps(
-            crate::network::redact_credentials(url).into_owned(),
-        ));
-    }
-
-    let agent = crate::net::agent::agent();
-    let response = agent
-        .get(url)
-        .header("User-Agent", crate::net::agent::USER_AGENT)
-        .call()
-        .map_err(|e| FetchError::Network {
-            url: crate::network::redact_credentials(url).into_owned(),
-            message: e.to_string(),
-        })?;
-
-    if response.status() != 200 {
-        return Err(FetchError::HttpStatus {
-            url: crate::network::redact_credentials(url).into_owned(),
-            status: response.status().as_u16(),
-        });
-    }
-
-    let mut body = response.into_body();
-    let reader = body.as_reader();
-    let mut limited = reader.take(max_bytes + 1);
-    let mut buf = Vec::with_capacity(8 * 1024);
-    limited
-        .read_to_end(&mut buf)
-        .map_err(|e| FetchError::Read {
-            url: crate::network::redact_credentials(url).into_owned(),
-            source: e,
-        })?;
-
-    if buf.len() as u64 > max_bytes {
-        return Err(FetchError::TooLarge {
-            url: crate::network::redact_credentials(url).into_owned(),
-            cap: max_bytes,
-        });
-    }
-
-    Ok(buf)
-}
-
-fn insecure_loopback_allowed(url: &str) -> bool {
-    if std::env::var_os("JARVY_LIBRARY_ALLOW_INSECURE_FETCH").is_none() {
-        return false;
-    }
-    is_plain_loopback_http(url)
-}
-
-fn is_plain_loopback_http(url: &str) -> bool {
-    let Some(after_scheme) = url.strip_prefix("http://") else {
-        return false;
+    let cfg = BoundedFetchConfig {
+        insecure_loopback_env: "JARVY_LIBRARY_ALLOW_INSECURE_FETCH",
     };
-    let authority_end = after_scheme
-        .find(['/', '?', '#'])
-        .unwrap_or(after_scheme.len());
-    let authority = &after_scheme[..authority_end];
-    if authority.contains('@') {
-        return false;
-    }
-    let host_end = authority.find(':').unwrap_or(authority.len());
-    let host = &authority[..host_end];
-    matches!(host, "127.0.0.1" | "localhost")
+    bounded_fetch(url, max_bytes, cfg).map_err(|kind| {
+        let redacted = crate::network::redact_credentials(url).into_owned();
+        match kind {
+            BoundedFetchErrorKind::NonHttps => FetchError::NonHttps(redacted),
+            BoundedFetchErrorKind::Network(message) => FetchError::Network {
+                url: redacted,
+                message,
+            },
+            BoundedFetchErrorKind::HttpStatus(status) => FetchError::HttpStatus {
+                url: redacted,
+                status,
+            },
+            BoundedFetchErrorKind::TooLarge => FetchError::TooLarge {
+                url: redacted,
+                cap: max_bytes,
+            },
+            BoundedFetchErrorKind::Read(source) => FetchError::Read {
+                url: redacted,
+                source,
+            },
+        }
+    })
 }
 
 #[cfg(test)]
@@ -121,19 +84,5 @@ mod tests {
     fn refuses_ftp_url() {
         let err = fetch_bounded("ftp://example.com/manifest.json", 1024).unwrap_err();
         assert!(matches!(err, FetchError::NonHttps(_)));
-    }
-
-    #[test]
-    fn loopback_parser_accepts_clean_loopback() {
-        assert!(is_plain_loopback_http("http://127.0.0.1:8080/x"));
-        assert!(is_plain_loopback_http("http://localhost:8080/x"));
-    }
-
-    #[test]
-    fn loopback_parser_refuses_userinfo_bypass() {
-        assert!(!is_plain_loopback_http(
-            "http://127.0.0.1:80@attacker.example/x"
-        ));
-        assert!(!is_plain_loopback_http("http://user@127.0.0.1:8080/x"));
     }
 }

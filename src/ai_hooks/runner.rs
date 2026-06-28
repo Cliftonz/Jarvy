@@ -168,25 +168,12 @@ struct Resolution<'cfg> {
 /// surface `UnknownLibraryHook` for any entry that depended on the
 /// failed library.
 fn prepare_library_sources(cfg: &AiHooksConfig) {
-    if cfg.library_sources.is_empty() {
-        return;
-    }
-    if let Err(e) = crate::library_registry::check_origin(cfg.origin, "ai_hooks") {
-        eprintln!(
-            "  Warning: ai_hooks library_sources refused: {e}. \
-             Move the URL into your local jarvy.toml or ~/.jarvy/config.toml."
-        );
-        return;
-    }
-    for source in &cfg.library_sources {
-        if let Err(e) = crate::library_registry::sync(source) {
-            eprintln!(
-                "  Warning: ai_hooks library_sources sync failed for {}: {e}. \
-                 Falling back to cached + built-in hooks.",
-                crate::network::redact_credentials(&source.url),
-            );
-        }
-    }
+    crate::library_registry::sync_all(
+        "ai_hooks",
+        "Falling back to cached + built-in hooks.",
+        &cfg.library_sources,
+        cfg.origin,
+    );
 }
 
 fn resolve<'cfg>(cfg: &'cfg AiHooksConfig) -> Result<Resolution<'cfg>, AiHookError> {

@@ -481,6 +481,49 @@ where
     }
 }
 
+/// Drive `check_origin` + per-source `sync` for every entry in a
+/// consumer's `library_sources`. Centralizes the three identical copies
+/// previously living in `ai_hooks::runner`, `mcp_register::runner`, and
+/// `commands::skills_cmd` (maint P1, review item 16). Per-source
+/// failures are logged but never fatal — downstream `resolve_*` calls
+/// will surface "unknown library item" for anything that depended on a
+/// failed sync.
+///
+/// `consumer` is the subsystem label (`"ai_hooks"`, `"mcp_register"`,
+/// `"skills"`). `fallback_hint` is the trailing clause appended to the
+/// per-source warning so each subsystem can describe its own fallback
+/// posture (e.g. "Falling back to cached + built-in hooks.").
+pub fn sync_all(
+    consumer: &'static str,
+    fallback_hint: &str,
+    sources: &[LibrarySource],
+    origin: crate::ai_hooks::ConfigOrigin,
+) {
+    if sources.is_empty() {
+        return;
+    }
+    if let Err(e) = check_origin(origin, consumer) {
+        eprintln!(
+            "  Warning: {consumer} library_sources refused: {e}. \
+             Move the URL into your local jarvy.toml or ~/.jarvy/config.toml."
+        );
+        return;
+    }
+    for source in sources {
+        if let Err(e) = sync(source) {
+            let url = crate::network::redact_credentials(&source.url);
+            if fallback_hint.is_empty() {
+                eprintln!("  Warning: {consumer} library_sources sync failed for {url}: {e}.");
+            } else {
+                eprintln!(
+                    "  Warning: {consumer} library_sources sync failed for {url}: {e}. \
+                     {fallback_hint}"
+                );
+            }
+        }
+    }
+}
+
 /// Refuse a `library_sources` declaration that came from a remote
 /// `jarvy.toml`. Used by every consumer at apply time.
 pub fn check_origin(

@@ -10,7 +10,7 @@
 //!   sig) has its own size cap. Defaults are generous but guard against
 //!   accidental DoS from a misbehaving registry.
 
-use std::io::Read;
+use crate::net::bounded_fetch::{BoundedFetchConfig, BoundedFetchErrorKind, bounded_fetch};
 use thiserror::Error;
 
 /// Manifest response cap. Registries with more than a few thousand tools
@@ -42,95 +42,37 @@ pub enum FetchError {
     NonHttps(String),
 }
 
-/// Fetch a URL into a bounded byte buffer. Refuses non-HTTPS URLs
-/// unless the loopback-test bypass is active (see
-/// [`insecure_loopback_allowed`]).
+/// Fetch a URL into a bounded byte buffer. Refuses non-HTTPS URLs unless
+/// the loopback-test bypass (env `JARVY_REGISTRY_ALLOW_INSECURE_FETCH`
+/// plus a loopback host) is active. Delegates to `net::bounded_fetch` so
+/// the HTTPS-only refusal, bounded-read, and loopback-parser logic stays
+/// in exactly one place (maint P1, review item 18).
 pub fn fetch_bounded(url: &str, max_bytes: u64) -> Result<Vec<u8>, FetchError> {
-    if !url.starts_with("https://") && !insecure_loopback_allowed(url) {
-        return Err(FetchError::NonHttps(
-            crate::network::redact_credentials(url).into_owned(),
-        ));
-    }
-
-    let agent = crate::net::agent::agent();
-    let response = agent
-        .get(url)
-        .header("User-Agent", crate::net::agent::USER_AGENT)
-        .call()
-        .map_err(|e| FetchError::Network {
-            url: crate::network::redact_credentials(url).into_owned(),
-            message: e.to_string(),
-        })?;
-
-    if response.status() != 200 {
-        return Err(FetchError::HttpStatus {
-            url: crate::network::redact_credentials(url).into_owned(),
-            status: response.status().as_u16(),
-        });
-    }
-
-    let mut body = response.into_body();
-    let reader = body.as_reader();
-    // Take(max_bytes + 1) so we can distinguish exact-fit from overflow.
-    let mut limited = reader.take(max_bytes + 1);
-    let mut buf = Vec::with_capacity(8 * 1024);
-    limited
-        .read_to_end(&mut buf)
-        .map_err(|e| FetchError::Read {
-            url: crate::network::redact_credentials(url).into_owned(),
-            source: e,
-        })?;
-
-    if buf.len() as u64 > max_bytes {
-        return Err(FetchError::TooLarge {
-            url: crate::network::redact_credentials(url).into_owned(),
-            cap: max_bytes,
-        });
-    }
-
-    Ok(buf)
-}
-
-/// Loopback-only escape hatch for integration tests. The CLI ships an
-/// HTTPS-only fetch policy because a typo in `[registry] url` would
-/// otherwise silently downgrade to plaintext. Spinning up a real TLS
-/// listener per test would be heavyweight, so tests opt in via env var
-/// AND restrict to 127.0.0.1 / localhost URLs. Production users have no
-/// way to set this — the env var has no other consumer and the URL
-/// guard means even with the env var set, only loopback fetches are
-/// allowed. Combined this is far weaker than a config flag (which would
-/// be parseable from `~/.jarvy/config.toml`) yet sufficient for the
-/// integration-test harness.
-fn insecure_loopback_allowed(url: &str) -> bool {
-    if std::env::var_os("JARVY_REGISTRY_ALLOW_INSECURE_FETCH").is_none() {
-        return false;
-    }
-    is_plain_loopback_http(url)
-}
-
-/// True iff `url` is `http://<loopback-host>[:port]/...` with NO
-/// `userinfo@` segment. Byte-prefix matching the serialized form is
-/// not enough: `http://127.0.0.1:80@attacker.example/` parses with
-/// `127.0.0.1:80` as USERINFO and `attacker.example` as host (RFC 3986).
-/// We parse the authority portion ourselves rather than pulling in the
-/// `url` crate just for this gate.
-fn is_plain_loopback_http(url: &str) -> bool {
-    let Some(after_scheme) = url.strip_prefix("http://") else {
-        return false;
+    let cfg = BoundedFetchConfig {
+        insecure_loopback_env: "JARVY_REGISTRY_ALLOW_INSECURE_FETCH",
     };
-    // The authority is everything before the first '/', '?' or '#'.
-    let authority_end = after_scheme
-        .find(['/', '?', '#'])
-        .unwrap_or(after_scheme.len());
-    let authority = &after_scheme[..authority_end];
-    // Reject any `@` in the authority — that's a userinfo segment.
-    if authority.contains('@') {
-        return false;
-    }
-    // The host is everything up to ':' (port) or end.
-    let host_end = authority.find(':').unwrap_or(authority.len());
-    let host = &authority[..host_end];
-    matches!(host, "127.0.0.1" | "localhost")
+    bounded_fetch(url, max_bytes, cfg).map_err(|kind| {
+        let redacted = crate::network::redact_credentials(url).into_owned();
+        match kind {
+            BoundedFetchErrorKind::NonHttps => FetchError::NonHttps(redacted),
+            BoundedFetchErrorKind::Network(message) => FetchError::Network {
+                url: redacted,
+                message,
+            },
+            BoundedFetchErrorKind::HttpStatus(status) => FetchError::HttpStatus {
+                url: redacted,
+                status,
+            },
+            BoundedFetchErrorKind::TooLarge => FetchError::TooLarge {
+                url: redacted,
+                cap: max_bytes,
+            },
+            BoundedFetchErrorKind::Read(source) => FetchError::Read {
+                url: redacted,
+                source,
+            },
+        }
+    })
 }
 
 #[cfg(test)]
@@ -207,22 +149,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn is_plain_loopback_http_accepts_clean_loopback() {
-        // Direct unit on the parser — no env dance.
-        assert!(is_plain_loopback_http("http://127.0.0.1:8080/x"));
-        assert!(is_plain_loopback_http("http://localhost:8080/x"));
-        assert!(is_plain_loopback_http("http://127.0.0.1/"));
-    }
-
-    #[test]
-    fn is_plain_loopback_http_refuses_userinfo() {
-        assert!(!is_plain_loopback_http(
-            "http://127.0.0.1:80@attacker.example/x"
-        ));
-        assert!(!is_plain_loopback_http("http://user@127.0.0.1:8080/x"));
-        assert!(!is_plain_loopback_http(
-            "http://localhost@attacker.example/x"
-        ));
-    }
+    // is_plain_loopback_http parser tests now live in
+    // `crate::net::bounded_fetch::tests` — the function moved there when
+    // the fetch loop was consolidated.
 }

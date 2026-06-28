@@ -3,6 +3,7 @@
 //! cross-cutting network helpers (URL allowlist, redirect callback, etc.).
 
 pub mod agent;
+pub mod bounded_fetch;
 pub mod url_encode;
 
 #[allow(unused_imports)]

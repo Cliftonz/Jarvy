@@ -8,11 +8,8 @@
 //! those belong in the project's `.csproj`/`Directory.Packages.props` and are
 //! restored by `dotnet restore` during build, not by `jarvy setup`.
 
-use super::common::{
-    PackageError, command_exists, run_package_command, validate_package_name,
-    validate_package_version,
-};
-use super::config::{NugetConfig, PackageSpec};
+use super::common::{PackageError, run_install_loop};
+use super::config::NugetConfig;
 
 /// Handler for .NET global tool installation
 pub struct NugetHandler {
@@ -25,143 +22,39 @@ impl NugetHandler {
         Self { config }
     }
 
-    /// Install all configured global tools
+    /// Install all configured global tools. Idempotent via `dotnet tool
+    /// update -g` (rather than `install -g` which errors when the tool
+    /// is already present).
     pub fn install(&self) -> Result<(), PackageError> {
-        if !command_exists("dotnet") {
-            return Err(PackageError::PackageManagerNotInstalled(
-                "dotnet".to_string(),
-            ));
-        }
-
-        if self.config.packages.is_empty() {
-            println!("    No NuGet global tools configured");
-            return Ok(());
-        }
-
-        // `dotnet tool update -g` is fully machine-global; cwd is
-        // semantically irrelevant. Resolve once at the top of the loop
-        // so we don't pay a getcwd(3) syscall + PathBuf allocation per
-        // tool — and so a deleted-cwd condition doesn't surface as a
-        // mid-loop install failure unrelated to the package itself.
-        let current_dir = std::env::current_dir().map_err(PackageError::Io)?;
-
-        for (name, spec) in &self.config.packages {
-            if spec.is_optional() {
-                continue;
-            }
-            if let Err(e) = self.install_tool(name, spec, &current_dir) {
-                tracing::warn!(
-                    event = "package.install_failed",
-                    ecosystem = "nuget",
-                    package = %name,
-                    error = %e,
-                );
-                eprintln!("    Warning: Failed to install {}: {}", name, e);
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Install a single .NET global tool. Treats already-installed as success
-    /// so re-runs are idempotent — `dotnet tool install -g` exits non-zero
-    /// when the tool is already present, but `dotnet tool update -g` is the
-    /// idempotent path we actually want.
-    fn install_tool(
-        &self,
-        name: &str,
-        spec: &PackageSpec,
-        working_dir: &std::path::Path,
-    ) -> Result<(), PackageError> {
-        validate_package_name(name, "[nuget]")?;
-        validate_package_version(spec.version(), "[nuget]")?;
-
-        println!("    Installing {}...", name);
-        // Emit per-package events through `tracing` directly, but only
-        // when the user has opted into telemetry. `observability::
-        // telemetry_gate` is populated by `telemetry::init` at startup
-        // and gives lib-side modules a way to honor the consent gate without
-        // reaching the bin-only `crate::telemetry::is_enabled()`. The
-        // gate prevents `package.*` events from leaking to a
-        // user-configured OTLP endpoint when `telemetry.enabled =
-        // false` — the prior round emitted unconditionally and broke
-        // the documented consent contract.
-        let telemetry_on = crate::observability::telemetry_gate::is_enabled();
-        if telemetry_on {
-            tracing::info!(
-                event = "package.requested",
-                ecosystem = "nuget",
-                package = %name,
-                version = %spec.version(),
-                source = "config",
-                platform = std::env::consts::OS,
-            );
-        }
-        let started = std::time::Instant::now();
-
-        let args = build_install_args(name, spec.version());
-        let _pkg_span = tracing::info_span!(
-            "package",
-            ecosystem = "nuget",
-            name = %name,
-            version = %spec.version(),
+        run_install_loop(
+            "nuget",
+            "dotnet",
+            "[nuget]",
+            "No NuGet global tools configured",
+            &self.config.packages,
+            |name, spec| Ok(build_install_args(name, spec.version())),
         )
-        .entered();
-        match run_package_command("dotnet", &args, working_dir) {
-            Ok(()) => {
-                if telemetry_on {
-                    tracing::info!(
-                        event = "package.installed",
-                        ecosystem = "nuget",
-                        package = %name,
-                        version = %spec.version(),
-                        source = "config",
-                        duration_ms = started.elapsed().as_millis() as u64,
-                        platform = std::env::consts::OS,
-                    );
-                }
-                Ok(())
-            }
-            Err(e) => {
-                // Demoted from `error!` to `warn!`: per-package
-                // failures are advisory (setup continues). The whole
-                // ecosystem failing is the actually-pager-worthy
-                // event and that one stays `error!` in `mod.rs`.
-                if telemetry_on {
-                    tracing::warn!(
-                        event = "package.failed",
-                        ecosystem = "nuget",
-                        package = %name,
-                        version = %spec.version(),
-                        source = "config",
-                        error_kind = e.kind(),
-                        error = %e,
-                        platform = std::env::consts::OS,
-                    );
-                }
-                Err(e)
-            }
-        }
     }
 }
 
-/// Build the argv passed to `dotnet`. Extracted so the contract — `tool
-/// update -g <name>` (idempotent — `install -g` errors when present, so
-/// we use `update` instead), with `--version <ver>` only when not
-/// "latest" — can be pinned by a unit test independently of subprocess
-/// dispatch.
-pub(crate) fn build_install_args<'a>(name: &'a str, version: &'a str) -> Vec<&'a str> {
-    let mut args: Vec<&str> = Vec::with_capacity(6);
-    args.extend_from_slice(&["tool", "update", "-g", name]);
+/// Build the argv passed to `dotnet`. Pinned by a unit test below so
+/// the `tool update -g` (idempotent) shape can't silently regress.
+pub(crate) fn build_install_args(name: &str, version: &str) -> Vec<String> {
+    let mut args: Vec<String> = Vec::with_capacity(6);
+    args.push("tool".into());
+    args.push("update".into());
+    args.push("-g".into());
+    args.push(name.into());
     if version != "latest" {
-        args.push("--version");
-        args.push(version);
+        args.push("--version".into());
+        args.push(version.into());
     }
     args
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::config::PackageSpec;
     use super::*;
     use std::collections::HashMap;
 
@@ -220,8 +113,12 @@ mod tests {
         ];
         for (name, version, expected) in cases {
             let actual = build_install_args(name, version);
-            assert_eq!(actual, expected, "argv mismatch for {} = {}", name, version);
-            // Invariants the argv must always satisfy
+            let actual_refs: Vec<&str> = actual.iter().map(String::as_str).collect();
+            assert_eq!(
+                actual_refs, expected,
+                "argv mismatch for {} = {}",
+                name, version
+            );
             assert_eq!(actual[0], "tool", "first arg must be `tool`");
             assert_eq!(actual[1], "update", "must use `update` for idempotency");
             assert_eq!(actual[2], "-g", "must be global install");
@@ -229,37 +126,12 @@ mod tests {
         }
     }
 
-    /// `NugetHandler::install` must reject a flag-like name via the
-    /// shared validator BEFORE it reaches `dotnet`. Tests the error
-    /// variant explicitly, not the tautology that `Result` is a result.
+    /// Flag-like nuget tool names must be refused before they hit
+    /// `dotnet`. Wiring assertion only; full coverage in `common::tests`.
     #[test]
     fn nuget_rejects_flag_like_tool_names() {
-        // Build the args directly so we exercise the validator in
-        // `install_tool` without depending on whether `dotnet` is
-        // installed on the test host.
-        let mut packages = HashMap::new();
-        packages.insert(
-            "--source".to_string(),
-            PackageSpec::Version("latest".to_string()),
-        );
-        let config = NugetConfig { packages };
-        let handler = NugetHandler::new(config);
-        // If dotnet is not on PATH, the outer guard fires first
-        // (PackageManagerNotInstalled). Otherwise the per-tool
-        // validation rejects with RefusedUnsafeSpec. Both prove the
-        // attack surface is closed.
-        let result = handler.install();
-        match &result {
-            Ok(()) | Err(PackageError::PackageManagerNotInstalled(_)) => {
-                // Outer guard fired (no dotnet on PATH). The per-tool
-                // path is tested directly below.
-            }
-            Err(other) => panic!("unexpected outer error: {other:?}"),
-        }
-        // Per-tool guard, exercised directly:
-        let spec = PackageSpec::Version("latest".to_string());
-        let err = handler
-            .install_tool("--source", &spec, std::path::Path::new("."))
+        use super::super::common::validate_package_name;
+        let err = validate_package_name("--source", "[nuget]")
             .expect_err("flag-like name must be refused");
         assert!(
             matches!(err, PackageError::RefusedUnsafeSpec(_, _)),

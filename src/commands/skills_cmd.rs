@@ -155,22 +155,5 @@ fn resolve_target_agents(cfg: &SkillsConfig) -> Vec<SkillAgent> {
 }
 
 fn prepare_library_sources(cfg: &SkillsConfig) {
-    if cfg.library_sources.is_empty() {
-        return;
-    }
-    if let Err(e) = crate::library_registry::check_origin(cfg.origin, "skills") {
-        eprintln!(
-            "  Warning: skills library_sources refused: {e}. \
-             Move the URL into your local jarvy.toml or ~/.jarvy/config.toml."
-        );
-        return;
-    }
-    for source in &cfg.library_sources {
-        if let Err(e) = crate::library_registry::sync(source) {
-            eprintln!(
-                "  Warning: skills library_sources sync failed for {}: {e}.",
-                crate::network::redact_credentials(&source.url),
-            );
-        }
-    }
+    crate::library_registry::sync_all("skills", "", &cfg.library_sources, cfg.origin);
 }

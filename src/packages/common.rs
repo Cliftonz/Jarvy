@@ -377,6 +377,141 @@ pub fn command_exists(cmd: &str) -> bool {
     crate::tools::common::has(cmd)
 }
 
+/// Run the per-package install loop shared by `gem`, `go`, `cargo`,
+/// and `nuget` handlers (maint P1, review item 17). Validates the
+/// package manager is on PATH, short-circuits on empty config,
+/// resolves cwd once, then iterates each entry: validate name +
+/// version, emit `package.requested`, build argv via `build_args`,
+/// run, emit `package.installed` / `package.failed`.
+///
+/// `purpose` is the validator label (e.g. `"[gem]"`); `ecosystem` is
+/// the telemetry tag (e.g. `"gem"`); `empty_msg` is printed when the
+/// config has no packages.
+///
+/// `build_args` returns the owned `Vec<String>` so each handler can
+/// stitch ecosystem-specific argv (cargo's `--features`, go's
+/// `name@version` module spec) without lifetime contortions. The
+/// per-call allocation is negligible next to spawning a subprocess.
+pub fn run_install_loop<F>(
+    ecosystem: &'static str,
+    command: &'static str,
+    purpose: &'static str,
+    empty_msg: &str,
+    packages: &std::collections::HashMap<String, super::config::PackageSpec>,
+    mut build_args: F,
+) -> Result<(), PackageError>
+where
+    F: FnMut(&str, &super::config::PackageSpec) -> Result<Vec<String>, PackageError>,
+{
+    if !command_exists(command) {
+        return Err(PackageError::PackageManagerNotInstalled(
+            command.to_string(),
+        ));
+    }
+    if packages.is_empty() {
+        println!("    {empty_msg}");
+        return Ok(());
+    }
+
+    let current_dir = std::env::current_dir().map_err(PackageError::Io)?;
+
+    for (name, spec) in packages {
+        if spec.is_optional() {
+            continue;
+        }
+        if let Err(e) = install_one(
+            ecosystem,
+            command,
+            purpose,
+            name,
+            spec,
+            &current_dir,
+            &mut build_args,
+        ) {
+            tracing::warn!(
+                event = "package.install_failed",
+                ecosystem = ecosystem,
+                package = %name,
+                error = %e,
+            );
+            eprintln!("    Warning: Failed to install {}: {}", name, e);
+        }
+    }
+
+    Ok(())
+}
+
+fn install_one<F>(
+    ecosystem: &'static str,
+    command: &'static str,
+    purpose: &'static str,
+    name: &str,
+    spec: &super::config::PackageSpec,
+    working_dir: &Path,
+    build_args: &mut F,
+) -> Result<(), PackageError>
+where
+    F: FnMut(&str, &super::config::PackageSpec) -> Result<Vec<String>, PackageError>,
+{
+    validate_package_name(name, purpose)?;
+    validate_package_version(spec.version(), purpose)?;
+
+    println!("    Installing {}...", name);
+    let telemetry_on = crate::observability::telemetry_gate::is_enabled();
+    if telemetry_on {
+        tracing::info!(
+            event = "package.requested",
+            ecosystem = ecosystem,
+            package = %name,
+            version = %spec.version(),
+            source = "config",
+            platform = std::env::consts::OS,
+        );
+    }
+    let _pkg_span = tracing::info_span!(
+        "package",
+        ecosystem = ecosystem,
+        name = %name,
+        version = %spec.version(),
+    )
+    .entered();
+    let started = std::time::Instant::now();
+
+    let args_owned = build_args(name, spec)?;
+    let args: Vec<&str> = args_owned.iter().map(String::as_str).collect();
+    match run_package_command(command, &args, working_dir) {
+        Ok(()) => {
+            if telemetry_on {
+                tracing::info!(
+                    event = "package.installed",
+                    ecosystem = ecosystem,
+                    package = %name,
+                    version = %spec.version(),
+                    source = "config",
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    platform = std::env::consts::OS,
+                );
+            }
+            Ok(())
+        }
+        Err(e) => {
+            if telemetry_on {
+                tracing::warn!(
+                    event = "package.failed",
+                    ecosystem = ecosystem,
+                    package = %name,
+                    version = %spec.version(),
+                    source = "config",
+                    error_kind = e.kind(),
+                    error = %e,
+                    platform = std::env::consts::OS,
+                );
+            }
+            Err(e)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

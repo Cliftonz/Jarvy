@@ -225,25 +225,12 @@ fn resolve_custom(spec: &McpServerSpec) -> Option<ResolvedServer> {
 /// cache is populated before resolution. Same trust shape as
 /// `ai_hooks::runner::prepare_library_sources` (PRD-054).
 fn prepare_library_sources(cfg: &McpRegisterConfig) {
-    if cfg.library_sources.is_empty() {
-        return;
-    }
-    if let Err(e) = crate::library_registry::check_origin(cfg.origin, "mcp_register") {
-        eprintln!(
-            "  Warning: mcp_register library_sources refused: {e}. \
-             Move the URL into your local jarvy.toml or ~/.jarvy/config.toml."
-        );
-        return;
-    }
-    for source in &cfg.library_sources {
-        if let Err(e) = crate::library_registry::sync(source) {
-            eprintln!(
-                "  Warning: mcp_register library_sources sync failed for {}: {e}. \
-                 Falling back to cached + inline servers.",
-                crate::network::redact_credentials(&source.url),
-            );
-        }
-    }
+    crate::library_registry::sync_all(
+        "mcp_register",
+        "Falling back to cached + inline servers.",
+        &cfg.library_sources,
+        cfg.origin,
+    );
 }
 
 fn filter_for_agent(
