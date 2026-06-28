@@ -56,10 +56,17 @@ pub use manifest::{
     Manifest,
 };
 
+use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::SystemTime;
 use thiserror::Error;
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
+}
 
 #[derive(Debug, Error)]
 pub enum LibraryError {
@@ -83,6 +90,17 @@ pub enum LibraryError {
         "remote-fetched config attempted to declare library_sources for {consumer}; refusing (PRD-054 trust gate)"
     )]
     RemoteRefused { consumer: &'static str },
+
+    #[error(
+        "manifest sha256 mismatch for {url}: pinned `{expected}`, fetched body computes `{actual}` — \
+         either the publisher re-published (run `jarvy library freeze` to update the pin) \
+         or someone is tampering with the manifest in transit"
+    )]
+    ManifestShaMismatch {
+        url: String,
+        expected: String,
+        actual: String,
+    },
 }
 
 impl LibraryError {
@@ -95,6 +113,7 @@ impl LibraryError {
             LibraryError::UnsupportedSchema { .. } => "unsupported_schema",
             LibraryError::Io(_) => "io",
             LibraryError::RemoteRefused { .. } => "remote_refused",
+            LibraryError::ManifestShaMismatch { .. } => "manifest_sha_mismatch",
         }
     }
 }
@@ -290,12 +309,49 @@ pub fn sync(source: &LibrarySource) -> Result<SyncReport, LibraryError> {
         );
     }
 
+    // Review item 12 (P1). `require_signature = true` is the default
+    // but v1 has no cosign enforcement — operators reading the
+    // schema reasonably believe Sigstore protects them. Surface the
+    // unenforced state loudly until phase 5 ships, otherwise the
+    // documented trust contract is silently broken.
+    if source.require_signature && telemetry_on {
+        tracing::warn!(
+            event = "library.signature_unenforced",
+            url = %crate::network::redact_credentials(&source.url),
+            advice = "cosign verification is scaffolded but NOT enforced in v1 — \
+                      pin a manifest_sha256 or set require_signature = false to \
+                      silence this warning until phase 5 ships",
+        );
+        eprintln!(
+            "  Warning: library {} declares `require_signature = true` but \
+             cosign verification is not yet enforced (PRD-054 phase 5). \
+             Pin a `manifest_sha256` or accept the URL on trust until then.",
+            crate::network::redact_credentials(&source.url),
+        );
+    }
+
     Ok(report)
 }
 
 fn fetch_and_parse(source: &LibrarySource) -> Result<Manifest, LibraryError> {
     let url = canonicalize_manifest_url(&source.url);
     let body = fetch::fetch_bounded(&url, fetch::MAX_MANIFEST_BYTES)?;
+    // Review item 13 (P1). Manifest sha-pin verification — runs
+    // BEFORE deserialization so a body that doesn't match the pin
+    // is refused even if its JSON is otherwise valid. Computes sha
+    // over the raw bytes the publisher served (not the canonicalized
+    // / normalized JSON), matching what `jarvy library freeze` would
+    // produce.
+    if let Some(ref expected) = source.manifest_sha256 {
+        let actual = sha256_hex(&body);
+        if !actual.eq_ignore_ascii_case(expected) {
+            return Err(LibraryError::ManifestShaMismatch {
+                url: crate::network::redact_credentials(&url).into_owned(),
+                expected: expected.clone(),
+                actual,
+            });
+        }
+    }
     let manifest: Manifest = serde_json::from_slice(&body).map_err(|e| LibraryError::Parse {
         url: crate::network::redact_credentials(&url).into_owned(),
         source: e,

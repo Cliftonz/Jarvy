@@ -42,6 +42,16 @@ pub struct LibrarySource {
     /// (24h). The disk cache satisfies reads inside this window.
     #[serde(default = "default_refresh_interval")]
     pub refresh_interval_secs: u64,
+
+    /// Optional sha256 hex digest of the manifest body. When set,
+    /// every sync recomputes the sha and refuses to apply if it
+    /// doesn't match. The strongest tamper-evidence available in v1
+    /// until cosign enforcement lands — pinning a sha means a
+    /// publisher cannot silently re-publish under the same URL and
+    /// expect Jarvy to pick up new content without a visible bump.
+    /// Review item 13 (P1).
+    #[serde(default)]
+    pub manifest_sha256: Option<String>,
 }
 
 impl LibrarySource {
@@ -55,6 +65,7 @@ impl LibrarySource {
             identity_regexp: None,
             oidc_issuer: None,
             refresh_interval_secs: default_refresh_interval(),
+            manifest_sha256: None,
         }
     }
 }

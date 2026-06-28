@@ -45,6 +45,7 @@ fn seed_manifest(url: &str, manifest: Manifest) {
         identity_regexp: None,
         oidc_issuer: None,
         refresh_interval_secs: 86_400,
+        manifest_sha256: None,
     });
 }
 
@@ -339,6 +340,7 @@ fn sync_falls_back_to_disk_cache_on_unreachable_host() {
         identity_regexp: None,
         oidc_issuer: None,
         refresh_interval_secs: 86_400,
+        manifest_sha256: None,
     });
 
     match report {

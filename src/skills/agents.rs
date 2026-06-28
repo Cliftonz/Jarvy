@@ -104,6 +104,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(jarvy_home_env)]
     fn detect_agents_empty_when_no_dirs() {
         // SAFETY: JARVY_HOME points at an empty tempdir; no agent dirs.
         #[allow(unsafe_code)]
@@ -117,6 +118,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(jarvy_home_env)]
     fn detect_agents_finds_present_dirs() {
         // SAFETY: scoped JARVY_HOME for this test only.
         #[allow(unsafe_code)]

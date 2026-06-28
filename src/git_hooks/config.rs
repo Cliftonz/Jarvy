@@ -3,7 +3,15 @@
 use serde::{Deserialize, Serialize};
 
 /// `[git_hooks]` block.
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+///
+/// `Default` is hand-implemented to match the serde-deserialized
+/// defaults (`enabled = true`, `auto_install = true`). Previously the
+/// auto-derived `Default` produced `enabled = false`, which made
+/// `Option<GitHooksConfig>::unwrap_or_default()` (used by
+/// `commands/hooks_cmd.rs`) silently disable hooks for projects
+/// without a `[git_hooks]` block — even when a `.pre-commit-config.yaml`
+/// existed. Review item 14 (P1).
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GitHooksConfig {
     /// Master enable. Default `true` — the block's presence implies
     /// enablement; users set `enabled = false` to declare-but-disable.
@@ -51,6 +59,24 @@ pub struct GitHooksConfig {
     /// making `allow_remote` dead code.
     #[serde(skip)]
     pub origin: crate::ai_hooks::ConfigOrigin,
+}
+
+impl Default for GitHooksConfig {
+    /// Matches the serde-deserialized defaults. Previously the
+    /// auto-derived `Default` produced `enabled = false`, breaking
+    /// `unwrap_or_default()` call sites. Review item 14 (P1).
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            framework: None,
+            auto_install: true,
+            auto_update: false,
+            run_after_install: false,
+            allow_remote: false,
+            pre_commit: None,
+            origin: crate::ai_hooks::ConfigOrigin::Local,
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -122,16 +148,19 @@ mod tests {
     #[test]
     fn defaults_enable_hooks_and_auto_install() {
         let c = GitHooksConfig::default();
-        // Default::default() does NOT call our serde defaults — those
-        // only fire during deserialization. Validate via TOML round-trip.
         let parsed: GitHooksConfig = toml::from_str("").unwrap();
+        // Both paths must agree (review item 14 — the previously-
+        // documented quirk was a footgun).
         assert!(parsed.enabled);
         assert!(parsed.auto_install);
         assert!(!parsed.auto_update);
         assert!(!parsed.run_after_install);
         assert!(!parsed.allow_remote);
-        // The default-only Default::default branch:
-        assert!(!c.enabled); // documented quirk — use toml::from_str("") for defaults
+        assert!(c.enabled, "Default::default must match serde defaults");
+        assert!(c.auto_install);
+        assert!(!c.auto_update);
+        assert!(!c.run_after_install);
+        assert!(!c.allow_remote);
     }
 
     #[test]

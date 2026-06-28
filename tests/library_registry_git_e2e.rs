@@ -169,6 +169,7 @@ impl E2EFixture {
             identity_regexp: None,
             oidc_issuer: None,
             refresh_interval_secs: 86_400,
+            manifest_sha256: None,
         }
     }
 }
