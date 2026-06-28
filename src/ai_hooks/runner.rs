@@ -67,6 +67,7 @@ impl RemoveReport {
 /// Apply `cfg` to every configured agent. Per-agent failures are
 /// collected into the report instead of returning early.
 pub fn apply(cfg: &AiHooksConfig) -> Result<ApplyReport, AiHookError> {
+    prepare_library_sources(cfg);
     let resolution = resolve(cfg)?;
     let mut report = ApplyReport {
         refused_custom: resolution.refused_custom,
@@ -89,6 +90,7 @@ pub fn apply(cfg: &AiHooksConfig) -> Result<ApplyReport, AiHookError> {
 
 /// Check drift without writing. Per-agent failures collected.
 pub fn check(cfg: &AiHooksConfig) -> Vec<Result<CheckOutcome, (AgentTarget, AiHookError)>> {
+    prepare_library_sources(cfg);
     let resolution = match resolve(cfg) {
         Ok(r) => r,
         Err(e) => {
@@ -157,6 +159,34 @@ struct Resolution<'cfg> {
     /// Entries refused by the remote-config trust boundary (always
     /// refused regardless of `allow_custom_commands`).
     remote_refused_custom: Vec<String>,
+}
+
+/// Fetch + cache each `library_sources` entry so the in-process
+/// `library_registry` cache is populated before `resolve` runs. Trust
+/// gate: remote-origin configs cannot declare library_sources (PRD-054).
+/// Per-source failures are logged but never fatal — `resolve` will
+/// surface `UnknownLibraryHook` for any entry that depended on the
+/// failed library.
+fn prepare_library_sources(cfg: &AiHooksConfig) {
+    if cfg.library_sources.is_empty() {
+        return;
+    }
+    if let Err(e) = crate::library_registry::check_origin(cfg.origin, "ai_hooks") {
+        eprintln!(
+            "  Warning: ai_hooks library_sources refused: {e}. \
+             Move the URL into your local jarvy.toml or ~/.jarvy/config.toml."
+        );
+        return;
+    }
+    for source in &cfg.library_sources {
+        if let Err(e) = crate::library_registry::sync(source) {
+            eprintln!(
+                "  Warning: ai_hooks library_sources sync failed for {}: {e}. \
+                 Falling back to cached + built-in hooks.",
+                crate::network::redact_credentials(&source.url),
+            );
+        }
+    }
 }
 
 fn resolve<'cfg>(cfg: &'cfg AiHooksConfig) -> Result<Resolution<'cfg>, AiHookError> {
@@ -239,36 +269,88 @@ fn resolve_one<'cfg>(
 
     // Library reference path — always allowed, regardless of origin.
     if let Some(ref lib_name) = entry.use_library {
-        let lib = library::find(lib_name)
-            .ok_or_else(|| AiHookError::UnknownLibraryHook(lib_name.clone()))?;
-        let name = entry.name.clone().unwrap_or_else(|| lib.name.to_string());
-        let event = entry.event.unwrap_or(lib.event);
-        let matcher = entry
-            .matcher
-            .clone()
-            .or_else(|| lib.matcher.map(|s| s.to_string()));
-        // Library bodies borrow from the static registry — zero alloc
-        // on the bash side. Windows side defers to platform::windows_command
-        // which returns Native (borrowed) when command_windows is set.
-        let bash_command: Cow<'cfg, str> = Cow::Borrowed(lib.bash);
-        let translated = windows_command(
-            Some(lib.bash),
-            entry.command_windows.as_deref().or(Some(lib.powershell)),
-            &name,
-        );
-        let windows_warned = translated.was_warned();
-        let windows_command = Cow::Owned(translated.into_string());
-        let timeout_ms = entry.timeout_ms.unwrap_or(lib.timeout_ms);
-        return Ok(ResolveOutcome::Resolved(ResolvedEntry {
-            name,
-            library_source: Some(lib.name.to_string()),
-            event,
-            matcher,
-            bash_command,
-            windows_command,
-            windows_warned,
-            timeout_ms,
-        }));
+        // Built-in library wins first — canonical Jarvy-shipped hooks
+        // take precedence over any third-party library entry with the
+        // same name. PRD-054 trust ordering.
+        if let Some(lib) = library::find(lib_name) {
+            let name = entry.name.clone().unwrap_or_else(|| lib.name.to_string());
+            let event = entry.event.unwrap_or(lib.event);
+            let matcher = entry
+                .matcher
+                .clone()
+                .or_else(|| lib.matcher.map(|s| s.to_string()));
+            // Library bodies borrow from the static registry — zero alloc
+            // on the bash side.
+            let bash_command: Cow<'cfg, str> = Cow::Borrowed(lib.bash);
+            let translated = windows_command(
+                Some(lib.bash),
+                entry.command_windows.as_deref().or(Some(lib.powershell)),
+                &name,
+            );
+            let windows_warned = translated.was_warned();
+            let windows_command = Cow::Owned(translated.into_string());
+            let timeout_ms = entry.timeout_ms.unwrap_or(lib.timeout_ms);
+            return Ok(ResolveOutcome::Resolved(ResolvedEntry {
+                name,
+                library_source: Some(lib.name.to_string()),
+                event,
+                matcher,
+                bash_command,
+                windows_command,
+                windows_warned,
+                timeout_ms,
+            }));
+        }
+
+        // PRD-054 third-party library_sources fallback. The
+        // `library_registry::sync` call must have run before resolve so
+        // the in-process cache is populated; `apply` does this. Inline
+        // `bash` bodies are honored directly; `bash_url` references
+        // would require an additional fetch + sha verify that v1 does
+        // not implement (item-skipped error surfaces clearly).
+        if let Some(item) = crate::library_registry::resolve_hook(lib_name) {
+            let Some(bash_body) = item.bash.clone() else {
+                return Err(AiHookError::UnknownLibraryHook(format!(
+                    "{lib_name} (library item found but has no inline `bash` body; \
+                     `bash_url`/`bash_sha256` fetch is a PRD-054 follow-up phase)"
+                )));
+            };
+            let name = entry.name.clone().unwrap_or_else(|| item.name.clone());
+            let event = entry.event.unwrap_or_else(|| {
+                // Library item carries event as String; parse on the
+                // fly. Unknown events fall through to PreToolUse so a
+                // malformed library entry doesn't silently misfire.
+                item.event
+                    .parse()
+                    .unwrap_or(crate::ai_hooks::event::HookEvent::PreToolUse)
+            });
+            let matcher = entry.matcher.clone().or_else(|| item.matcher.clone());
+            let bash_command: Cow<'cfg, str> = Cow::Owned(bash_body);
+            let powershell_default = item.powershell.clone();
+            let translated = windows_command(
+                Some(bash_command.as_ref()),
+                entry
+                    .command_windows
+                    .as_deref()
+                    .or(powershell_default.as_deref()),
+                &name,
+            );
+            let windows_warned = translated.was_warned();
+            let windows_command = Cow::Owned(translated.into_string());
+            let timeout_ms = entry.timeout_ms.unwrap_or(item.timeout_ms);
+            return Ok(ResolveOutcome::Resolved(ResolvedEntry {
+                name,
+                library_source: Some(format!("library:{}", item.name)),
+                event,
+                matcher,
+                bash_command,
+                windows_command,
+                windows_warned,
+                timeout_ms,
+            }));
+        }
+
+        return Err(AiHookError::UnknownLibraryHook(lib_name.clone()));
     }
 
     // Raw command path — gated by allow_custom_commands AND origin.

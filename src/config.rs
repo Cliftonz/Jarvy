@@ -310,6 +310,9 @@ pub struct Config {
     /// Git hook framework integration (`[git_hooks]`)
     #[serde(default, rename = "git_hooks")]
     pub git_hooks: Option<crate::git_hooks::GitHooksConfig>,
+    /// AI agent skill installation (`[skills]` — PRD-049 + PRD-054)
+    #[serde(default)]
+    pub skills: Option<crate::skills::SkillsConfig>,
     /// Drift detection configuration
     #[serde(default)]
     pub drift: Option<crate::drift::DriftConfig>,
@@ -399,6 +402,7 @@ pub const TOP_LEVEL_SECTIONS: &[&str] = &[
     "packages",
     "git",
     "git_hooks",
+    "skills",
     "drift",
     "telemetry",
     "commands",
@@ -961,6 +965,7 @@ mod tests {
                 nuget: _,
                 git: _,
                 git_hooks: _,
+                skills: _,
                 drift: _,
                 telemetry: _,
                 commands: _,
@@ -995,6 +1000,7 @@ mod tests {
             "packages",
             "git",
             "git_hooks",
+            "skills",
             "drift",
             "telemetry",
             "commands",

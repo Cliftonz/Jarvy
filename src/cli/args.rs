@@ -491,6 +491,14 @@ pub enum Commands {
         #[clap(short, long, default_value = "./jarvy.toml")]
         file: String,
     },
+    /// Install and manage AI agent skills from library_sources (PRD-049 + PRD-054)
+    Skills {
+        #[clap(subcommand)]
+        action: SkillsAction,
+        /// Path to the configuration file
+        #[clap(short, long, default_value = "./jarvy.toml")]
+        file: String,
+    },
     /// Catch-all for unknown subcommands and their args
     #[clap(external_subcommand)]
     External(Vec<String>),

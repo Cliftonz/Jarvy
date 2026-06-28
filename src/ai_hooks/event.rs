@@ -65,6 +65,29 @@ impl fmt::Display for HookEvent {
     }
 }
 
+impl std::str::FromStr for HookEvent {
+    type Err = String;
+
+    /// Parse a snake_case event name (`"pre_tool_use"` → `PreToolUse`).
+    /// Used by PRD-054 library_registry to coerce manifest event
+    /// strings into the typed enum without going through serde_json.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        for ev in Self::ALL {
+            if ev.as_str() == s {
+                return Ok(*ev);
+            }
+        }
+        Err(format!(
+            "unknown HookEvent `{s}`; valid: {}",
+            Self::ALL
+                .iter()
+                .map(|e| e.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

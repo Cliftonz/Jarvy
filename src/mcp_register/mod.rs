@@ -108,6 +108,7 @@ pub fn synthesize_auto_register(agents: Vec<McpAgentTarget>) -> McpRegisterConfi
         allow_custom_servers: false,
         jarvy: None,
         servers: Vec::new(),
+        library_sources: Vec::new(),
         origin: crate::ai_hooks::ConfigOrigin::Local,
     }
 }

@@ -55,6 +55,7 @@ impl RemoveReport {
 }
 
 pub fn apply(cfg: &McpRegisterConfig) -> Result<ApplyReport, McpRegisterError> {
+    prepare_library_sources(cfg);
     let resolution = resolve(cfg);
     let mut report = ApplyReport {
         refused_custom: resolution.refused_custom,
@@ -75,6 +76,7 @@ pub fn apply(cfg: &McpRegisterConfig) -> Result<ApplyReport, McpRegisterError> {
 pub fn check(
     cfg: &McpRegisterConfig,
 ) -> Vec<Result<CheckOutcome, (McpAgentTarget, McpRegisterError)>> {
+    prepare_library_sources(cfg);
     let resolution = resolve(cfg);
     let mut out = Vec::with_capacity(cfg.unique_agents().len());
     for target in cfg.unique_agents() {
@@ -170,6 +172,36 @@ fn build_jarvy_server(override_cfg: Option<&JarvyServerOverride>) -> ResolvedSer
 }
 
 fn resolve_custom(spec: &McpServerSpec) -> Option<ResolvedServer> {
+    // PRD-054: `use = "library-name"` pulls defaults from a previously
+    // synced library item. Locally-declared fields on the spec
+    // override the library defaults (e.g. spec `env = { ... }` wins).
+    if let Some(ref lib_name) = spec.use_library {
+        let item = crate::library_registry::resolve_mcp_server(lib_name)?;
+        let resolved_name = if spec.name.is_empty() {
+            item.name.clone()
+        } else {
+            spec.name.clone()
+        };
+        let command = spec.command.clone().or(Some(item.command));
+        let mut args = spec.args.clone();
+        if args.is_empty() {
+            args = item.args;
+        }
+        let mut env = item.env.clone();
+        for (k, v) in &spec.env {
+            env.insert(k.clone(), v.clone());
+        }
+        return Some(ResolvedServer {
+            name: resolved_name,
+            transport: spec.transport,
+            command,
+            args,
+            url: spec.url.clone(),
+            env,
+            is_jarvy: false,
+        });
+    }
+
     if spec.name.is_empty() {
         return None;
     }
@@ -187,6 +219,31 @@ fn resolve_custom(spec: &McpServerSpec) -> Option<ResolvedServer> {
         env: spec.env.clone(),
         is_jarvy: false,
     })
+}
+
+/// Fetch each `library_sources` entry so the in-process registry
+/// cache is populated before resolution. Same trust shape as
+/// `ai_hooks::runner::prepare_library_sources` (PRD-054).
+fn prepare_library_sources(cfg: &McpRegisterConfig) {
+    if cfg.library_sources.is_empty() {
+        return;
+    }
+    if let Err(e) = crate::library_registry::check_origin(cfg.origin, "mcp_register") {
+        eprintln!(
+            "  Warning: mcp_register library_sources refused: {e}. \
+             Move the URL into your local jarvy.toml or ~/.jarvy/config.toml."
+        );
+        return;
+    }
+    for source in &cfg.library_sources {
+        if let Err(e) = crate::library_registry::sync(source) {
+            eprintln!(
+                "  Warning: mcp_register library_sources sync failed for {}: {e}. \
+                 Falling back to cached + inline servers.",
+                crate::network::redact_credentials(&source.url),
+            );
+        }
+    }
 }
 
 fn filter_for_agent(

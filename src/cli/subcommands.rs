@@ -5,6 +5,22 @@
 use clap::Subcommand;
 
 #[derive(Subcommand)]
+pub enum SkillsAction {
+    /// Install every skill from `[skills.install]`, or a single named skill
+    Install {
+        /// Only install this skill name (otherwise installs all configured)
+        #[clap(long)]
+        name: Option<String>,
+    },
+    /// List skills declared in jarvy.toml + their installation status across agents
+    List {},
+    /// Drift check: which configured skills are missing / out-of-version per agent
+    Status {},
+    /// Show which AI agents are detected on disk
+    Agents {},
+}
+
+#[derive(Subcommand)]
 pub enum HooksAction {
     /// Install the configured git hook framework into `.git/hooks/`
     Install {},

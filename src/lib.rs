@@ -5,6 +5,7 @@ pub mod drift;
 pub mod error_codes;
 pub mod git;
 pub mod git_hooks;
+pub mod library_registry;
 pub mod logging;
 pub mod mcp_register;
 // Internal — `REPO_SLUG` / `REPO_URL` are crate-private. If a future
@@ -20,6 +21,7 @@ pub mod progress;
 pub mod registry_remote;
 pub mod sandbox;
 pub mod security;
+pub mod skills;
 pub mod ticket;
 pub mod tools;
 pub mod update;

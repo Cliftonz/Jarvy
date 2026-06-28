@@ -56,6 +56,14 @@ pub struct AiHooksConfig {
     #[serde(rename = "hook", default)]
     pub hooks: Vec<HookEntry>,
 
+    /// Third-party library sources (PRD-054). Each entry is fetched on
+    /// `jarvy setup` / `jarvy ai-hooks apply` and its `ai_hook` items
+    /// become resolvable via `use = "..."`. Local-origin only — the
+    /// runtime refuses `library_sources` from remote-fetched configs
+    /// (see `library_registry::check_origin`).
+    #[serde(default)]
+    pub library_sources: Vec<crate::library_registry::LibrarySource>,
+
     /// Where this config came from. Not serialized — populated by the
     /// loader (`Local` for `Config::new`, `Remote` for `--from <url>`).
     #[serde(skip)]

@@ -45,6 +45,13 @@ pub struct McpRegisterConfig {
     #[serde(rename = "server", default)]
     pub servers: Vec<McpServerSpec>,
 
+    /// Third-party library sources (PRD-054). Each entry is fetched on
+    /// `jarvy mcp-register apply` and its `mcp_server` items become
+    /// resolvable from a `[[mcp_register.server]] use = "..."` entry.
+    /// Local-origin only; refused for remote-fetched configs.
+    #[serde(default)]
+    pub library_sources: Vec<crate::library_registry::LibrarySource>,
+
     /// Origin tag. Set by the loader — `Local` for `Config::new`,
     /// `Remote` for `--from <url>`. Not serialized.
     #[serde(skip)]
@@ -94,6 +101,14 @@ pub struct McpServerSpec {
     /// Empty = apply to all configured agents.
     #[serde(default)]
     pub agents: Vec<McpAgentTarget>,
+
+    /// Reference a third-party library entry by name (PRD-054). When
+    /// set, `command` / `args` / `env` are pulled from the matching
+    /// library item; locally-declared fields override the library's
+    /// defaults. Useful for `use = "myorg-tickets"` followed by an
+    /// `env = { ... }` override for the local API key.
+    #[serde(rename = "use", default)]
+    pub use_library: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -27,7 +27,121 @@ for the full release process and
 [`docs/release-quirks-jarvy.md`](https://github.com/Cliftonz/jarvy/blob/main/docs/release-quirks-jarvy.md)
 for divergences from generic release skills.
 
-## [Unreleased] — Close out PRD-011/013/014/037/038/039/048/052 + gem/go + git hooks + progress (2026-06-28)
+## [Unreleased] — Close out PRD-011/013/014/037/038/039/048/049/052/054 + library registry + skills + git hooks + progress (2026-06-28)
+
+A documentation + maintainability + ecosystem-breadth pass that closes
+ten long-open PRDs across four commits. The headliner is **PRD-054
+library registry** — a shared HTTPS-fetched manifest format that lets a
+team publish reusable AI hooks, MCP servers, and AI agent skills at any
+URL, with `[ai_hooks]`, `[mcp_register]`, and `[skills]` all consuming
+the same format. PRD-049 (skills) rides on it for v1; PRD-048 / 052
+(git hooks, spinners) shipped in the prior commit. No user-visible
+behavior changes for existing configs — all new surface is additive.
+
+### Added — library registry (PRD-054)
+
+- **`src/library_registry/` shared module**: manifest schema (tagged
+  by `kind`: `ai_hook` / `mcp_server` / `skill`), HTTPS-bounded fetch
+  (`MAX_MANIFEST_BYTES = 16 MiB`, `MAX_ITEM_BYTES = 1 MiB`), on-disk
+  cache at `~/.jarvy/library.d/<sha256-of-url>/manifest.json`,
+  in-process resolver across all cached libraries. Atomic write
+  pattern (`.new` → rename) for cache durability.
+
+- **One manifest, three consumers**: a single `manifest.json` URL can
+  publish AI hooks, MCP servers, and skills simultaneously — each
+  consumer filters by `kind`. Publishers write one manifest; teams
+  point `[ai_hooks] library_sources`, `[mcp_register] library_sources`,
+  and `[skills] library_sources` at the same URL.
+
+  ```toml
+  [[ai_hooks.library_sources]]
+  url = "https://cdn.myorg.com/jarvy/manifest.json"
+
+  [[ai_hooks.hook]]
+  use = "no-prod-deploys"
+  ```
+
+- **Trust model uniform across consumers**: remote-fetched configs
+  (`jarvy setup --from <url>`) CANNOT declare `library_sources` —
+  refused with `library.remote_refused` event. Mirrors
+  `[packages] allow_remote` semantics. There is no override flag;
+  adding one would defeat the purpose. Teams that want to ship
+  `library_sources` to every developer copy them into each user's
+  local `~/.jarvy/config.toml`.
+
+- **Built-in items win over library items**: `crate::ai_hooks::LIBRARY`
+  (the canonical Jarvy-shipped hooks) is checked BEFORE library
+  fallbacks, so name collisions favor the audited built-in.
+
+- **sha256 verification** for skill `SKILL.md` bodies (mandatory) and
+  scaffolded for ai_hook `bash_url` (v1 only honors inline `bash:` for
+  hooks). A publisher mutating a versioned artifact in place surfaces
+  a clear `library.sha_mismatch` event and refuses to install.
+
+- **Offline tolerance**: on network failure, the cached on-disk
+  manifest is served with a `library.fetch.cached_hit
+  reason="fetch_failed"` event so log scrapers can see staleness.
+
+- **Cosign signature verification scaffolded but not enforced in v1**.
+  `require_signature = true` (default) is honored once cosign wiring
+  lands; `false` today emits a `library.signature_disabled` warning.
+  Phase 5 of PRD-054.
+
+### Added — AI agent skills installation (PRD-049 v1)
+
+- **`[skills]` config block** with `library_sources`, `install` map,
+  per-skill `agents = [...]` narrowing.
+- **`jarvy skills` subcommand**: `install` (all or `--name <skill>`),
+  `list` (per-agent status), `status` (drift summary), `agents`
+  (detect installed AI agents).
+- **Setup integration**: `jarvy setup` auto-installs every configured
+  skill when `[skills] auto_install = true` (default).
+- **Per-agent path layout**: `~/.{agent}/skills/<skill-name>/SKILL.md`
+  across claude-code, cursor, codex, windsurf, cline, continue. Two
+  narrowing layers (consumer `agents = [...]` + publisher
+  `supported_agents = [...]`) both apply.
+- **`.jarvy-skill.json` sidecar** records version + sha256 + install
+  time per skill per agent. `jarvy skills status` uses it for drift
+  detection without needing to re-fetch.
+- **v1 explicitly skips** skills.sh API integration (search / info /
+  popular), companion file fetching, `jarvy skills update` /
+  `remove`, version-range pinning, project-scope skills. Tracked
+  under PRD-049 phase 2.
+
+### Added — library_sources consumers for AI hooks + MCP register
+
+- **`[ai_hooks].library_sources`**: fetch + register library hook
+  items. `use = "hook-name"` resolves built-in `LIBRARY` first, then
+  cached library items. Hook bodies are taken inline from manifest
+  `bash:` / `powershell:` fields. Per-source-failure-is-advisory:
+  `apply` continues with cached + built-in hooks if a library URL is
+  unreachable.
+
+- **`[[mcp_register.server]] use = "library-name"`**: pulls
+  `command` / `args` / `env` defaults from a previously synced
+  library item. Locally-declared fields on the spec override the
+  library defaults (e.g. spec `env = { ... }` wins over library env).
+  Subject to the existing `allow_custom_servers` gate plus the new
+  `library_sources` remote-refusal gate.
+
+### Tracking
+
+- Drafts + closes PRD-054 (Library Registry — v1 shipped, sig verify
+  + `jarvy library` CLI tracked as follow-up)
+- Closes PRD-049 phase 1 (Skills Registry Integration — library-based
+  install ships; skills.sh API + remove/update commands tracked as
+  PRD-049 phase 2)
+- Continues PRD-048 (Pre-Commit Hook Installation) + PRD-052
+  (Progress Indicators) from the prior commit
+- Continues PRD-011 / 013 / 014 / 037 / 038 / 039 closures from the
+  first commit
+
+---
+
+## [Unreleased — earlier: pre-commit hooks + progress spinners]
+
+(Originally a separate `[Unreleased]` entry; merged into the section
+above so the awk extractor sees a single curated block.)
 
 A documentation + maintainability + ecosystem-breadth pass that closes
 eight long-open PRDs across three commits: gem/go package handlers +

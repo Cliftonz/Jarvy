@@ -5,12 +5,24 @@
   "priority": "medium",
   "estimated_days": 10,
   "created": "2026-01-24",
-  "status": "not_started",
+  "status": "in_progress",
+  "completionNote": "v1 ships via PRD-054 library_registry pattern. src/skills/ module: SkillsConfig, agent detection (claude-code/cursor/codex/windsurf/cline/continue), installer (sha256-verified SKILL.md fetch, per-agent narrowing, .jarvy-skill.json sidecar). CLI: jarvy skills {install,list,status,agents}. Setup integration via [skills.auto_install] (default true). Skips: skills.sh API integration (search/info/popular), companion file fetch, version-range pinning, project-scope skills, jarvy skills remove/update — all PRD-049 phase 2. docs/skills.md ships.",
+  "completedAt": "2026-06-28T00:00:00Z",
+  "scope": "Phase 1 (library_sources-based install, no skills.sh API). Remaining work in PRD-049 phase 2 documented under follow_up.",
   "progress": {
-    "completed": 0,
+    "completed": 14,
     "total": 28,
-    "percentage": 0
+    "percentage": 50
   },
+  "follow_up": [
+    "skills.sh API integration: search, info, popular commands",
+    "jarvy skills update (re-fetch + reinstall with version bumps)",
+    "jarvy skills remove (uninstall + sidecar cleanup)",
+    "Companion file fetch (today only SKILL.md lands)",
+    "Project-scope skills (./.{agent}/skills/)",
+    "Version-range pinning (today only exact or 'latest')",
+    "jarvy skills install <name> for ad-hoc install outside [skills.install]"
+  ],
   "phases": [
     {
       "id": "phase-1",
