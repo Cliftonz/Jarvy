@@ -81,7 +81,12 @@ fn insecure_loopback_allowed(url: &str, env_var: &'static str) -> bool {
 /// `userinfo@` segment. Byte-prefix matching the serialized form is
 /// not enough: `http://127.0.0.1:80@attacker.example/` parses with
 /// `127.0.0.1:80` as USERINFO and `attacker.example` as host (RFC 3986).
-pub fn is_plain_loopback_http(url: &str) -> bool {
+///
+/// `pub(crate)` so consumers cannot reach in and call the parser
+/// directly — they MUST go through `bounded_fetch` which also requires
+/// the env-var consent gate. Exposed module-wide for the local tests
+/// below.
+pub(crate) fn is_plain_loopback_http(url: &str) -> bool {
     let Some(after_scheme) = url.strip_prefix("http://") else {
         return false;
     };
