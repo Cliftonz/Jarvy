@@ -154,9 +154,9 @@ fn parse_source_refuses_ftp() {
 }
 
 #[test]
-#[serial(library_env)]
+#[serial(jarvy_home_env)]
 fn parse_source_refuses_git_file_without_bypass() {
-    // SAFETY: serialized via #[serial(library_env)].
+    // SAFETY: serialized via #[serial(jarvy_home_env)].
     #[allow(unsafe_code)]
     unsafe {
         std::env::remove_var("JARVY_LIBRARY_ALLOW_INSECURE_GIT");
@@ -166,9 +166,9 @@ fn parse_source_refuses_git_file_without_bypass() {
 }
 
 #[test]
-#[serial(library_env)]
+#[serial(jarvy_home_env)]
 fn parse_source_accepts_git_file_with_bypass() {
-    // SAFETY: serialized via #[serial(library_env)].
+    // SAFETY: serialized via #[serial(jarvy_home_env)].
     #[allow(unsafe_code)]
     unsafe {
         std::env::set_var("JARVY_LIBRARY_ALLOW_INSECURE_GIT", "1");
@@ -236,7 +236,7 @@ fn library_error_kind_is_stable() {
 // =====================================================================
 
 #[test]
-#[serial(library_cache)]
+#[serial(jarvy_home_env)]
 fn resolve_skill_returns_first_match_across_libraries() {
     library_registry::clear_cache();
     seed_manifest(
@@ -263,7 +263,7 @@ fn resolve_skill_returns_first_match_across_libraries() {
 }
 
 #[test]
-#[serial(library_cache)]
+#[serial(jarvy_home_env)]
 fn resolve_skill_returns_none_for_unknown_name() {
     library_registry::clear_cache();
     seed_manifest(
@@ -275,7 +275,7 @@ fn resolve_skill_returns_none_for_unknown_name() {
 }
 
 #[test]
-#[serial(library_cache)]
+#[serial(jarvy_home_env)]
 fn resolve_mcp_server_returns_none_when_only_skills_cached() {
     library_registry::clear_cache();
     seed_manifest(
@@ -288,7 +288,7 @@ fn resolve_mcp_server_returns_none_when_only_skills_cached() {
 }
 
 #[test]
-#[serial(library_cache)]
+#[serial(jarvy_home_env)]
 fn resolve_hook_returns_none_when_only_skills_cached() {
     library_registry::clear_cache();
     seed_manifest(
@@ -300,7 +300,7 @@ fn resolve_hook_returns_none_when_only_skills_cached() {
 }
 
 #[test]
-#[serial(library_cache)]
+#[serial(jarvy_home_env)]
 fn clear_cache_drops_every_seeded_library() {
     library_registry::clear_cache();
     seed_manifest(
@@ -321,7 +321,7 @@ fn clear_cache_drops_every_seeded_library() {
 // =====================================================================
 
 #[test]
-#[serial(library_cache)]
+#[serial(jarvy_home_env)]
 fn sync_falls_back_to_disk_cache_on_unreachable_host() {
     library_registry::clear_cache();
     let url = "https://this-host-must-not-resolve.example.invalid/manifest.json";

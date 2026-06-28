@@ -92,7 +92,12 @@ mod tests {
         assert!(!config.disable_file_logging);
     }
 
+    /// Serialized with the `jarvy_home_env` group — same rationale as
+    /// the `src/logging/mod.rs` mirror test. Concurrent tests pinning
+    /// JARVY_HOME to a tempdir otherwise race with the `.jarvy/logs`
+    /// suffix assertion.
     #[test]
+    #[serial_test::serial(jarvy_home_env)]
     fn test_default_log_directory() {
         let dir = default_log_directory();
         assert!(dir.ends_with(".jarvy/logs"));

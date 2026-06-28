@@ -284,4 +284,99 @@ mod tests {
         );
         assert_eq!(status, SkillStatus::Missing);
     }
+
+    // =================================================================
+    // Review item 11 (P0) — fetch_skill_md sha-mismatch path.
+    //
+    // The whole point of fetching by sha256 is tamper detection. The
+    // E2E suite uses the synthesizer-computed sha (always matches) —
+    // a refactor that drops the verification line ships green. These
+    // tests pin the contract directly against a fixture skill body in
+    // the library cache root, using a publisher-supplied sha that may
+    // or may not match.
+    // =================================================================
+
+    use crate::library_registry::manifest::LibrarySkillItem;
+    use serial_test::serial;
+    use tempfile::tempdir;
+
+    fn seed_library_cache_skill_md(content: &[u8]) -> (tempfile::TempDir, String) {
+        let home = tempdir().unwrap();
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("JARVY_HOME", home.path());
+        }
+        let cache_root = crate::library_registry::cache::cache_root().unwrap();
+        let skill_path = cache_root.join("test-skill.md");
+        std::fs::write(&skill_path, content).unwrap();
+        let url = format!("file://{}", skill_path.canonicalize().unwrap().display());
+        (home, url)
+    }
+
+    #[test]
+    #[serial(jarvy_home_env)]
+    fn fetch_skill_md_refuses_sha_mismatch() {
+        let (_home_guard, url) = seed_library_cache_skill_md(b"actual body bytes");
+        let item = LibrarySkillItem {
+            name: "test-skill".into(),
+            version: "1.0.0".into(),
+            description: String::new(),
+            skill_md_url: url,
+            skill_md_sha256: "deadbeef".into(), // deliberate wrong sha
+            companion_files: Vec::new(),
+            supported_agents: Vec::new(),
+        };
+        let err = fetch_skill_md(&item).expect_err("wrong sha must refuse");
+        match err {
+            SkillError::ShaMismatch {
+                name,
+                expected,
+                actual,
+            } => {
+                assert_eq!(name, "test-skill");
+                assert_eq!(expected, "deadbeef");
+                assert_ne!(actual, "deadbeef", "actual must be computed from body");
+            }
+            other => panic!("expected ShaMismatch, got {other:?}"),
+        }
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::remove_var("JARVY_HOME");
+        }
+    }
+
+    #[test]
+    #[serial(jarvy_home_env)]
+    fn fetch_skill_md_accepts_correct_sha_case_insensitive() {
+        let body = b"verified body";
+        let (_home_guard, url) = seed_library_cache_skill_md(body);
+        // Compute the expected sha, then UPPERCASE it to verify the
+        // case-insensitive comparison is honored.
+        let expected = sha256_hex(body).to_uppercase();
+        let item = LibrarySkillItem {
+            name: "test-skill".into(),
+            version: "1.0.0".into(),
+            description: String::new(),
+            skill_md_url: url,
+            skill_md_sha256: expected,
+            companion_files: Vec::new(),
+            supported_agents: Vec::new(),
+        };
+        let bytes = fetch_skill_md(&item).expect("matching uppercase sha must accept");
+        assert_eq!(bytes, body);
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::remove_var("JARVY_HOME");
+        }
+    }
+
+    #[test]
+    fn install_skill_no_agents_returns_no_agents() {
+        let entry = crate::skills::config::SkillEntry::Version("1.0.0".to_string());
+        let err = install_skill("any-skill", &entry, &[]).expect_err("empty agents must error");
+        match err {
+            SkillError::NoAgents => {}
+            other => panic!("expected NoAgents, got {other:?}"),
+        }
+    }
 }

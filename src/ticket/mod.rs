@@ -247,7 +247,12 @@ mod tests {
         assert!(!scope.logs);
     }
 
+    /// Serialized against `jarvy_home_env` because
+    /// `default_tickets_directory()` reads JARVY_HOME — concurrent
+    /// tests that pin tempdirs into JARVY_HOME otherwise race with
+    /// the `.jarvy/tickets` suffix assertion.
     #[test]
+    #[serial_test::serial(jarvy_home_env)]
     fn test_default_tickets_directory() {
         let dir = default_tickets_directory();
         assert!(dir.ends_with(".jarvy/tickets"));

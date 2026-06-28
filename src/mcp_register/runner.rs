@@ -328,3 +328,174 @@ mod tests {
         assert!(res.servers.contains_key("tool"));
     }
 }
+
+// =====================================================================
+// PRD-054 use_library resolution (review item 10, P0)
+// =====================================================================
+
+#[cfg(test)]
+mod use_library_tests {
+    use super::*;
+    use crate::library_registry::manifest::{
+        LibraryItem, LibraryMcpItem, MANIFEST_SCHEMA_VERSION, Manifest,
+    };
+    use crate::library_registry::{self, LibrarySource};
+    use serial_test::serial;
+    use std::collections::BTreeMap;
+
+    fn pin_jarvy_home() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("JARVY_HOME", tmp.path());
+        }
+        tmp
+    }
+
+    fn unpin_jarvy_home() {
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::remove_var("JARVY_HOME");
+        }
+    }
+
+    fn seed_server_in_cache(
+        name: &str,
+        command: &str,
+        args: Vec<&str>,
+        env: BTreeMap<String, String>,
+    ) {
+        let url = format!("https://test.example.com/mcp/{name}/manifest.json");
+        let manifest = Manifest {
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            publisher: "test".into(),
+            description: String::new(),
+            homepage: String::new(),
+            generated_at: String::new(),
+            items: vec![LibraryItem::McpServer(LibraryMcpItem {
+                name: name.into(),
+                version: "1.0.0".into(),
+                description: String::new(),
+                command: command.into(),
+                args: args.into_iter().map(str::to_string).collect(),
+                env,
+                supported_agents: Vec::new(),
+            })],
+        };
+        let path = library_registry::cache::manifest_cache_path(&url).unwrap();
+        library_registry::cache::write_manifest(&path, &manifest).unwrap();
+        let _ = library_registry::sync(&LibrarySource {
+            url,
+            require_signature: false,
+            identity_regexp: None,
+            oidc_issuer: None,
+            refresh_interval_secs: 86_400,
+        });
+    }
+
+    /// Happy path — `use = "lib-name"` with no overrides pulls
+    /// command/args/env from the library item.
+    #[test]
+    #[serial(jarvy_home_env)]
+    fn use_library_inherits_command_args_env() {
+        let _home = pin_jarvy_home();
+        library_registry::clear_cache();
+        let mut env = BTreeMap::new();
+        env.insert("FOO".into(), "from-library".into());
+        seed_server_in_cache("myorg-tool", "myorg-bin", vec!["serve"], env);
+
+        let spec = McpServerSpec {
+            use_library: Some("myorg-tool".to_string()),
+            transport: McpServerTransport::Stdio,
+            ..Default::default()
+        };
+        let resolved = resolve_custom(&spec).expect("resolved");
+        assert_eq!(resolved.name, "myorg-tool");
+        assert_eq!(resolved.command.as_deref(), Some("myorg-bin"));
+        assert_eq!(resolved.args, vec!["serve".to_string()]);
+        assert_eq!(
+            resolved.env.get("FOO").map(String::as_str),
+            Some("from-library")
+        );
+        library_registry::clear_cache();
+        unpin_jarvy_home();
+    }
+
+    /// Spec `command` overrides library command.
+    #[test]
+    #[serial(jarvy_home_env)]
+    fn use_library_spec_command_overrides_library_command() {
+        let _home = pin_jarvy_home();
+        library_registry::clear_cache();
+        seed_server_in_cache("override-cmd", "from-library", vec![], BTreeMap::new());
+
+        let spec = McpServerSpec {
+            use_library: Some("override-cmd".to_string()),
+            transport: McpServerTransport::Stdio,
+            command: Some("from-spec".to_string()),
+            ..Default::default()
+        };
+        let resolved = resolve_custom(&spec).expect("resolved");
+        assert_eq!(resolved.command.as_deref(), Some("from-spec"));
+        library_registry::clear_cache();
+        unpin_jarvy_home();
+    }
+
+    /// Spec env key overrides library env value for the same key;
+    /// non-overridden library keys still come through.
+    #[test]
+    #[serial(jarvy_home_env)]
+    fn use_library_spec_env_key_overrides_library_env_same_key() {
+        let _home = pin_jarvy_home();
+        library_registry::clear_cache();
+        let mut lib_env = BTreeMap::new();
+        lib_env.insert("API_KEY".into(), "library-default".into());
+        lib_env.insert("LIBRARY_ONLY".into(), "kept".into());
+        seed_server_in_cache("env-override", "tool", vec![], lib_env);
+
+        let mut spec_env = BTreeMap::new();
+        spec_env.insert("API_KEY".into(), "spec-wins".into());
+        let spec = McpServerSpec {
+            use_library: Some("env-override".to_string()),
+            transport: McpServerTransport::Stdio,
+            env: spec_env,
+            ..Default::default()
+        };
+        let resolved = resolve_custom(&spec).expect("resolved");
+        assert_eq!(
+            resolved.env.get("API_KEY").map(String::as_str),
+            Some("spec-wins"),
+            "spec env must override library env for same key"
+        );
+        assert_eq!(
+            resolved.env.get("LIBRARY_ONLY").map(String::as_str),
+            Some("kept"),
+            "non-overridden library env keys must remain"
+        );
+        library_registry::clear_cache();
+        unpin_jarvy_home();
+    }
+
+    /// `use = "<missing-name>"` returns `None` from resolve_custom —
+    /// the caller buckets it as "refused_custom" but the symptom
+    /// shouldn't be a silent drop with no diagnostic. Pin the
+    /// current behavior so a future fix (e.g. returning a typed
+    /// "library item not found" error) is a visible change.
+    #[test]
+    #[serial(jarvy_home_env)]
+    fn use_library_unknown_lib_name_returns_none() {
+        let _home = pin_jarvy_home();
+        library_registry::clear_cache();
+        let spec = McpServerSpec {
+            use_library: Some("does-not-exist".to_string()),
+            transport: McpServerTransport::Stdio,
+            ..Default::default()
+        };
+        // Today: silent None — caller emits a generic "refused"
+        // message. Documented as a follow-up to surface a distinct
+        // diagnostic (e.g. McpRegisterError::UnknownLibrary(name)).
+        assert!(resolve_custom(&spec).is_none());
+        library_registry::clear_cache();
+        unpin_jarvy_home();
+    }
+}
