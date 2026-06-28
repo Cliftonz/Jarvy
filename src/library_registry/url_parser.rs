@@ -127,6 +127,33 @@ fn parse_git(https_url: &str, original_url: &str) -> Result<SourceScheme, Librar
         }
     };
 
+    // P0 — argv-flag injection refusal. `git fetch origin <ref>` honors
+    // `--upload-pack=cmd` / `--receive-pack` / `--exec` etc. as `<ref>`
+    // and runs `cmd` locally during transport setup. A ref starting
+    // with `-` is never a legitimate tag/branch/SHA — refuse at parse
+    // time. Also refuse whitespace and control bytes (defense in depth
+    // against shell-meta smuggling via ANSI escapes in error messages).
+    if git_ref.starts_with('-') {
+        return Err(LibraryError::Parse {
+            url: original_url.to_string(),
+            source: serde::de::Error::custom(
+                "git ref must not start with `-` (refused as potential argv-flag injection \
+                 against `git fetch --upload-pack=...` and similar)",
+            ),
+        });
+    }
+    if git_ref
+        .chars()
+        .any(|c| c.is_whitespace() || c.is_control() || c == '\u{7f}')
+    {
+        return Err(LibraryError::Parse {
+            url: original_url.to_string(),
+            source: serde::de::Error::custom(
+                "git ref must not contain whitespace or control bytes",
+            ),
+        });
+    }
+
     // The repo half MUST still be an https:// URL after the @ trim
     // — unless the loopback-test bypass is active, in which case
     // file:// (pointing at a local repo) is also allowed.
@@ -244,6 +271,44 @@ mod tests {
     fn refuses_unpinned_github_shorthand() {
         let err = parse_source("github:myorg/skills").unwrap_err();
         assert!(format!("{err}").contains("@<ref>"));
+    }
+
+    /// P0 — argv-flag-injection refusal. `git fetch origin --upload-pack=cmd`
+    /// runs `cmd` locally during transport setup. A ref starting with
+    /// `-` is never legitimate; refuse at parse time.
+    #[test]
+    fn refuses_dash_prefixed_ref() {
+        for hostile in [
+            "git+https://github.com/myorg/skills.git@--upload-pack=curl",
+            "git+https://github.com/myorg/skills.git@-X",
+            "github:myorg/skills@-",
+            "github:myorg/skills@--receive-pack=evil",
+        ] {
+            let err = parse_source(hostile).expect_err(hostile);
+            let msg = format!("{err}");
+            assert!(
+                msg.contains("argv-flag injection") || msg.contains("must not start"),
+                "expected argv-injection refusal for {hostile}, got {msg}"
+            );
+        }
+    }
+
+    /// Defense in depth — refuse whitespace / control bytes in git ref.
+    #[test]
+    fn refuses_whitespace_or_control_in_ref() {
+        for hostile in [
+            "github:myorg/skills@v1.0.0\n",
+            "github:myorg/skills@v1 0",
+            "github:myorg/skills@v1\u{0007}", // BEL
+            "github:myorg/skills@v1\u{001b}[31m",
+        ] {
+            let err = parse_source(hostile).expect_err(hostile);
+            let msg = format!("{err}");
+            assert!(
+                msg.contains("whitespace") || msg.contains("control"),
+                "expected whitespace/control refusal for {hostile:?}, got {msg}"
+            );
+        }
     }
 
     #[test]

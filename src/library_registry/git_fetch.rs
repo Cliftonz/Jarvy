@@ -158,6 +158,12 @@ fn git_clone_and_checkout(repo: &str, git_ref: &str, dest: &Path) -> Result<(), 
     // explicitly, then checkout. This handles tags, branches, AND
     // commit SHAs uniformly — `git clone --branch <sha>` doesn't work
     // because --branch only accepts symbolic refs.
+    //
+    // `--` separators before every user-controlled positional arg
+    // (`<repo>`, `<git_ref>`) close the argv-flag-injection vector
+    // against `git fetch --upload-pack=...` etc. The url_parser
+    // already refuses `-`-prefixed refs at parse time; the `--` here
+    // is belt-and-braces.
     let dest_str = dest.to_str().ok_or_else(|| {
         LibraryError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -166,18 +172,26 @@ fn git_clone_and_checkout(repo: &str, git_ref: &str, dest: &Path) -> Result<(), 
     })?;
 
     run_git(
-        &["clone", "--depth", "1", "--no-tags", repo, dest_str],
+        &["clone", "--depth", "1", "--no-tags", "--", repo, dest_str],
         None,
     )?;
-    run_git(&["fetch", "--depth", "1", "origin", git_ref], Some(dest))?;
+    run_git(
+        &["fetch", "--depth", "1", "origin", "--", git_ref],
+        Some(dest),
+    )?;
     run_git(&["checkout", "--detach", "FETCH_HEAD"], Some(dest))?;
     Ok(())
 }
 
 fn git_refresh(repo: &str, git_ref: &str, dest: &Path) -> Result<(), LibraryError> {
     // Reset any local state (defensive — there shouldn't be any) then
-    // fetch + check out.
-    run_git(&["fetch", "--depth", "1", "origin", git_ref], Some(dest)).or_else(|_| {
+    // fetch + check out. `--` separator before user-controlled
+    // git_ref (see git_clone_and_checkout rationale).
+    run_git(
+        &["fetch", "--depth", "1", "origin", "--", git_ref],
+        Some(dest),
+    )
+    .or_else(|_| {
         // Fallback: re-clone if fetch fails (e.g. shallow clone
         // limitations on commit SHAs that aren't reachable from
         // the default branch).
@@ -198,16 +212,29 @@ fn run_git(args: &[&str], cwd: Option<&Path>) -> Result<(), LibraryError> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let redacted = crate::network::redact_credentials(stderr.trim());
+        // Redact every arg individually before joining for the log —
+        // the `<repo>` slot of `git clone` is a user-controlled URL
+        // that may carry `user:token@host` credentials. Stderr is
+        // already redacted above; argv was not, leaking PATs into
+        // `~/.jarvy/logs/jarvy.log` and any OTLP sink. (Review item 6.)
+        let redacted_args: Vec<std::borrow::Cow<'_, str>> = args
+            .iter()
+            .map(|a| crate::network::redact_credentials(a))
+            .collect();
+        let redacted_args_joined: String = redacted_args
+            .iter()
+            .map(|c| c.as_ref())
+            .collect::<Vec<_>>()
+            .join(" ");
         tracing::warn!(
             event = "library.git.clone_failed",
-            args = %args.join(" "),
+            args = %redacted_args_joined,
             exit = %output.status.code().unwrap_or(-1),
             error = %redacted,
         );
         return Err(LibraryError::Io(std::io::Error::other(format!(
             "git {} failed: {}",
-            args.join(" "),
-            redacted
+            redacted_args_joined, redacted
         ))));
     }
     Ok(())
@@ -252,13 +279,29 @@ fn resolve_subpath_within(root: &Path, subpath: &str) -> Result<PathBuf, Library
 }
 
 fn walk_skills(root: &Path) -> Result<Vec<LibraryItem>, LibraryError> {
+    // Canonicalize the root ONCE so per-file containment checks below
+    // compare against a stable absolute path. If the root itself is a
+    // symlink, that's resolved here.
+    let canon_root = root.canonicalize().map_err(LibraryError::Io)?;
     let mut items = Vec::new();
-    walk_dir(root, root, &mut items)?;
+    walk_dir(&canon_root, &canon_root, &mut items)?;
     Ok(items)
 }
 
-fn walk_dir(root: &Path, dir: &Path, items: &mut Vec<LibraryItem>) -> Result<(), LibraryError> {
-    if !dir.is_dir() {
+fn walk_dir(
+    canon_root: &Path,
+    dir: &Path,
+    items: &mut Vec<LibraryItem>,
+) -> Result<(), LibraryError> {
+    // Use `symlink_metadata` (no follow) on the entry so a publisher's
+    // committed symlink doesn't redirect the walker to /home/$USER/.ssh
+    // or similar. P0 fix: previously `is_dir()` followed symlinks and
+    // could walk arbitrary paths the publisher pointed at.
+    let dir_meta = match std::fs::symlink_metadata(dir) {
+        Ok(m) => m,
+        Err(e) => return Err(LibraryError::Io(e)),
+    };
+    if dir_meta.file_type().is_symlink() || !dir_meta.is_dir() {
         return Ok(());
     }
     for entry in std::fs::read_dir(dir).map_err(LibraryError::Io)? {
@@ -270,17 +313,51 @@ fn walk_dir(root: &Path, dir: &Path, items: &mut Vec<LibraryItem>) -> Result<(),
                 continue;
             }
         }
-        if path.is_dir() {
-            walk_dir(root, &path, items)?;
+        // Skip symlinks entirely — both for dir traversal and SKILL.md
+        // file targets. A symlinked SKILL.md could point at an
+        // arbitrary file outside the clone whose contents would then
+        // be packaged into the synthesized manifest and written to
+        // `~/.{agent}/skills/`. Use file_type from the entry to avoid
+        // an extra syscall.
+        let file_type = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        if file_type.is_symlink() {
+            tracing::info!(
+                event = "library.git.symlink_skipped",
+                path = %path.strip_prefix(canon_root).unwrap_or(&path).display(),
+            );
+            continue;
+        }
+        if file_type.is_dir() {
+            walk_dir(canon_root, &path, items)?;
             continue;
         }
         if path.file_name().and_then(|n| n.to_str()) == Some("SKILL.md") {
-            match build_skill_item(root, &path) {
+            // Defense-in-depth: even with the symlink-skip above,
+            // canonicalize the SKILL.md path and assert it lives
+            // inside the canonical root. Catches edge cases where the
+            // entry itself isn't a symlink but its parent was followed
+            // before our check (shouldn't happen given the dir walk
+            // also skips symlinks, but belt-and-braces).
+            let canon_path = match path.canonicalize() {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            if !canon_path.starts_with(canon_root) {
+                tracing::warn!(
+                    event = "library.git.path_escape_refused",
+                    canon_path = %canon_path.display(),
+                );
+                continue;
+            }
+            match build_skill_item(canon_root, &canon_path) {
                 Ok(item) => items.push(LibraryItem::Skill(item)),
                 Err(reason) => {
                     tracing::info!(
                         event = "library.git_skill.skipped",
-                        path = %path.display(),
+                        path = %canon_path.strip_prefix(canon_root).unwrap_or(&canon_path).display(),
                         reason = %reason,
                     );
                 }
@@ -358,14 +435,70 @@ struct SkillFrontmatter {
 
 /// Read a `file://` URL into bytes. Used by the skills installer when
 /// a manifest item's `skill_md_url` came from a git-fetched library.
+///
+/// P0 — scope refusal. The URL MUST canonicalize to a path inside the
+/// library-cache root (`~/.jarvy/library.d/`). A manifest fetched over
+/// HTTPS that declares `skill_md_url = "file:///etc/passwd"` would
+/// otherwise be honored — the publisher of any trusted library URL
+/// could exfiltrate any user-readable file via the agent skill dir.
+/// Bounded by `MAX_ITEM_BYTES` so a multi-GB file doesn't OOM.
 pub fn read_file_url(url: &str) -> Result<Vec<u8>, LibraryError> {
+    use std::io::Read as _;
     let path = url
         .strip_prefix("file://")
         .ok_or_else(|| LibraryError::Parse {
             url: url.to_string(),
             source: serde::de::Error::custom("not a file:// URL"),
         })?;
-    std::fs::read(path).map_err(LibraryError::Io)
+
+    // Anchor: canonical library cache root. If the cache hasn't been
+    // created (no prior sync), no file:// URL is acceptable.
+    let cache_root = match super::cache::cache_root() {
+        Ok(root) => root,
+        Err(_) => {
+            return Err(LibraryError::Parse {
+                url: url.to_string(),
+                source: serde::de::Error::custom(
+                    "file:// rejected: library cache root unavailable",
+                ),
+            });
+        }
+    };
+    let canon_root = cache_root.canonicalize().map_err(LibraryError::Io)?;
+    let canon_path = std::path::Path::new(path)
+        .canonicalize()
+        .map_err(LibraryError::Io)?;
+    if !canon_path.starts_with(&canon_root) {
+        tracing::warn!(
+            event = "library.file_url_refused",
+            reason = "outside_cache_root",
+        );
+        return Err(LibraryError::Parse {
+            url: url.to_string(),
+            source: serde::de::Error::custom(
+                "file:// rejected: path is outside the library cache root",
+            ),
+        });
+    }
+
+    // Bounded read — MAX_ITEM_BYTES matches the HTTPS-fetch cap so the
+    // two paths can't be played off against each other (an attacker
+    // who controls a publisher manifest can't trick a 50 GB local file
+    // into memory).
+    let file = std::fs::File::open(&canon_path).map_err(LibraryError::Io)?;
+    let mut limited = file.take(super::fetch::MAX_ITEM_BYTES + 1);
+    let mut buf = Vec::with_capacity(8 * 1024);
+    limited.read_to_end(&mut buf).map_err(LibraryError::Io)?;
+    if buf.len() as u64 > super::fetch::MAX_ITEM_BYTES {
+        return Err(LibraryError::Parse {
+            url: url.to_string(),
+            source: serde::de::Error::custom(format!(
+                "file:// rejected: body exceeds {} byte cap",
+                super::fetch::MAX_ITEM_BYTES
+            )),
+        });
+    }
+    Ok(buf)
 }
 
 #[cfg(test)]
@@ -489,13 +622,102 @@ mod tests {
         assert_eq!(items.len(), 2);
     }
 
+    /// P0 — read_file_url MUST refuse paths outside the library cache
+    /// root. Without the anchor, a publisher-controlled manifest can
+    /// declare `skill_md_url = "file:///etc/passwd"` and exfiltrate
+    /// any user-readable file through the agent skill dir.
     #[test]
-    fn read_file_url_round_trips() {
+    #[serial_test::serial(library_env)]
+    fn read_file_url_refuses_paths_outside_cache_root() {
+        // SAFETY: serial-test gate (`library_env`) ensures no other env-mutating
+        // test in this group runs concurrently.
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("JARVY_HOME", tempdir().unwrap().path());
+        }
         let tmp = tempdir().unwrap();
-        let path = tmp.path().join("x.md");
-        std::fs::write(&path, "hello").unwrap();
-        let url = format!("file://{}", path.display());
+        let outside_path = tmp.path().join("evil.md");
+        std::fs::write(&outside_path, "secret").unwrap();
+        let url = format!("file://{}", outside_path.canonicalize().unwrap().display());
+        let err = read_file_url(&url).expect_err("must refuse paths outside cache root");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("outside") || msg.contains("cache root") || msg.contains("library cache"),
+            "expected cache-root refusal, got {msg}"
+        );
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::remove_var("JARVY_HOME");
+        }
+    }
+
+    /// Happy path — a file:// URL pointing INSIDE the cache root reads
+    /// successfully. Ensures the containment check isn't a blanket
+    /// refusal of every file:// URL.
+    #[test]
+    #[serial_test::serial(library_env)]
+    fn read_file_url_accepts_paths_inside_cache_root() {
+        let home = tempdir().unwrap();
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("JARVY_HOME", home.path());
+        }
+        // Force cache root creation by calling manifest_cache_path
+        // (creates the dir tree).
+        let cache_root = super::super::cache::cache_root().unwrap();
+        let target = cache_root.join("test-skill.md");
+        std::fs::write(&target, b"hello inside").unwrap();
+        let url = format!("file://{}", target.canonicalize().unwrap().display());
         let bytes = read_file_url(&url).unwrap();
-        assert_eq!(bytes, b"hello");
+        assert_eq!(bytes, b"hello inside");
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::remove_var("JARVY_HOME");
+        }
+    }
+
+    /// P0 — symlink in cloned repo must be skipped, NOT followed.
+    /// Without this, a publisher's `evil-skill -> /home/$USER/.ssh`
+    /// symlink causes the walker to descend into ~/.ssh and package
+    /// any SKILL.md it finds.
+    #[test]
+    #[cfg(unix)]
+    fn walk_skills_skips_symlinks() {
+        let tmp = tempdir().unwrap();
+        // Real SKILL.md the walker should find.
+        std::fs::create_dir_all(tmp.path().join("real")).unwrap();
+        std::fs::write(
+            tmp.path().join("real/SKILL.md"),
+            "---\nname: real-skill\nversion: 1.0.0\n---\nbody",
+        )
+        .unwrap();
+        // Symlinked dir pointing OUTSIDE the clone — must be skipped.
+        let outside = tempdir().unwrap();
+        std::fs::create_dir_all(outside.path().join("evil")).unwrap();
+        std::fs::write(
+            outside.path().join("evil/SKILL.md"),
+            "---\nname: evil-skill\nversion: 1.0.0\n---\nshould not be packaged",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(outside.path().join("evil"), tmp.path().join("evil-link"))
+            .unwrap();
+        // Symlinked SKILL.md inside the clone — must be skipped.
+        std::os::unix::fs::symlink(
+            outside.path().join("evil/SKILL.md"),
+            tmp.path().join("real/SYMLINKED.md"),
+        )
+        .unwrap();
+
+        let items = walk_skills(tmp.path()).unwrap();
+        assert_eq!(
+            items.len(),
+            1,
+            "only the real SKILL.md should land; symlinked entries refused"
+        );
+        if let LibraryItem::Skill(s) = &items[0] {
+            assert_eq!(s.name, "real-skill");
+        } else {
+            panic!("expected Skill variant");
+        }
     }
 }
