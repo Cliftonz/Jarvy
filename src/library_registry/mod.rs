@@ -150,6 +150,16 @@ static MANIFEST_CACHE: Mutex<Option<CacheEntries>> = Mutex::new(None);
 /// returns the original `LibraryError::Fetch`.
 pub fn sync(source: &LibrarySource) -> Result<SyncReport, LibraryError> {
     let telemetry_on = crate::observability::telemetry_gate::is_enabled();
+    // Per-sync span so every child event (fetch start/complete, sha
+    // check, signature warnings, sync.failed / completed) nests under
+    // one trace ID per library URL (obs P1, review item 22). Held for
+    // the lifetime of this call via the `_sync_span.entered()` guard.
+    let _sync_span = tracing::info_span!(
+        "library.sync",
+        url = %crate::network::redact_credentials(&source.url),
+        require_signature = source.require_signature,
+    )
+    .entered();
     if telemetry_on {
         tracing::info!(
             event = "library.sync.started",

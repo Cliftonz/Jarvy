@@ -154,6 +154,8 @@ OTEL-based, **opt-out by default**. Config in `~/.jarvy/config.toml::[telemetry]
 | `git_hooks.remote_refused` | remote config tried auto_install | `reason = "allow_remote_not_set"` |
 | `git_hooks.install_failed` | install_hooks returned error | `error_kind`, `error` |
 | `git_hooks.installed` / `git_hooks.updated` | per-framework op | `framework = "pre-commit"`, `install_hooks` (for installed) |
+| `git_hooks.install_started` / `git_hooks.install_completed` | `install_hooks()` entry/exit (CLI + setup callers; obs P1 review item 23/24) | started: `enabled`, `auto_update`, `run_after_install`. completed: `status = "applied" \| "skipped" \| "failed"`, `applied`, `framework`, `auto_update`, `run_after_install`, `duration_ms` |
+| `git_hooks.update_started` / `git_hooks.update_completed` | `update_hooks()` entry/exit | started: `enabled`. completed: `status`, `applied`, `framework`, `duration_ms` |
 | `git_hooks.pre_commit_version_mismatch` | version pin triggered upgrade | `installed`, `required` |
 | `library.sync.started` | per-source fetch begins (PRD-054) | `url` (redacted), `require_signature` |
 | `library.sync.completed` | fetch + parse OK | `url`, `items_synced`, `ai_hook_count`, `mcp_server_count`, `skill_count`, `from_cache`, `signature_verified` |

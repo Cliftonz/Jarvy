@@ -117,7 +117,54 @@ fn enforce_remote_gate(config: &GitHooksConfig) -> Result<(), HookError> {
 /// `Ok(false)` when nothing was configured / detected. Errors are
 /// advisory in the setup flow — callers map to a warning, not a fatal
 /// exit.
+///
+/// Emits `git_hooks.install_started` / `git_hooks.install_completed`
+/// envelopes (obs P1, review items 23 + 24) so the CLI entry points
+/// (`jarvy hooks install`) carry the same structured-event signal that
+/// the setup-time phase wrapper does. Distinct from the run-level
+/// `git_hooks.phase_*` envelopes in `setup_cmd::run_git_hooks_phase`
+/// (which wrap the full install + auto_update + run_after_install
+/// pipeline).
 pub fn install_hooks(config: &GitHooksConfig, project_dir: &Path) -> Result<bool, HookError> {
+    let telemetry_on = crate::observability::telemetry_gate::is_enabled();
+    let started = std::time::Instant::now();
+    if telemetry_on {
+        tracing::info!(
+            event = "git_hooks.install_started",
+            enabled = config.enabled,
+            auto_update = config.auto_update,
+            run_after_install = config.run_after_install,
+        );
+    }
+    let outcome = install_hooks_inner(config, project_dir);
+    if telemetry_on {
+        let (status, applied, framework_label) = match &outcome {
+            Ok(true) => (
+                "applied",
+                true,
+                config
+                    .framework
+                    .or_else(|| detect_framework(project_dir))
+                    .map(HookFramework::as_str)
+                    .unwrap_or("none"),
+            ),
+            Ok(false) => ("skipped", false, "none"),
+            Err(_) => ("failed", false, "none"),
+        };
+        tracing::info!(
+            event = "git_hooks.install_completed",
+            status = status,
+            applied = applied,
+            framework = framework_label,
+            auto_update = config.auto_update,
+            run_after_install = config.run_after_install,
+            duration_ms = started.elapsed().as_millis() as u64,
+        );
+    }
+    outcome
+}
+
+fn install_hooks_inner(config: &GitHooksConfig, project_dir: &Path) -> Result<bool, HookError> {
     if !config.enabled {
         return Ok(false);
     }
@@ -149,6 +196,38 @@ pub fn install_hooks(config: &GitHooksConfig, project_dir: &Path) -> Result<bool
 /// Update hooks (currently: pre-commit autoupdate). Behavior parallels
 /// `install_hooks` — Ok(true) on update, Ok(false) when nothing to do.
 pub fn update_hooks(config: &GitHooksConfig, project_dir: &Path) -> Result<bool, HookError> {
+    let telemetry_on = crate::observability::telemetry_gate::is_enabled();
+    let started = std::time::Instant::now();
+    if telemetry_on {
+        tracing::info!(event = "git_hooks.update_started", enabled = config.enabled,);
+    }
+    let outcome = update_hooks_inner(config, project_dir);
+    if telemetry_on {
+        let (status, applied, framework_label) = match &outcome {
+            Ok(true) => (
+                "applied",
+                true,
+                config
+                    .framework
+                    .or_else(|| detect_framework(project_dir))
+                    .map(HookFramework::as_str)
+                    .unwrap_or("none"),
+            ),
+            Ok(false) => ("skipped", false, "none"),
+            Err(_) => ("failed", false, "none"),
+        };
+        tracing::info!(
+            event = "git_hooks.update_completed",
+            status = status,
+            applied = applied,
+            framework = framework_label,
+            duration_ms = started.elapsed().as_millis() as u64,
+        );
+    }
+    outcome
+}
+
+fn update_hooks_inner(config: &GitHooksConfig, project_dir: &Path) -> Result<bool, HookError> {
     if !config.enabled {
         return Ok(false);
     }
