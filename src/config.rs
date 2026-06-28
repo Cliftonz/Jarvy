@@ -530,6 +530,21 @@ impl Config {
         if let Some(ref mut cfg) = self.mcp_register {
             cfg.origin = crate::ai_hooks::ConfigOrigin::Remote;
         }
+        // Review item 4 (P0) — PRD-054 trust gate for `[skills]
+        // library_sources` was wired in skills_cmd.rs but its origin
+        // tag was never propagated. A remote `jarvy setup --from <url>`
+        // config could ship `[[skills.library_sources]]` and bypass
+        // the gate entirely. Same fix shape as ai_hooks / mcp_register.
+        if let Some(ref mut cfg) = self.skills {
+            cfg.origin = crate::ai_hooks::ConfigOrigin::Remote;
+        }
+        // Review item 5 (P0) — `[git_hooks]` declared `allow_remote`
+        // as a documented trust gate but no `origin` field existed on
+        // `GitHooksConfig` to compare against. Field added in the
+        // companion git_hooks/config.rs edit; this propagates it.
+        if let Some(ref mut cfg) = self.git_hooks {
+            cfg.origin = crate::ai_hooks::ConfigOrigin::Remote;
+        }
     }
 
     pub fn new(config_path: &str) -> Self {
@@ -1017,6 +1032,73 @@ mod tests {
                 s
             );
         }
+    }
+
+    /// Review items 4 + 5 (P0). `mark_remote()` must propagate the
+    /// origin tag into every sub-config that owns one — otherwise the
+    /// per-subsystem trust gates fire against the default `Local`
+    /// value and a hostile remote config bypasses them.
+    #[test]
+    fn mark_remote_propagates_to_all_origin_bearing_subconfigs() {
+        let toml_str = r#"
+[provisioner]
+git = "latest"
+
+[ai_hooks]
+agents = ["claude-code"]
+
+[mcp_register]
+agents = ["claude-code"]
+
+[skills]
+auto_install = false
+
+[git_hooks]
+enabled = true
+"#;
+        let mut cfg: Config = toml::from_str(toml_str).unwrap();
+        // Baseline: every sub-config defaults to Local.
+        assert_eq!(cfg.origin, crate::ai_hooks::ConfigOrigin::Local);
+        assert_eq!(
+            cfg.ai_hooks.as_ref().unwrap().origin,
+            crate::ai_hooks::ConfigOrigin::Local
+        );
+        assert_eq!(
+            cfg.mcp_register.as_ref().unwrap().origin,
+            crate::ai_hooks::ConfigOrigin::Local
+        );
+        assert_eq!(
+            cfg.skills.as_ref().unwrap().origin,
+            crate::ai_hooks::ConfigOrigin::Local
+        );
+        assert_eq!(
+            cfg.git_hooks.as_ref().unwrap().origin,
+            crate::ai_hooks::ConfigOrigin::Local
+        );
+
+        cfg.mark_remote();
+
+        // Every origin-bearing sub-config now Remote. If a future
+        // sub-config adds an `origin` field and forgets the
+        // propagation, add the assertion here so the next test run
+        // catches it.
+        assert_eq!(cfg.origin, crate::ai_hooks::ConfigOrigin::Remote);
+        assert_eq!(
+            cfg.ai_hooks.as_ref().unwrap().origin,
+            crate::ai_hooks::ConfigOrigin::Remote
+        );
+        assert_eq!(
+            cfg.mcp_register.as_ref().unwrap().origin,
+            crate::ai_hooks::ConfigOrigin::Remote
+        );
+        assert_eq!(
+            cfg.skills.as_ref().unwrap().origin,
+            crate::ai_hooks::ConfigOrigin::Remote
+        );
+        assert_eq!(
+            cfg.git_hooks.as_ref().unwrap().origin,
+            crate::ai_hooks::ConfigOrigin::Remote
+        );
     }
 
     #[test]

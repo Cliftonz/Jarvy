@@ -196,7 +196,12 @@ pub fn format_size(bytes: u64) -> String {
 mod tests {
     use super::*;
 
+    /// Serialized against the `jarvy_home_env` group because
+    /// `default_log_directory()` reads JARVY_HOME — concurrent tests
+    /// that pin a tempdir into JARVY_HOME otherwise race with the
+    /// `.jarvy/logs` suffix assertion.
     #[test]
+    #[serial_test::serial(jarvy_home_env)]
     fn test_default_log_directory() {
         let dir = default_log_directory();
         assert!(dir.ends_with(".jarvy/logs"));

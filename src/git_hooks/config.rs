@@ -43,6 +43,14 @@ pub struct GitHooksConfig {
     /// pre-commit framework knobs.
     #[serde(default)]
     pub pre_commit: Option<PreCommitConfig>,
+
+    /// Origin tag set by the config loader; not serialized. Propagated
+    /// by `Config::mark_remote` so handlers can enforce the
+    /// `allow_remote` gate without re-reading the parent `Config`.
+    /// Review item 5 (P0) — previously the field was missing entirely,
+    /// making `allow_remote` dead code.
+    #[serde(skip)]
+    pub origin: crate::ai_hooks::ConfigOrigin,
 }
 
 fn default_true() -> bool {
@@ -151,5 +159,13 @@ version = "3.6.0"
         let toml_str = "allow_remote = true";
         let cfg: GitHooksConfig = toml::from_str(toml_str).unwrap();
         assert!(cfg.allow_remote);
+    }
+
+    /// Origin defaults to Local — propagation from Config::mark_remote
+    /// is tested in src/config.rs::tests.
+    #[test]
+    fn origin_defaults_to_local() {
+        let cfg: GitHooksConfig = toml::from_str("").unwrap();
+        assert_eq!(cfg.origin, crate::ai_hooks::ConfigOrigin::Local);
     }
 }

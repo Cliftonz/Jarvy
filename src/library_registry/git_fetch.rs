@@ -627,7 +627,7 @@ mod tests {
     /// declare `skill_md_url = "file:///etc/passwd"` and exfiltrate
     /// any user-readable file through the agent skill dir.
     #[test]
-    #[serial_test::serial(library_env)]
+    #[serial_test::serial(jarvy_home_env)]
     fn read_file_url_refuses_paths_outside_cache_root() {
         // SAFETY: serial-test gate (`library_env`) ensures no other env-mutating
         // test in this group runs concurrently.
@@ -655,7 +655,7 @@ mod tests {
     /// successfully. Ensures the containment check isn't a blanket
     /// refusal of every file:// URL.
     #[test]
-    #[serial_test::serial(library_env)]
+    #[serial_test::serial(jarvy_home_env)]
     fn read_file_url_accepts_paths_inside_cache_root() {
         let home = tempdir().unwrap();
         #[allow(unsafe_code)]

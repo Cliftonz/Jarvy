@@ -50,6 +50,13 @@ pub enum HookError {
     #[error("hook framework `{0}` is configured but not yet supported by jarvy")]
     UnsupportedFramework(String),
 
+    #[error(
+        "remote-fetched config attempted to install git hooks without \
+         `[git_hooks] allow_remote = true`; refusing to land arbitrary \
+         pre-commit hooks from an untrusted source (PRD-054 trust gate)"
+    )]
+    RemoteRefused,
+
     #[error("not inside a git repository (no `.git` directory found)")]
     NotAGitRepo,
 
@@ -76,6 +83,7 @@ impl HookError {
         match self {
             HookError::FrameworkNotInstalled(_) => "framework_not_installed",
             HookError::UnsupportedFramework(_) => "unsupported_framework",
+            HookError::RemoteRefused => "remote_refused",
             HookError::NotAGitRepo => "not_a_git_repo",
             HookError::InstallFailed(_) => "install_failed",
             HookError::UpdateFailed(_) => "update_failed",
@@ -84,6 +92,24 @@ impl HookError {
             HookError::Io(_) => "io",
         }
     }
+}
+
+/// Refuse install / update / run when the config came from a remote
+/// `jarvy setup --from <url>` source and `allow_remote` is not set.
+/// Review item 5 (P0) — previously the `allow_remote` field was
+/// declared but never read, so a friendly-looking remote config could
+/// land arbitrary pre-commit hooks on the consuming machine.
+fn enforce_remote_gate(config: &GitHooksConfig) -> Result<(), HookError> {
+    if config.origin == crate::ai_hooks::ConfigOrigin::Remote && !config.allow_remote {
+        if crate::observability::telemetry_gate::is_enabled() {
+            tracing::warn!(
+                event = "git_hooks.remote_refused",
+                reason = "allow_remote_not_set",
+            );
+        }
+        return Err(HookError::RemoteRefused);
+    }
+    Ok(())
 }
 
 /// Install hooks for the configured framework, auto-detecting if the
@@ -95,6 +121,7 @@ pub fn install_hooks(config: &GitHooksConfig, project_dir: &Path) -> Result<bool
     if !config.enabled {
         return Ok(false);
     }
+    enforce_remote_gate(config)?;
     if !project_dir.join(".git").exists() {
         return Err(HookError::NotAGitRepo);
     }
@@ -125,6 +152,7 @@ pub fn update_hooks(config: &GitHooksConfig, project_dir: &Path) -> Result<bool,
     if !config.enabled {
         return Ok(false);
     }
+    enforce_remote_gate(config)?;
     let framework = match config.framework.or_else(|| detect_framework(project_dir)) {
         Some(f) => f,
         None => return Ok(false),
@@ -172,6 +200,7 @@ pub fn run_hooks(
     all_files: bool,
     hook_id: Option<&str>,
 ) -> Result<(), HookError> {
+    enforce_remote_gate(config)?;
     let framework = match config.framework.or_else(|| detect_framework(project_dir)) {
         Some(f) => f,
         None => {
@@ -252,4 +281,112 @@ pub struct HookInfo {
     pub version: String,
     #[allow(dead_code)] // Reserved for husky/lefthook handlers
     pub hook_type: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai_hooks::ConfigOrigin;
+    use tempfile::tempdir;
+
+    /// Review item 5 (P0). Remote-origin config with default
+    /// `allow_remote = false` must refuse install / update / run.
+    #[test]
+    fn install_hooks_refuses_remote_without_allow_remote_opt_in() {
+        let tmp = tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        std::fs::write(tmp.path().join(".pre-commit-config.yaml"), "repos: []").unwrap();
+        let cfg = GitHooksConfig {
+            enabled: true,
+            framework: Some(HookFramework::PreCommit),
+            auto_install: true,
+            auto_update: false,
+            run_after_install: false,
+            allow_remote: false,
+            pre_commit: None,
+            origin: ConfigOrigin::Remote,
+        };
+        let err = install_hooks(&cfg, tmp.path()).expect_err("remote must refuse");
+        assert!(matches!(err, HookError::RemoteRefused), "got {err:?}");
+    }
+
+    #[test]
+    fn update_hooks_refuses_remote_without_allow_remote_opt_in() {
+        let tmp = tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        let cfg = GitHooksConfig {
+            enabled: true,
+            framework: Some(HookFramework::PreCommit),
+            auto_install: true,
+            auto_update: false,
+            run_after_install: false,
+            allow_remote: false,
+            pre_commit: None,
+            origin: ConfigOrigin::Remote,
+        };
+        let err = update_hooks(&cfg, tmp.path()).expect_err("remote must refuse");
+        assert!(matches!(err, HookError::RemoteRefused));
+    }
+
+    #[test]
+    fn run_hooks_refuses_remote_without_allow_remote_opt_in() {
+        let tmp = tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        let cfg = GitHooksConfig {
+            enabled: true,
+            framework: Some(HookFramework::PreCommit),
+            auto_install: true,
+            auto_update: false,
+            run_after_install: false,
+            allow_remote: false,
+            pre_commit: None,
+            origin: ConfigOrigin::Remote,
+        };
+        let err = run_hooks(&cfg, tmp.path(), false, None).expect_err("remote must refuse");
+        assert!(matches!(err, HookError::RemoteRefused));
+    }
+
+    /// Remote-origin config WITH explicit `allow_remote = true` passes
+    /// the gate (proceeds to framework detection / handler).
+    #[test]
+    fn install_hooks_accepts_remote_when_explicitly_opted_in() {
+        let tmp = tempdir().unwrap();
+        // No .git dir → install_hooks returns NotAGitRepo AFTER the
+        // gate check passes. That proves the gate didn't fire.
+        let cfg = GitHooksConfig {
+            enabled: true,
+            framework: Some(HookFramework::PreCommit),
+            auto_install: true,
+            auto_update: false,
+            run_after_install: false,
+            allow_remote: true,
+            pre_commit: None,
+            origin: ConfigOrigin::Remote,
+        };
+        let err =
+            install_hooks(&cfg, tmp.path()).expect_err("no .git → NotAGitRepo, NOT RemoteRefused");
+        assert!(
+            matches!(err, HookError::NotAGitRepo),
+            "expected gate to pass + later check to fail with NotAGitRepo; got {err:?}"
+        );
+    }
+
+    /// Local-origin config (default) is unchanged — no `allow_remote`
+    /// needed.
+    #[test]
+    fn install_hooks_local_origin_unchanged() {
+        let tmp = tempdir().unwrap();
+        let cfg = GitHooksConfig {
+            enabled: true,
+            framework: Some(HookFramework::PreCommit),
+            auto_install: true,
+            auto_update: false,
+            run_after_install: false,
+            allow_remote: false,
+            pre_commit: None,
+            origin: ConfigOrigin::Local, // default
+        };
+        let err = install_hooks(&cfg, tmp.path()).expect_err("no .git → NotAGitRepo");
+        assert!(matches!(err, HookError::NotAGitRepo));
+    }
 }
