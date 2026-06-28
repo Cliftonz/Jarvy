@@ -166,3 +166,129 @@ fn uninstall_action(project_dir: &Path) -> i32 {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Exit-code contract tests for `hooks_cmd` action handlers
+    //! (QA P1, review item 25). These pin the install/update/list/status
+    //! mapping so a refactor of `git_hooks::*` can't silently flip a
+    //! success path into a HOOK_FAILED exit (or vice versa) without a
+    //! test catching it.
+    use super::*;
+    use crate::ai_hooks::ConfigOrigin;
+    use crate::git_hooks::{GitHooksConfig, HookFramework};
+    use tempfile::tempdir;
+
+    fn cfg_local_pre_commit() -> GitHooksConfig {
+        GitHooksConfig {
+            enabled: true,
+            framework: Some(HookFramework::PreCommit),
+            auto_install: true,
+            auto_update: false,
+            run_after_install: false,
+            allow_remote: false,
+            pre_commit: None,
+            origin: ConfigOrigin::Local,
+        }
+    }
+
+    fn cfg_disabled() -> GitHooksConfig {
+        let mut c = cfg_local_pre_commit();
+        c.enabled = false;
+        c
+    }
+
+    fn cfg_remote_without_opt_in() -> GitHooksConfig {
+        let mut c = cfg_local_pre_commit();
+        c.origin = ConfigOrigin::Remote;
+        c
+    }
+
+    /// `install_action` returns 0 (Ok) when hooks are disabled —
+    /// `install_hooks` returns `Ok(false)` and the action treats that
+    /// as a non-error skip.
+    #[test]
+    fn install_action_returns_zero_when_disabled() {
+        let tmp = tempdir().unwrap();
+        let exit = install_action(&cfg_disabled(), tmp.path());
+        assert_eq!(exit, 0);
+    }
+
+    /// `install_action` returns HOOK_FAILED when the project isn't a
+    /// git repo (the underlying handler returns `Err(NotAGitRepo)`).
+    /// Pins the "any error → HOOK_FAILED" contract.
+    #[test]
+    fn install_action_returns_hook_failed_when_not_a_git_repo() {
+        let tmp = tempdir().unwrap();
+        // No .git directory created.
+        let exit = install_action(&cfg_local_pre_commit(), tmp.path());
+        assert_eq!(exit, crate::error_codes::HOOK_FAILED);
+    }
+
+    /// Remote-origin config without `allow_remote` opt-in must return
+    /// HOOK_FAILED — the trust gate fires inside `install_hooks` and
+    /// the action surfaces it as a failure exit. Review item 5 (P0)
+    /// already covered the refusal; this pins the CLI-level exit code.
+    #[test]
+    fn install_action_returns_hook_failed_for_remote_without_allow_remote() {
+        let tmp = tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        let exit = install_action(&cfg_remote_without_opt_in(), tmp.path());
+        assert_eq!(exit, crate::error_codes::HOOK_FAILED);
+    }
+
+    /// `update_action` returns 0 when disabled.
+    #[test]
+    fn update_action_returns_zero_when_disabled() {
+        let tmp = tempdir().unwrap();
+        let exit = update_action(&cfg_disabled(), tmp.path());
+        assert_eq!(exit, 0);
+    }
+
+    /// Remote origin must refuse update too.
+    #[test]
+    fn update_action_returns_hook_failed_for_remote_without_allow_remote() {
+        let tmp = tempdir().unwrap();
+        let exit = update_action(&cfg_remote_without_opt_in(), tmp.path());
+        assert_eq!(exit, crate::error_codes::HOOK_FAILED);
+    }
+
+    /// `status_action` is a pure probe — always 0, even when nothing
+    /// is detected or installed. Mirrors `jarvy hooks status` against
+    /// a fresh non-git directory.
+    #[test]
+    fn status_action_returns_zero_on_empty_dir() {
+        let tmp = tempdir().unwrap();
+        let exit = status_action(&cfg_local_pre_commit(), tmp.path());
+        assert_eq!(exit, 0);
+    }
+
+    /// `list_action` with no detected framework returns 0 (treated as
+    /// "nothing to list" by the handler).
+    #[test]
+    fn list_action_returns_zero_when_no_framework_detected() {
+        let tmp = tempdir().unwrap();
+        let mut cfg = cfg_local_pre_commit();
+        cfg.framework = None;
+        let exit = list_action(&cfg, tmp.path());
+        assert_eq!(exit, 0);
+    }
+
+    /// `list_action` with a pre-commit framework set but no config
+    /// file present returns 0 (the handler treats missing config as
+    /// "no hooks configured", not an error).
+    #[test]
+    fn list_action_returns_zero_when_config_file_missing() {
+        let tmp = tempdir().unwrap();
+        let exit = list_action(&cfg_local_pre_commit(), tmp.path());
+        assert_eq!(exit, 0);
+    }
+
+    /// `run_action` returns HOOK_FAILED when the trust gate refuses.
+    #[test]
+    fn run_action_returns_hook_failed_for_remote_without_allow_remote() {
+        let tmp = tempdir().unwrap();
+        let exit = run_action(&cfg_remote_without_opt_in(), tmp.path(), false, None);
+        assert_eq!(exit, crate::error_codes::HOOK_FAILED);
+    }
+}
