@@ -726,3 +726,23 @@ jobs:
             upload_one "$f"
           done
           echo "All ${#files[@]} assets uploaded successfully."
+
+      # Promote the draft to a published release. Stable releases also
+      # get marked `--latest`; pre-releases (rc / beta / alpha) leave
+      # the GitHub "Latest" pin alone so users on the stable channel
+      # aren't auto-served a pre-release artifact. v0.4.0 was the
+      # canary that exposed the missing step: workflow created the
+      # draft + uploaded 61 assets, then stopped without publishing,
+      # forcing a manual `gh release edit --draft=false`.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.detect_prerelease.outputs.is_prerelease }}" = "true" ]; then
+            gh release edit "${VERSION}" --draft=false
+            echo "Pre-release ${VERSION} published (not pinned as Latest)."
+          else
+            gh release edit "${VERSION}" --draft=false --latest
+            echo "Stable release ${VERSION} published and pinned as Latest."
+          fi
