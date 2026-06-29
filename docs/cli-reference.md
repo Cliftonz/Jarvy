@@ -39,6 +39,10 @@ Commands:
   env           Manage environment variables from jarvy.toml
   ci-config     Generate CI configuration files for various providers
   ci-info       Show detected CI environment information
+  context       Show the current execution context (workspace root, member, resolved config path) so you can sanity-check what jarvy would do from this directory. Read-only
+  library       Inspect / clean the shared library-registry cache (PRD-054 phase 6)
+  workspace     Inspect a monorepo workspace defined by `[workspace]` in jarvy.toml (PRD-047)
+  discover      Scan the project for tooling and suggest a jarvy.toml (PRD-044)
   services      Manage project services (docker-compose, tilt)
   doctor        Diagnose environment issues, check tool health, and verify PATH
   diff          Preview changes before running setup (dry-run)
@@ -93,10 +97,7 @@ Usage: jarvy setup [OPTIONS]
 
 Options:
   -f, --file <FILE>            Path to the configuration file [default: ./jarvy.toml]
-  -P, --project <NAME>         Run setup against one workspace member (PRD-047). Pass the member name from
-                               `[workspace] members`, or `current` to auto-detect from cwd. Without --project,
-                               setup auto-detects whether cwd sits inside a member; pass --project at the
-                               workspace root to disambiguate.
+  -P, --project <NAME>         Run setup against one workspace member only (PRD-047). Pass the member name as it appears in `[workspace] members`, or use `current` to auto-detect from the current directory. Without `--project`, setup runs against the file at `--file` as a single-project repo (unchanged behavior)
       --from <URL>             Fetch configuration from a URL (e.g., GitHub raw URL, gist, HTTP endpoint)
       --role <ROLE>            Override role assignment for this run (temporary, doesn't modify config)
       --no-hooks               Skip all hook execution
@@ -209,10 +210,77 @@ Options:
 ```text
 Show detected CI environment information
 
-Usage: jarvy ci-info
+Usage: jarvy ci-info [OPTIONS]
+
+Options:
+  -F, --format <OUTPUT_FORMAT>  Output format: json, pretty [default: pretty]
+  -h, --help                    Print help
+```
+
+### `jarvy context`
+
+```text
+Show the current execution context (workspace root, member, resolved config path) so you can sanity-check what jarvy would do from this directory. Read-only
+
+Usage: jarvy context [OPTIONS]
+
+Options:
+  -f, --file <FILE>             Path to the configuration file (default: walks up from cwd) [default: ./jarvy.toml]
+  -F, --format <OUTPUT_FORMAT>  Output format: json, pretty [default: pretty]
+  -h, --help                    Print help
+```
+
+### `jarvy library`
+
+```text
+Inspect / clean the shared library-registry cache (PRD-054 phase 6)
+
+Usage: jarvy library <COMMAND>
+
+Commands:
+  list   List every cached library (URL, publisher, item counts)
+  show   Show the items inside one cached library
+  clean  Wipe the on-disk library cache (`~/.jarvy/library.d/`)
+  sync   Force-refresh every cached library_sources entry declared in jarvy.toml
+  help   Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help  Print help
+```
+
+### `jarvy workspace`
+
+```text
+Inspect a monorepo workspace defined by `[workspace]` in jarvy.toml (PRD-047)
+
+Usage: jarvy workspace [OPTIONS] <COMMAND>
+
+Commands:
+  list      List all workspace members and their tools
+  show      Show the resolved tool set for one member (with inheritance applied)
+  validate  Validate the workspace (members exist, each jarvy.toml parses)
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -f, --file <FILE>  Path to the configuration file [default: ./jarvy.toml]
+  -h, --help         Print help
+```
+
+### `jarvy discover`
+
+```text
+Scan the project for tooling and suggest a jarvy.toml (PRD-044)
+
+Usage: jarvy discover [OPTIONS]
+
+Options:
+  -f, --file <FILE>             Path to the configuration file to read / update [default: ./jarvy.toml]
+      --apply                   Write suggestions into jarvy.toml (creates the file if missing)
+      --missing                 Show only tools that aren't already pinned (one `name = "version"` per line)
+      --rules <RULES>           Path to a custom rules TOML file (overrides [discover] rules in jarvy.toml). Custom rules append to — never replace — the built-in set
+      --watch                   Re-run discover whenever a project file changes (notify-driven file-system watcher). Press Ctrl-C to exit
+  -F, --format <OUTPUT_FORMAT>  Output format: json, pretty [default: pretty]
+  -h, --help                    Print help
 ```
 
 ### `jarvy services`
@@ -764,98 +832,6 @@ Options:
   -f, --file <FILE>  Path to the configuration file [default: ./jarvy.toml]
   -h, --help         Print help
 ```
-
-### `jarvy discover`
-
-```text
-Scan the project for tooling and suggest a jarvy.toml (PRD-044)
-
-Usage: jarvy discover [OPTIONS]
-
-Options:
-  -f, --file <FILE>          Path to the configuration file to read / update [default: ./jarvy.toml]
-      --apply                Write suggestions into jarvy.toml (creates if missing, merges if not)
-      --missing              Show only tools that aren't already pinned (one `name = "version"` per line)
-      --rules <PATH>         Custom rules TOML file appended to the built-in set (overrides
-                             `[discover] rules = "..."` from jarvy.toml)
-      --watch                Re-run discover whenever a project file changes (notify-driven,
-                             750 ms debounce; Ctrl-C to exit). Falls through to one-shot mode
-                             under `--format json`.
-  -F, --format <OUTPUT_FORMAT>  Output format: json, pretty [default: pretty]
-  -h, --help                 Print help
-```
-
-Dry-run by default. `--apply` is append-only: hand-pinned tools in
-`[provisioner]` survive unchanged; new tools land after the existing
-block, before any subsequent `[section]`. Detected ecosystems jarvy
-can't install (maven, gradle, dotnet, …) surface in an
-`uninstallable` bucket — never silently dropped. After `jarvy setup`
-runs, a continuous-discovery advisory fires for any tool implied by
-the project tree but not yet in `[provisioner]`. See
-[`docs/discover.md`](discover.md) for `[discover]` config, custom
-rules shape, version-range narrowing, and the trust posture.
-
-### `jarvy workspace`
-
-```text
-Inspect a monorepo workspace defined by `[workspace]` in jarvy.toml (PRD-047)
-
-Usage: jarvy workspace [OPTIONS] <COMMAND>
-
-Commands:
-  list      List all workspace members and their tools
-  show      Show the resolved tool set for one member (with inheritance applied)
-  validate  Validate the workspace (members exist, each jarvy.toml parses)
-
-Options:
-  -f, --file <FILE>  Path to the configuration file [default: ./jarvy.toml]
-  -h, --help         Print help
-```
-
-Read-only inspection of `[workspace] members = [...]` declarations.
-Supports glob patterns (`apps/*`) and `exclude = [...]` in
-`[workspace]`. `show` annotates each tool with `(inherited)` /
-`(overridden)` so it's clear where each version came from. For
-actually provisioning a member, use `jarvy setup --project <name>`
-or rely on auto-context detection (`cd apps/web && jarvy setup`).
-See [`docs/workspace.md`](workspace.md) for inheritance semantics.
-
-### `jarvy context`
-
-```text
-Show the current execution context (workspace root, member, resolved config path)
-
-Usage: jarvy context [OPTIONS]
-
-Options:
-  -f, --file <FILE>             Path to the configuration file [default: ./jarvy.toml]
-  -F, --format <OUTPUT_FORMAT>  Output format: json, pretty [default: pretty]
-  -h, --help                    Print help
-```
-
-Read-only diagnostic — what would `jarvy setup` actually do from here?
-Lists detected workspace members (current marked with `→`),
-auto-detected `--project`, and the resolved setup file.
-
-### `jarvy library`
-
-```text
-Inspect / clean the shared library-registry cache (PRD-054 phase 6)
-
-Usage: jarvy library [OPTIONS] <COMMAND>
-
-Commands:
-  list   List every cached library (URL, publisher, item counts)
-  show   Show the items inside one cached library
-  clean  Wipe `~/.jarvy/library.d/` (and the process cache). Supports --dry-run.
-  sync   Force-refresh every library_sources entry declared in jarvy.toml
-```
-
-`list` / `show` / `clean` are read-only or local-disk operations.
-`sync` walks `[ai_hooks] library_sources`, `[mcp_register]
-library_sources`, and `[skills] library_sources` and refetches each
-one (honoring the remote-config trust gate and cosign signature
-verification — see PRD-054).
 
 ### `jarvy help`
 
