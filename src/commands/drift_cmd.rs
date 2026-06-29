@@ -21,9 +21,19 @@ pub fn run_drift(file: &str, action: &DriftAction) -> i32 {
 
     match action {
         DriftAction::Check { output_format } => run_drift_check(&project_dir, file, output_format),
-        DriftAction::Status { verbose } => run_drift_status(&project_dir, *verbose),
-        DriftAction::Accept { tools } => run_drift_accept(&project_dir, file, tools.as_deref()),
-        DriftAction::Fix { dry_run, force: _ } => run_drift_fix(&project_dir, file, *dry_run),
+        DriftAction::Status {
+            verbose,
+            output_format,
+        } => run_drift_status(&project_dir, *verbose, output_format),
+        DriftAction::Accept {
+            tools,
+            output_format,
+        } => run_drift_accept(&project_dir, file, tools.as_deref(), output_format),
+        DriftAction::Fix {
+            dry_run,
+            force: _,
+            output_format,
+        } => run_drift_fix(&project_dir, file, *dry_run, output_format),
     }
 }
 
@@ -86,20 +96,65 @@ fn run_drift_check(project_dir: &Path, config_file: &str, output_format: &str) -
 }
 
 /// Run drift status command
-fn run_drift_status(project_dir: &Path, verbose: bool) -> i32 {
+fn run_drift_status(project_dir: &Path, verbose: bool, output_format: &str) -> i32 {
     let state = match EnvironmentState::load(project_dir) {
         Ok(Some(state)) => state,
         Ok(None) => {
-            println!("\x1b[33m⚠\x1b[0m No baseline state found.");
-            println!("  The baseline is captured automatically after 'jarvy setup'.");
-            println!("  Or run 'jarvy drift accept' to create one manually.");
+            if output_format == "json" {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "status": "no_baseline",
+                        "message": "no baseline state found",
+                    })
+                );
+            } else {
+                println!("\x1b[33m⚠\x1b[0m No baseline state found.");
+                println!("  The baseline is captured automatically after 'jarvy setup'.");
+                println!("  Or run 'jarvy drift accept' to create one manually.");
+            }
             return 0;
         }
         Err(e) => {
-            eprintln!("Failed to load state: {}", e);
+            if output_format == "json" {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "status": "error",
+                        "error": e.to_string(),
+                    })
+                );
+            } else {
+                eprintln!("Failed to load state: {}", e);
+            }
             return 1;
         }
     };
+
+    if output_format == "json" {
+        let json = serde_json::json!({
+            "status": "ok",
+            "state_version": state.version,
+            "created_at": state.created_at,
+            "updated_at": state.updated_at,
+            "tools": state.tools.iter().map(|(name, tool)| {
+                serde_json::json!({
+                    "name": name,
+                    "version": tool.version,
+                    "install_method": tool.install_method,
+                    "path": tool.path.display().to_string(),
+                })
+            }).collect::<Vec<_>>(),
+            "files": state.files.iter().map(|(path, hash)| {
+                serde_json::json!({ "path": path, "hash": hash })
+            }).collect::<Vec<_>>(),
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
+        );
+        return 0;
+    }
 
     println!("\x1b[1mDrift Detection Baseline\x1b[0m");
     println!("========================");
@@ -139,7 +194,12 @@ fn run_drift_status(project_dir: &Path, verbose: bool) -> i32 {
 }
 
 /// Run drift accept command
-fn run_drift_accept(project_dir: &Path, config_file: &str, tools_filter: Option<&str>) -> i32 {
+fn run_drift_accept(
+    project_dir: &Path,
+    config_file: &str,
+    tools_filter: Option<&str>,
+    output_format: &str,
+) -> i32 {
     // Load config to get tracked files
     let config = Config::new(config_file);
     let drift_config = config.drift.clone().unwrap_or_default();
@@ -193,39 +253,68 @@ fn run_drift_accept(project_dir: &Path, config_file: &str, tools_filter: Option<
 
     // Save state
     if let Err(e) = state.save(project_dir) {
-        eprintln!("Failed to save state: {}", e);
+        if output_format == "json" {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "status": "error",
+                    "error": e.to_string(),
+                })
+            );
+        } else {
+            eprintln!("Failed to save state: {}", e);
+        }
         return 1;
     }
 
-    println!("\x1b[32m✓\x1b[0m Baseline state updated");
-    println!(
-        "  {} tool{} accepted",
-        accepted,
-        if accepted == 1 { "" } else { "s" }
-    );
-    if !drift_config.track_files.is_empty() {
+    if output_format == "json" {
+        let json = serde_json::json!({
+            "status": "ok",
+            "tools_accepted": accepted,
+            "files_tracked": drift_config.track_files.len(),
+        });
         println!(
-            "  {} file{} tracked",
-            drift_config.track_files.len(),
-            if drift_config.track_files.len() == 1 {
-                ""
-            } else {
-                "s"
-            }
+            "{}",
+            serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
         );
+    } else {
+        println!("\x1b[32m✓\x1b[0m Baseline state updated");
+        println!(
+            "  {} tool{} accepted",
+            accepted,
+            if accepted == 1 { "" } else { "s" }
+        );
+        if !drift_config.track_files.is_empty() {
+            println!(
+                "  {} file{} tracked",
+                drift_config.track_files.len(),
+                if drift_config.track_files.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            );
+        }
     }
 
     0
 }
 
 /// Run drift fix command
-fn run_drift_fix(project_dir: &Path, config_file: &str, dry_run: bool) -> i32 {
+fn run_drift_fix(project_dir: &Path, config_file: &str, dry_run: bool, output_format: &str) -> i32 {
     // Load config
     let config = Config::new(config_file);
     let drift_config = config.drift.clone().unwrap_or_default();
 
     if !drift_config.enabled {
-        println!("Drift detection is disabled in configuration.");
+        if output_format == "json" {
+            println!(
+                "{}",
+                serde_json::json!({"status": "disabled", "message": "drift detection disabled"})
+            );
+        } else {
+            println!("Drift detection is disabled in configuration.");
+        }
         return 0;
     }
 
@@ -233,12 +322,26 @@ fn run_drift_fix(project_dir: &Path, config_file: &str, dry_run: bool) -> i32 {
     let state = match EnvironmentState::load(project_dir) {
         Ok(Some(state)) => state,
         Ok(None) => {
-            println!("\x1b[33m⚠\x1b[0m No baseline state found.");
-            println!("  Run 'jarvy setup' first to establish a baseline.");
+            if output_format == "json" {
+                println!(
+                    "{}",
+                    serde_json::json!({"status": "no_baseline", "message": "no baseline state found"})
+                );
+            } else {
+                println!("\x1b[33m⚠\x1b[0m No baseline state found.");
+                println!("  Run 'jarvy setup' first to establish a baseline.");
+            }
             return 1;
         }
         Err(e) => {
-            eprintln!("Failed to load state: {}", e);
+            if output_format == "json" {
+                println!(
+                    "{}",
+                    serde_json::json!({"status": "error", "error": e.to_string()})
+                );
+            } else {
+                eprintln!("Failed to load state: {}", e);
+            }
             return 1;
         }
     };
@@ -248,17 +351,31 @@ fn run_drift_fix(project_dir: &Path, config_file: &str, dry_run: bool) -> i32 {
     let report = match detector.detect() {
         Ok(report) => report,
         Err(e) => {
-            eprintln!("Drift detection failed: {}", e);
+            if output_format == "json" {
+                println!(
+                    "{}",
+                    serde_json::json!({"status": "error", "error": e.to_string()})
+                );
+            } else {
+                eprintln!("Drift detection failed: {}", e);
+            }
             return 1;
         }
     };
 
     if report.status == DriftStatus::NoDrift {
-        println!("\x1b[32m✓\x1b[0m No drift detected, nothing to fix.");
+        if output_format == "json" {
+            println!(
+                "{}",
+                serde_json::json!({"status": "no_drift", "dry_run": dry_run})
+            );
+        } else {
+            println!("\x1b[32m✓\x1b[0m No drift detected, nothing to fix.");
+        }
         return 0;
     }
 
-    if dry_run {
+    if dry_run && output_format != "json" {
         println!("\x1b[36mDry run mode\x1b[0m - no changes will be made\n");
     }
 
@@ -266,7 +383,19 @@ fn run_drift_fix(project_dir: &Path, config_file: &str, dry_run: bool) -> i32 {
     let fixer = DriftFixer::new(dry_run);
     let results = fixer.fix_all(&report);
 
-    DriftFixer::print_summary(&results);
+    if output_format == "json" {
+        let json = serde_json::json!({
+            "status": "fixed",
+            "dry_run": dry_run,
+            "results": results,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
+        );
+    } else {
+        DriftFixer::print_summary(&results);
+    }
 
     0
 }

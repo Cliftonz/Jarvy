@@ -39,8 +39,44 @@ pub fn run_ci_config(provider: ci::CiProvider, output: &str, dry_run: bool) -> i
 }
 
 /// Run the ci-info command
-pub fn run_ci_info() {
-    match ci::detect() {
+pub fn run_ci_info(output_format: &str) {
+    let detected = ci::detect();
+    if output_format == "json" {
+        let json = match &detected {
+            Some(env) => serde_json::json!({
+                "detected": true,
+                "provider": env.provider.to_string(),
+                "forced": env.forced,
+                "features": {
+                    "log_groups": env.provider.supports_groups(),
+                    "output_vars": env.provider.supports_output_vars(),
+                    "caching": env.provider.supports_cache(),
+                    "cache_dir": env.provider.cache_dir(),
+                },
+                "build": {
+                    "id": env.build_id,
+                    "repository": env.repository,
+                    "branch": env.branch,
+                    "commit_sha": env.commit_sha,
+                }
+            }),
+            None => serde_json::json!({
+                "detected": false,
+                "supported_providers": [
+                    "github_actions", "gitlab_ci", "circleci", "travis_ci",
+                    "azure_devops", "jenkins", "bitbucket", "buildkite",
+                    "teamcity", "appveyor", "generic"
+                ]
+            }),
+        };
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
+        );
+        return;
+    }
+
+    match detected {
         Some(env) => {
             println!("CI Environment Detected");
             println!("=======================");

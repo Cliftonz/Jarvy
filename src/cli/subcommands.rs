@@ -159,16 +159,30 @@ pub enum ServicesAction {
         /// Run services in the foreground (attached)
         #[clap(long)]
         foreground: bool,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
     },
     /// Stop project services
-    Stop {},
+    Stop {
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
     /// Show service status
-    Status {},
+    Status {
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
     /// Restart project services
     Restart {
         /// Run services in the foreground (attached)
         #[clap(long)]
         foreground: bool,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
     },
 }
 
@@ -302,12 +316,18 @@ pub enum DriftAction {
         /// Show detailed tool information
         #[clap(short, long)]
         verbose: bool,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
     },
     /// Accept current state as new baseline
     Accept {
         /// Accept specific tools only (comma-separated)
         #[clap(long)]
         tools: Option<String>,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
     },
     /// Fix detected drift issues
     Fix {
@@ -317,6 +337,9 @@ pub enum DriftAction {
         /// Force fix non-auto-fixable issues (may require confirmation)
         #[clap(long)]
         force: bool,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
     },
 }
 
@@ -338,7 +361,11 @@ pub enum LogsAction {
         output_format: String,
     },
     /// Show log statistics
-    Stats {},
+    Stats {
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
     /// Clean old log files
     Clean {
         /// Remove all log files (not just old ones)
@@ -347,9 +374,16 @@ pub enum LogsAction {
         /// Show what would be removed without removing
         #[clap(long)]
         dry_run: bool,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
     },
     /// Show logging configuration
-    Config {},
+    Config {
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
 }
 
 #[derive(Clone, Subcommand)]
@@ -368,18 +402,31 @@ pub enum TicketAction {
         /// Show what would be collected without creating ticket
         #[clap(long)]
         dry_run: bool,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
     },
     /// Show contents of a ticket
     Show {
         /// Ticket ID or path to ticket ZIP
         ticket: String,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
     },
     /// List existing tickets
-    List {},
+    List {
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
     /// Clean old tickets
     Clean {
         /// Remove tickets older than this many days (default: 30)
         #[clap(long, default_value = "30")]
         older_than: u32,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
     },
 }

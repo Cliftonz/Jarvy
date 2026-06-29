@@ -171,7 +171,11 @@ pub enum Commands {
         dry_run: bool,
     },
     /// Show detected CI environment information
-    CiInfo {},
+    CiInfo {
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
     /// Manage project services (docker-compose, tilt)
     Services {
         #[clap(subcommand)]

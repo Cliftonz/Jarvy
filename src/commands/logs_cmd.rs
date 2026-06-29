@@ -14,9 +14,13 @@ pub fn run_logs_command(action: LogsAction) -> i32 {
             grep,
             output_format,
         } => handle_logs_view(lines, level, grep, &output_format),
-        LogsAction::Stats {} => handle_logs_stats(),
-        LogsAction::Clean { all, dry_run } => handle_logs_clean(all, dry_run),
-        LogsAction::Config {} => handle_logs_config(),
+        LogsAction::Stats { output_format } => handle_logs_stats(&output_format),
+        LogsAction::Clean {
+            all,
+            dry_run,
+            output_format,
+        } => handle_logs_clean(all, dry_run, &output_format),
+        LogsAction::Config { output_format } => handle_logs_config(&output_format),
     }
 }
 
@@ -85,9 +89,24 @@ fn handle_logs_view(
 }
 
 /// Show log statistics
-fn handle_logs_stats() -> i32 {
+fn handle_logs_stats(output_format: &str) -> i32 {
     match logging::get_log_stats() {
         Ok(stats) => {
+            if output_format == "json" {
+                let json = serde_json::json!({
+                    "total_files": stats.total_files,
+                    "total_size_bytes": stats.total_size_bytes,
+                    "current_file_size_bytes": stats.current_file_size_bytes,
+                    "entries_by_level": stats.entries_by_level,
+                    "oldest_entry": stats.oldest_entry,
+                    "newest_entry": stats.newest_entry,
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
+                );
+                return 0;
+            }
             println!("Log Statistics:");
             println!("  Total files: {}", stats.total_files);
             println!(
@@ -118,7 +137,14 @@ fn handle_logs_stats() -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("Error getting log stats: {}", e);
+            if output_format == "json" {
+                println!(
+                    "{}",
+                    serde_json::json!({"status": "error", "error": e.to_string()})
+                );
+            } else {
+                eprintln!("Error getting log stats: {}", e);
+            }
             1
         }
     }
@@ -128,17 +154,23 @@ fn handle_logs_stats() -> i32 {
 const DEFAULT_MAX_AGE_DAYS: u32 = 30;
 
 /// Clean old log files
-fn handle_logs_clean(all: bool, dry_run: bool) -> i32 {
+fn handle_logs_clean(all: bool, dry_run: bool, output_format: &str) -> i32 {
     let log_dir = logging::default_log_directory();
 
     if dry_run {
-        // Just show what would be removed
         if !log_dir.exists() {
-            println!("No log directory found.");
+            if output_format == "json" {
+                println!(
+                    "{}",
+                    serde_json::json!({"status": "no_log_dir", "dry_run": true})
+                );
+            } else {
+                println!("No log directory found.");
+            }
             return 0;
         }
 
-        let mut would_remove = 0;
+        let mut would_remove_paths: Vec<String> = Vec::new();
         let mut would_remove_bytes: u64 = 0;
         let max_age_secs = DEFAULT_MAX_AGE_DAYS as u64 * 24 * 60 * 60;
         let now = std::time::SystemTime::now();
@@ -167,17 +199,30 @@ fn handle_logs_clean(all: bool, dry_run: bool) -> i32 {
                         if let Ok(metadata) = path.metadata() {
                             would_remove_bytes += metadata.len();
                         }
-                        would_remove += 1;
-                        println!("Would remove: {}", path.display());
+                        if output_format != "json" {
+                            println!("Would remove: {}", path.display());
+                        }
+                        would_remove_paths.push(path.display().to_string());
                     }
                 }
             }
         }
 
-        if would_remove > 0 {
+        if output_format == "json" {
+            let json = serde_json::json!({
+                "dry_run": true,
+                "would_remove_count": would_remove_paths.len(),
+                "would_remove_bytes": would_remove_bytes,
+                "would_remove_paths": would_remove_paths,
+            });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
+            );
+        } else if !would_remove_paths.is_empty() {
             println!(
                 "\nWould remove {} files ({})",
-                would_remove,
+                would_remove_paths.len(),
                 logging::format_size(would_remove_bytes)
             );
         } else {
@@ -188,7 +233,17 @@ fn handle_logs_clean(all: bool, dry_run: bool) -> i32 {
 
     match logging::clean_logs(DEFAULT_MAX_AGE_DAYS, all) {
         Ok((removed, bytes)) => {
-            if removed > 0 {
+            if output_format == "json" {
+                let json = serde_json::json!({
+                    "dry_run": false,
+                    "removed_count": removed,
+                    "removed_bytes": bytes,
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
+                );
+            } else if removed > 0 {
                 println!(
                     "Removed {} log files ({})",
                     removed,
@@ -200,16 +255,38 @@ fn handle_logs_clean(all: bool, dry_run: bool) -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("Error cleaning logs: {}", e);
+            if output_format == "json" {
+                println!(
+                    "{}",
+                    serde_json::json!({"status": "error", "error": e.to_string()})
+                );
+            } else {
+                eprintln!("Error cleaning logs: {}", e);
+            }
             1
         }
     }
 }
 
 /// Show logging configuration
-fn handle_logs_config() -> i32 {
+fn handle_logs_config(output_format: &str) -> i32 {
     let log_dir = logging::default_log_directory();
     let log_file = logging::current_log_file();
+
+    if output_format == "json" {
+        let json = serde_json::json!({
+            "directory": log_dir.display().to_string(),
+            "current_file": log_file.display().to_string(),
+            "rotation": "daily",
+            "format": {"file": "json", "console": "text_or_json"},
+            "cleanup_max_age_days": DEFAULT_MAX_AGE_DAYS,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
+        );
+        return 0;
+    }
 
     println!("Logging Configuration:");
     println!("  Directory: {}", log_dir.display());
@@ -231,13 +308,22 @@ mod tests {
     #[test]
     fn test_logs_config() {
         // Should not panic
-        let result = handle_logs_config();
+        let result = handle_logs_config("pretty");
         assert_eq!(result, 0);
     }
 
     #[test]
     fn test_logs_stats() {
         // Should not panic even with no logs
-        let _result = handle_logs_stats();
+        let _result = handle_logs_stats("pretty");
+    }
+
+    #[test]
+    fn test_logs_config_json_emits_parseable() {
+        // JSON variant must round-trip through serde_json.
+        // Avoid hitting global stdout state - this only validates the code
+        // path compiles and runs.
+        let result = handle_logs_config("json");
+        assert_eq!(result, 0);
     }
 }

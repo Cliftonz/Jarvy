@@ -16,10 +16,17 @@ pub fn run_ticket_command(action: TicketAction) -> i32 {
             logs,
             output,
             dry_run,
-        } => handle_ticket_create(tool, logs, output, dry_run),
-        TicketAction::Show { ticket } => handle_ticket_show(&ticket),
-        TicketAction::List {} => handle_ticket_list(),
-        TicketAction::Clean { older_than } => handle_ticket_clean(older_than),
+            output_format,
+        } => handle_ticket_create(tool, logs, output, dry_run, &output_format),
+        TicketAction::Show {
+            ticket,
+            output_format,
+        } => handle_ticket_show(&ticket, &output_format),
+        TicketAction::List { output_format } => handle_ticket_list(&output_format),
+        TicketAction::Clean {
+            older_than,
+            output_format,
+        } => handle_ticket_clean(older_than, &output_format),
     }
 }
 
@@ -29,8 +36,11 @@ fn handle_ticket_create(
     log_lines: usize,
     output_path: Option<String>,
     dry_run: bool,
+    output_format: &str,
 ) -> i32 {
-    println!("Collecting diagnostic information...\n");
+    if output_format != "json" {
+        println!("Collecting diagnostic information...\n");
+    }
 
     // Determine scope based on options
     let mut scope = if let Some(ref t) = tool {
@@ -45,16 +55,33 @@ fn handle_ticket_create(
     let ticket_data = match collector.collect() {
         Ok(data) => data,
         Err(e) => {
-            eprintln!("Error collecting ticket data: {}", e);
+            if output_format == "json" {
+                println!(
+                    "{}",
+                    serde_json::json!({"status": "error", "error": e.to_string()})
+                );
+            } else {
+                eprintln!("Error collecting ticket data: {}", e);
+            }
             return 1;
         }
     };
 
     if dry_run {
-        // Just show what would be collected
-        let preview = preview_ticket(&ticket_data);
-        println!("{}", preview);
-        println!("\nDry run - no ticket file created.");
+        if output_format == "json" {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "status": "dry_run",
+                    "ticket_id": ticket_data.ticket_id,
+                    "preview": preview_ticket(&ticket_data),
+                })
+            );
+        } else {
+            let preview = preview_ticket(&ticket_data);
+            println!("{}", preview);
+            println!("\nDry run - no ticket file created.");
+        }
         return 0;
     }
 
@@ -68,30 +95,44 @@ fn handle_ticket_create(
 
     match bundler.bundle(&ticket_data) {
         Ok(path) => {
-            println!("Debug ticket created successfully!");
-            println!("\n  Ticket ID: {}", ticket_data.ticket_id);
-            println!("  Location: {}", path.display());
-            println!(
-                "  Size: {}",
-                logging::format_size(std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0))
-            );
-
-            // Show contents summary
-            let preview = preview_ticket(&ticket_data);
-            println!("\n{}", preview);
-
-            println!("\nShare this ticket file when reporting issues.");
+            let size_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            if output_format == "json" {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "status": "created",
+                        "ticket_id": ticket_data.ticket_id,
+                        "path": path.display().to_string(),
+                        "size_bytes": size_bytes,
+                    })
+                );
+            } else {
+                println!("Debug ticket created successfully!");
+                println!("\n  Ticket ID: {}", ticket_data.ticket_id);
+                println!("  Location: {}", path.display());
+                println!("  Size: {}", logging::format_size(size_bytes));
+                let preview = preview_ticket(&ticket_data);
+                println!("\n{}", preview);
+                println!("\nShare this ticket file when reporting issues.");
+            }
             0
         }
         Err(e) => {
-            eprintln!("Error creating ticket: {}", e);
+            if output_format == "json" {
+                println!(
+                    "{}",
+                    serde_json::json!({"status": "error", "error": e.to_string()})
+                );
+            } else {
+                eprintln!("Error creating ticket: {}", e);
+            }
             1
         }
     }
 }
 
 /// Show contents of a ticket
-fn handle_ticket_show(ticket_arg: &str) -> i32 {
+fn handle_ticket_show(ticket_arg: &str, output_format: &str) -> i32 {
     // Try to find the ticket
     let ticket_path = if ticket_arg.ends_with(".zip") {
         PathBuf::from(ticket_arg)
@@ -102,7 +143,14 @@ fn handle_ticket_show(ticket_arg: &str) -> i32 {
     };
 
     if !ticket_path.exists() {
-        eprintln!("Ticket not found: {}", ticket_path.display());
+        if output_format == "json" {
+            println!(
+                "{}",
+                serde_json::json!({"status": "not_found", "path": ticket_path.display().to_string()})
+            );
+        } else {
+            eprintln!("Ticket not found: {}", ticket_path.display());
+        }
         return 1;
     }
 
@@ -110,7 +158,14 @@ fn handle_ticket_show(ticket_arg: &str) -> i32 {
     let file = match std::fs::File::open(&ticket_path) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("Error opening ticket: {}", e);
+            if output_format == "json" {
+                println!(
+                    "{}",
+                    serde_json::json!({"status": "error", "error": e.to_string()})
+                );
+            } else {
+                eprintln!("Error opening ticket: {}", e);
+            }
             return 1;
         }
     };
@@ -118,10 +173,51 @@ fn handle_ticket_show(ticket_arg: &str) -> i32 {
     let mut archive = match zip::ZipArchive::new(file) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("Error reading ticket archive: {}", e);
+            if output_format == "json" {
+                println!(
+                    "{}",
+                    serde_json::json!({"status": "error", "error": e.to_string()})
+                );
+            } else {
+                eprintln!("Error reading ticket archive: {}", e);
+            }
             return 1;
         }
     };
+
+    if output_format == "json" {
+        let mut entries: Vec<serde_json::Value> = Vec::new();
+        for i in 0..archive.len() {
+            if let Ok(f) = archive.by_index(i) {
+                entries.push(serde_json::json!({
+                    "name": f.name(),
+                    "size": f.size(),
+                }));
+            }
+        }
+        let manifest: Option<serde_json::Value> =
+            if let Ok(mut mf) = archive.by_name("manifest.json") {
+                use std::io::Read;
+                let mut contents = String::new();
+                if mf.read_to_string(&mut contents).is_ok() {
+                    serde_json::from_str(&contents).ok()
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+        let json = serde_json::json!({
+            "path": ticket_path.display().to_string(),
+            "entries": entries,
+            "manifest": manifest,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
+        );
+        return 0;
+    }
 
     println!("Ticket: {}\n", ticket_path.display());
     println!("Contents:");
@@ -156,9 +252,27 @@ fn handle_ticket_show(ticket_arg: &str) -> i32 {
 }
 
 /// List existing tickets
-fn handle_ticket_list() -> i32 {
+fn handle_ticket_list(output_format: &str) -> i32 {
     match ticket::list_tickets() {
         Ok(tickets) => {
+            if output_format == "json" {
+                let json = serde_json::json!({
+                    "tickets_directory": ticket::default_tickets_directory().display().to_string(),
+                    "tickets": tickets.iter().map(|(name, path, size)| {
+                        serde_json::json!({
+                            "name": name,
+                            "path": path.display().to_string(),
+                            "size_bytes": size,
+                        })
+                    }).collect::<Vec<_>>(),
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
+                );
+                return 0;
+            }
+
             if tickets.is_empty() {
                 println!("No tickets found.");
                 println!("Run `jarvy ticket create` to generate a debug ticket.");
@@ -181,19 +295,37 @@ fn handle_ticket_list() -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("Error listing tickets: {}", e);
+            if output_format == "json" {
+                println!(
+                    "{}",
+                    serde_json::json!({"status": "error", "error": e.to_string()})
+                );
+            } else {
+                eprintln!("Error listing tickets: {}", e);
+            }
             1
         }
     }
 }
 
 /// Clean old tickets
-fn handle_ticket_clean(older_than: u32) -> i32 {
-    println!("Cleaning tickets older than {} days...\n", older_than);
+fn handle_ticket_clean(older_than: u32, output_format: &str) -> i32 {
+    if output_format != "json" {
+        println!("Cleaning tickets older than {} days...\n", older_than);
+    }
 
     match ticket::clean_tickets(older_than) {
         Ok((count, bytes)) => {
-            if count > 0 {
+            if output_format == "json" {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "removed_count": count,
+                        "removed_bytes": bytes,
+                        "older_than_days": older_than,
+                    })
+                );
+            } else if count > 0 {
                 println!(
                     "Removed {} tickets ({})",
                     count,
@@ -205,7 +337,14 @@ fn handle_ticket_clean(older_than: u32) -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("Error cleaning tickets: {}", e);
+            if output_format == "json" {
+                println!(
+                    "{}",
+                    serde_json::json!({"status": "error", "error": e.to_string()})
+                );
+            } else {
+                eprintln!("Error cleaning tickets: {}", e);
+            }
             1
         }
     }
@@ -218,6 +357,12 @@ mod tests {
     #[test]
     fn test_ticket_list() {
         // Should not panic even with no tickets
-        let _result = handle_ticket_list();
+        let _result = handle_ticket_list("pretty");
+    }
+
+    #[test]
+    fn test_ticket_list_json_path_works() {
+        // JSON path also must not panic.
+        let _result = handle_ticket_list("json");
     }
 }

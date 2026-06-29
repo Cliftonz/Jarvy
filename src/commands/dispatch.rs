@@ -109,8 +109,8 @@ pub fn run(cli: &Cli, global_config: &init::CliConfig) -> i32 {
             output,
             dry_run,
         }) => commands::run_ci_config(*provider, output, *dry_run),
-        Some(Commands::CiInfo {}) => {
-            commands::run_ci_info();
+        Some(Commands::CiInfo { output_format }) => {
+            commands::run_ci_info(output_format);
             0
         }
         Some(Commands::Services { action, file }) => commands::run_services(action, file),
