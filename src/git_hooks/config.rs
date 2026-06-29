@@ -52,6 +52,12 @@ pub struct GitHooksConfig {
     #[serde(default)]
     pub pre_commit: Option<PreCommitConfig>,
 
+    /// Native git hook scripts written straight into `.git/hooks/`
+    /// — no framework process between git and your script. Keyed by
+    /// hook stage (`pre-commit`, `commit-msg`, …).
+    #[serde(default)]
+    pub native: Option<NativeConfig>,
+
     /// Origin tag set by the config loader; not serialized. Propagated
     /// by `Config::mark_remote` so handlers can enforce the
     /// `allow_remote` gate without re-reading the parent `Config`.
@@ -74,9 +80,37 @@ impl Default for GitHooksConfig {
             run_after_install: false,
             allow_remote: false,
             pre_commit: None,
+            native: None,
             origin: crate::ai_hooks::ConfigOrigin::Local,
         }
     }
+}
+
+/// `[git_hooks.native]` block — write hook scripts directly into
+/// `.git/hooks/<name>` with no framework process in the loop. Each
+/// entry is a hook stage name → inline shell body. Jarvy stamps a
+/// `# managed by jarvy` marker into the file so a future run can
+/// recognize / overwrite its own output without clobbering hooks the
+/// user wrote by hand.
+///
+/// The most useful failure mode: if the existing `.git/hooks/<name>`
+/// has DIFFERENT content and lacks the Jarvy marker, install refuses
+/// with `HookError::InstallFailed` so we never silently overwrite
+/// hand-rolled hooks.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct NativeConfig {
+    /// Map of `<hook-stage>` → inline shell body. Example:
+    ///
+    /// ```toml
+    /// [git_hooks.native]
+    /// hooks.pre-commit = """
+    /// #!/bin/sh
+    /// cargo fmt --check || exit 1
+    /// """
+    /// hooks.commit-msg = "..."
+    /// ```
+    #[serde(default)]
+    pub hooks: std::collections::BTreeMap<String, String>,
 }
 
 fn default_true() -> bool {

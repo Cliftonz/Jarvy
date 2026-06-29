@@ -188,6 +188,7 @@ mod tests {
             run_after_install: false,
             allow_remote: false,
             pre_commit: None,
+            native: None,
             origin: ConfigOrigin::Local,
         }
     }

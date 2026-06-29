@@ -30,6 +30,9 @@
 
 pub mod config;
 pub mod detection;
+pub mod husky;
+pub mod lefthook;
+pub mod native;
 pub mod precommit;
 
 use std::path::Path;
@@ -47,6 +50,12 @@ pub enum HookError {
     #[error("hook framework `{0}` is not installed; install it before running `jarvy hooks`")]
     FrameworkNotInstalled(String),
 
+    /// Reserved for future frameworks that get declared in
+    /// `HookFramework` before a handler ships. With pre-commit /
+    /// husky / lefthook / native all wired today this variant is
+    /// dormant but kept so adding a new enum variant produces a
+    /// clean "not yet supported" error instead of a panic.
+    #[allow(dead_code)]
     #[error("hook framework `{0}` is configured but not yet supported by jarvy")]
     UnsupportedFramework(String),
 
@@ -187,9 +196,24 @@ fn install_hooks_inner(config: &GitHooksConfig, project_dir: &Path) -> Result<bo
             handler.install()?;
             Ok(true)
         }
-        HookFramework::Husky | HookFramework::Lefthook | HookFramework::Native => Err(
-            HookError::UnsupportedFramework(framework.as_str().to_string()),
-        ),
+        HookFramework::Husky => {
+            let handler = husky::HuskyHandler::new(project_dir.to_path_buf());
+            handler.install()?;
+            Ok(true)
+        }
+        HookFramework::Lefthook => {
+            let handler = lefthook::LefthookHandler::new(project_dir.to_path_buf());
+            handler.install()?;
+            Ok(true)
+        }
+        HookFramework::Native => {
+            let handler = native::NativeHandler::new(
+                config.native.clone().unwrap_or_default(),
+                project_dir.to_path_buf(),
+            );
+            handler.install()?;
+            Ok(true)
+        }
     }
 }
 
@@ -245,9 +269,24 @@ fn update_hooks_inner(config: &GitHooksConfig, project_dir: &Path) -> Result<boo
             handler.update()?;
             Ok(true)
         }
-        HookFramework::Husky | HookFramework::Lefthook | HookFramework::Native => Err(
-            HookError::UnsupportedFramework(framework.as_str().to_string()),
-        ),
+        HookFramework::Husky => {
+            let handler = husky::HuskyHandler::new(project_dir.to_path_buf());
+            handler.update()?;
+            Ok(true)
+        }
+        HookFramework::Lefthook => {
+            let handler = lefthook::LefthookHandler::new(project_dir.to_path_buf());
+            handler.update()?;
+            Ok(true)
+        }
+        HookFramework::Native => {
+            let handler = native::NativeHandler::new(
+                config.native.clone().unwrap_or_default(),
+                project_dir.to_path_buf(),
+            );
+            handler.update()?;
+            Ok(true)
+        }
     }
 }
 
@@ -265,9 +304,21 @@ pub fn list_hooks(config: &GitHooksConfig, project_dir: &Path) -> Result<Vec<Hoo
             );
             handler.list()
         }
-        HookFramework::Husky | HookFramework::Lefthook | HookFramework::Native => Err(
-            HookError::UnsupportedFramework(framework.as_str().to_string()),
-        ),
+        HookFramework::Husky => {
+            let handler = husky::HuskyHandler::new(project_dir.to_path_buf());
+            handler.list()
+        }
+        HookFramework::Lefthook => {
+            let handler = lefthook::LefthookHandler::new(project_dir.to_path_buf());
+            handler.list()
+        }
+        HookFramework::Native => {
+            let handler = native::NativeHandler::new(
+                config.native.clone().unwrap_or_default(),
+                project_dir.to_path_buf(),
+            );
+            handler.list()
+        }
     }
 }
 
@@ -296,9 +347,21 @@ pub fn run_hooks(
             );
             handler.run(all_files, hook_id)
         }
-        HookFramework::Husky | HookFramework::Lefthook | HookFramework::Native => Err(
-            HookError::UnsupportedFramework(framework.as_str().to_string()),
-        ),
+        HookFramework::Husky => {
+            let handler = husky::HuskyHandler::new(project_dir.to_path_buf());
+            handler.run(all_files, hook_id)
+        }
+        HookFramework::Lefthook => {
+            let handler = lefthook::LefthookHandler::new(project_dir.to_path_buf());
+            handler.run(all_files, hook_id)
+        }
+        HookFramework::Native => {
+            let handler = native::NativeHandler::new(
+                config.native.clone().unwrap_or_default(),
+                project_dir.to_path_buf(),
+            );
+            handler.run(all_files, hook_id)
+        }
     }
 }
 
@@ -383,6 +446,7 @@ mod tests {
             run_after_install: false,
             allow_remote: false,
             pre_commit: None,
+            native: None,
             origin: ConfigOrigin::Remote,
         };
         let err = install_hooks(&cfg, tmp.path()).expect_err("remote must refuse");
@@ -401,6 +465,7 @@ mod tests {
             run_after_install: false,
             allow_remote: false,
             pre_commit: None,
+            native: None,
             origin: ConfigOrigin::Remote,
         };
         let err = update_hooks(&cfg, tmp.path()).expect_err("remote must refuse");
@@ -419,6 +484,7 @@ mod tests {
             run_after_install: false,
             allow_remote: false,
             pre_commit: None,
+            native: None,
             origin: ConfigOrigin::Remote,
         };
         let err = run_hooks(&cfg, tmp.path(), false, None).expect_err("remote must refuse");
@@ -440,6 +506,7 @@ mod tests {
             run_after_install: false,
             allow_remote: true,
             pre_commit: None,
+            native: None,
             origin: ConfigOrigin::Remote,
         };
         let err =
@@ -463,6 +530,7 @@ mod tests {
             run_after_install: false,
             allow_remote: false,
             pre_commit: None,
+            native: None,
             origin: ConfigOrigin::Local, // default
         };
         let err = install_hooks(&cfg, tmp.path()).expect_err("no .git → NotAGitRepo");

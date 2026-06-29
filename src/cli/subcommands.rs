@@ -387,6 +387,42 @@ pub enum LogsAction {
 }
 
 #[derive(Subcommand)]
+pub enum LibraryAction {
+    /// List every cached library (URL, publisher, item counts)
+    List {
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
+    /// Show the items inside one cached library
+    Show {
+        /// Library URL (or shorthand `github:owner/repo@<ref>`) — as declared in [<subsystem>.library_sources]
+        url: String,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
+    /// Wipe the on-disk library cache (`~/.jarvy/library.d/`)
+    Clean {
+        /// Show what would be removed without removing
+        #[clap(long)]
+        dry_run: bool,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
+    /// Force-refresh every cached library_sources entry declared in jarvy.toml
+    Sync {
+        /// Path to the configuration file
+        #[clap(short, long, default_value = "./jarvy.toml")]
+        file: String,
+        /// Output format: json, pretty
+        #[clap(short = 'F', long = "format", default_value = "pretty")]
+        output_format: String,
+    },
+}
+
+#[derive(Subcommand)]
 pub enum WorkspaceAction {
     /// List all workspace members and their tools
     List {

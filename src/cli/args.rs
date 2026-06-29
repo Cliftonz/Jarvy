@@ -176,6 +176,11 @@ pub enum Commands {
         #[clap(short = 'F', long = "format", default_value = "pretty")]
         output_format: String,
     },
+    /// Inspect / clean the shared library-registry cache (PRD-054 phase 6)
+    Library {
+        #[clap(subcommand)]
+        action: LibraryAction,
+    },
     /// Inspect a monorepo workspace defined by `[workspace]` in jarvy.toml (PRD-047)
     Workspace {
         /// Path to the configuration file

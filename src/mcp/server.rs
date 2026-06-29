@@ -412,6 +412,31 @@ impl McpServer {
             "jarvy_validate_config" => {
                 crate::mcp::extended_tools::handle_validate_config(params.arguments)
             }
+            // PRD-044 discover surface
+            "jarvy_discover_scan" => {
+                crate::mcp::extended_tools::handle_discover_scan(params.arguments)
+            }
+            "jarvy_discover_apply" => {
+                let ctx = self.mutation_ctx(client_name);
+                crate::mcp::extended_tools::handle_discover_apply(params.arguments, &ctx)
+            }
+            // PRD-047 workspace surface
+            "jarvy_workspace_list" => {
+                crate::mcp::extended_tools::handle_workspace_list(params.arguments)
+            }
+            "jarvy_workspace_show" => {
+                crate::mcp::extended_tools::handle_workspace_show(params.arguments)
+            }
+            "jarvy_workspace_validate" => {
+                crate::mcp::extended_tools::handle_workspace_validate(params.arguments)
+            }
+            // PRD-054 phase 6 library cache
+            "jarvy_library_list" => {
+                crate::mcp::extended_tools::handle_library_list(params.arguments)
+            }
+            "jarvy_library_show" => {
+                crate::mcp::extended_tools::handle_library_show(params.arguments)
+            }
             _ => Err(McpError::method_not_found(format!(
                 "Unknown tool: {}",
                 params.name

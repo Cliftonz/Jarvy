@@ -193,20 +193,49 @@ pub fn run_diagnose(tool: &str, fix: bool, export: bool, _scope: &str, output_fo
     // Handle fix
     if fix && !report.fixes.is_empty() {
         println!("\nApplying fixes...");
+        let mut had_failure = false;
         for fix_item in &report.fixes {
             if fix_item.auto_applicable {
                 if let Some(ref cmd) = fix_item.command {
                     println!("  Running: {}", cmd);
-                    // Would run the fix here in a real implementation
-                    println!("    (Fix application not yet implemented)");
+                    match execute_fix_command(cmd) {
+                        Ok(()) => {
+                            println!("    ok");
+                        }
+                        Err(e) => {
+                            had_failure = true;
+                            eprintln!("    failed: {e}");
+                        }
+                    }
                 }
             } else {
                 println!("  Manual fix required: {}", fix_item.description);
             }
         }
+        if had_failure {
+            return 1;
+        }
     }
 
     0
+}
+
+/// Execute a suggested-fix shell command via `sh -c` and surface the
+/// exit status. Commands come from `Fix::command` which is built from
+/// the tool's own `ToolSpec` — Jarvy's first-party data — NOT from
+/// any remote / user-supplied source. That trust posture is what
+/// makes this safe to execute without an additional gate; the same
+/// commands would be printed verbatim today for the user to copy.
+fn execute_fix_command(cmd: &str) -> Result<(), String> {
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(cmd)
+        .status()
+        .map_err(|e| e.to_string())?;
+    if !status.success() {
+        return Err(format!("exit {}", status.code().unwrap_or(-1)));
+    }
+    Ok(())
 }
 
 /// Generate diagnostic report for a tool

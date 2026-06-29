@@ -298,6 +298,79 @@ pub fn extended_definitions() -> Vec<McpToolDefinition> {
                 }
             }),
         ),
+        // ---- Discover (PRD-044) ---------------------------------------
+        def(
+            "jarvy_discover_scan",
+            "Scan the project directory for marker files (Cargo.toml, package.json, Dockerfile, k8s/, …) and return suggested tools. Read-only. Use jarvy_discover_apply to actually write to jarvy.toml.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "project_dir": { "type": "string", "description": "Path to the project root (default: cwd / workspace root)" },
+                    "config_path": { "type": "string", "description": "Path to jarvy.toml (used to dedupe against already-pinned tools; default ./jarvy.toml)" }
+                }
+            }),
+        ),
+        def(
+            "jarvy_discover_apply",
+            "Run discover and merge suggested tools into jarvy.toml. Append-only — hand-pinned tools survive untouched. Defaults to dry_run = true.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "config_path": { "type": "string", "description": "Path to jarvy.toml (default ./jarvy.toml)" },
+                    "dry_run": { "type": "boolean", "description": "Preview only (default true)" }
+                }
+            }),
+        ),
+        // ---- Workspace (PRD-047) --------------------------------------
+        def(
+            "jarvy_workspace_list",
+            "Enumerate workspace members declared in [workspace] members and their resolved tool sets. Read-only.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "config_path": { "type": "string", "description": "Path to root jarvy.toml (default ./jarvy.toml)" }
+                }
+            }),
+        ),
+        def(
+            "jarvy_workspace_show",
+            "Show one workspace member's resolved config with inheritance / override annotations.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "config_path": { "type": "string" },
+                    "name": { "type": "string", "description": "Member name as declared in [workspace] members" }
+                },
+                "required": ["name"]
+            }),
+        ),
+        def(
+            "jarvy_workspace_validate",
+            "Validate that every workspace member exists and its jarvy.toml parses. Returns errors / warnings / refused-members.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "config_path": { "type": "string" }
+                }
+            }),
+        ),
+        // ---- Library cache (PRD-054 phase 6) -------------------------
+        def(
+            "jarvy_library_list",
+            "List every library currently in the process cache (URL, publisher, ai_hook/mcp_server/skill counts).",
+            json!({"type": "object", "properties": {}}),
+        ),
+        def(
+            "jarvy_library_show",
+            "Show items inside one cached library (by URL).",
+            json!({
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string", "description": "Library URL as declared in [<subsystem>.library_sources]" }
+                },
+                "required": ["url"]
+            }),
+        ),
     ]
 }
 
@@ -1157,6 +1230,307 @@ pub fn handle_validate_config(arguments: Option<Value>) -> McpResult<Value> {
             "error_type": "parse",
             "message": e.to_string(),
         })),
+    }
+}
+
+// ---------------------------------------------------------------------
+// Discover (PRD-044)
+// ---------------------------------------------------------------------
+
+#[derive(Deserialize, Default)]
+struct DiscoverScanArgs {
+    #[serde(default)]
+    project_dir: Option<String>,
+    #[serde(default)]
+    config_path: Option<String>,
+}
+
+pub fn handle_discover_scan(arguments: Option<Value>) -> McpResult<Value> {
+    let args: DiscoverScanArgs = arguments
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|e| McpError::invalid_params(e.to_string()))?
+        .unwrap_or_default();
+    let project_dir = std::path::PathBuf::from(args.project_dir.unwrap_or_else(|| ".".into()));
+    let config_path = args.config_path.unwrap_or_else(|| "./jarvy.toml".into());
+
+    let existing_text = std::fs::read_to_string(&config_path).ok();
+    let already_configured: std::collections::HashSet<String> = existing_text
+        .as_deref()
+        .and_then(|t| t.parse::<toml::Table>().ok())
+        .and_then(|t| t.get("provisioner").and_then(|v| v.as_table()).cloned())
+        .map(|t| t.keys().cloned().collect())
+        .unwrap_or_default();
+
+    crate::tools::register_all();
+    let known_tools: std::collections::HashSet<String> =
+        crate::tools::registry::registered_tool_names()
+            .into_iter()
+            .collect();
+    let report = crate::discover::analyze(&project_dir, &already_configured, &known_tools);
+
+    envelope(json!({
+        "project_dir": project_dir.display().to_string(),
+        "detections": report.detections,
+        "required": report.required,
+        "recommended": report.recommended,
+        "already_configured": report.already_configured,
+    }))
+}
+
+#[derive(Deserialize, Default)]
+struct DiscoverApplyArgs {
+    #[serde(default)]
+    config_path: Option<String>,
+    #[serde(default = "default_true_arg")]
+    dry_run: bool,
+}
+
+fn default_true_arg() -> bool {
+    true
+}
+
+pub fn handle_discover_apply(arguments: Option<Value>, ctx: &MutationCtx) -> McpResult<Value> {
+    let args: DiscoverApplyArgs = arguments
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|e| McpError::invalid_params(e.to_string()))?
+        .unwrap_or(DiscoverApplyArgs {
+            config_path: None,
+            dry_run: true,
+        });
+    let config_path = args.config_path.unwrap_or_else(|| "./jarvy.toml".into());
+
+    // Workspace containment — refuse a config_path that escapes the
+    // mutation ctx's workspace root (consistent with templates_use
+    // and ai_hooks_apply).
+    let resolved = resolve_within_workspace(ctx.workspace(), std::path::Path::new(&config_path))?;
+
+    if args.dry_run {
+        // Preview without rate limit / confirmation — read-only.
+        return handle_discover_scan(Some(json!({
+            "config_path": resolved.display().to_string(),
+        })));
+    }
+
+    // Mutating path: rate-limit + confirm + audit via the shared gate.
+    gate_mutation(
+        ctx,
+        "jarvy_discover_apply",
+        &format!("write suggested tools to {}", resolved.display()),
+    )?;
+
+    let exit = crate::discover::commands::run_discover(
+        resolved.to_str().unwrap_or(&config_path),
+        true,
+        false,
+        "json",
+    );
+    envelope(json!({
+        "status": if exit == 0 { "applied" } else { "failed" },
+        "exit_code": exit,
+        "config_path": resolved.display().to_string(),
+    }))
+}
+
+// ---------------------------------------------------------------------
+// Workspace (PRD-047)
+// ---------------------------------------------------------------------
+
+#[derive(Deserialize, Default)]
+struct WorkspaceListArgs {
+    #[serde(default)]
+    config_path: Option<String>,
+}
+
+pub fn handle_workspace_list(arguments: Option<Value>) -> McpResult<Value> {
+    let args: WorkspaceListArgs = arguments
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|e| McpError::invalid_params(e.to_string()))?
+        .unwrap_or_default();
+    let config_path = args.config_path.unwrap_or_else(|| "./jarvy.toml".into());
+    let project_dir = std::path::Path::new(&config_path)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    match crate::workspace::find_workspace_root(&project_dir) {
+        Some(ctx) => {
+            // Mirror the CLI shape — list of member summaries.
+            envelope(json!({
+                "workspace_root": ctx.root_config.parent().map(|p| p.display().to_string()),
+                "inherit": ctx.workspace.effective_inherit(),
+                "members": ctx.workspace.members,
+            }))
+        }
+        None => envelope(json!({
+            "status": "no_workspace",
+            "searched_from": project_dir.display().to_string(),
+        })),
+    }
+}
+
+#[derive(Deserialize)]
+struct WorkspaceShowArgs {
+    #[serde(default)]
+    config_path: Option<String>,
+    name: String,
+}
+
+pub fn handle_workspace_show(arguments: Option<Value>) -> McpResult<Value> {
+    let args: WorkspaceShowArgs = arguments
+        .ok_or_else(|| McpError::invalid_params("name is required"))
+        .and_then(|v| {
+            serde_json::from_value(v).map_err(|e| McpError::invalid_params(e.to_string()))
+        })?;
+    let config_path = args.config_path.unwrap_or_else(|| "./jarvy.toml".into());
+    let project_dir = std::path::Path::new(&config_path)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let ctx = match crate::workspace::find_workspace_root(&project_dir) {
+        Some(c) => c,
+        None => {
+            return envelope(json!({
+                "status": "no_workspace",
+                "searched_from": project_dir.display().to_string(),
+            }));
+        }
+    };
+
+    if !ctx.workspace.members.iter().any(|m| m == &args.name) {
+        return envelope(json!({"status": "unknown_member", "name": args.name}));
+    }
+
+    envelope(json!({
+        "workspace_root": ctx.root_config.parent().map(|p| p.display().to_string()),
+        "member": args.name,
+        "inherit": ctx.workspace.effective_inherit(),
+    }))
+}
+
+#[derive(Deserialize, Default)]
+struct WorkspaceValidateArgs {
+    #[serde(default)]
+    config_path: Option<String>,
+}
+
+pub fn handle_workspace_validate(arguments: Option<Value>) -> McpResult<Value> {
+    let args: WorkspaceValidateArgs = arguments
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|e| McpError::invalid_params(e.to_string()))?
+        .unwrap_or_default();
+    let config_path = args.config_path.unwrap_or_else(|| "./jarvy.toml".into());
+    let project_dir = std::path::Path::new(&config_path)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let ctx = match crate::workspace::find_workspace_root(&project_dir) {
+        Some(c) => c,
+        None => {
+            return envelope(json!({
+                "status": "no_workspace",
+                "searched_from": project_dir.display().to_string(),
+            }));
+        }
+    };
+
+    let root_dir = ctx
+        .root_config
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+    let mut errors = Vec::new();
+    let mut warnings = Vec::new();
+    let mut entries = Vec::new();
+    for member in &ctx.workspace.members {
+        let p = std::path::Path::new(member);
+        if p.is_absolute()
+            || p.components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            errors.push(format!("{member}: escapes workspace root"));
+            entries.push(json!({"name": member, "refused": true}));
+            continue;
+        }
+        let member_dir = root_dir.join(member);
+        let cfg = member_dir.join("jarvy.toml");
+        let dir_exists = member_dir.is_dir();
+        let cfg_exists = cfg.exists();
+        let parses = if cfg_exists {
+            std::fs::read_to_string(&cfg)
+                .ok()
+                .and_then(|s| toml::from_str::<toml::Value>(&s).ok())
+                .is_some()
+        } else {
+            true
+        };
+        if !dir_exists {
+            errors.push(format!("{member}: directory missing"));
+        } else if !cfg_exists {
+            warnings.push(format!("{member}: no jarvy.toml"));
+        } else if !parses {
+            errors.push(format!("{member}: jarvy.toml failed to parse"));
+        }
+        entries.push(json!({
+            "name": member,
+            "dir_exists": dir_exists,
+            "config_exists": cfg_exists,
+            "config_parses": parses,
+        }));
+    }
+    let status = if !errors.is_empty() {
+        "invalid"
+    } else if !warnings.is_empty() {
+        "warnings"
+    } else {
+        "ok"
+    };
+    envelope(json!({
+        "status": status,
+        "errors": errors,
+        "warnings": warnings,
+        "members": entries,
+    }))
+}
+
+// ---------------------------------------------------------------------
+// Library cache (PRD-054 phase 6)
+// ---------------------------------------------------------------------
+
+pub fn handle_library_list(_arguments: Option<Value>) -> McpResult<Value> {
+    let libs = crate::library_registry::list_cached();
+    envelope(json!({
+        "count": libs.len(),
+        "libraries": libs,
+    }))
+}
+
+#[derive(Deserialize)]
+struct LibraryShowArgs {
+    url: String,
+}
+
+pub fn handle_library_show(arguments: Option<Value>) -> McpResult<Value> {
+    let args: LibraryShowArgs = arguments
+        .ok_or_else(|| McpError::invalid_params("url is required"))
+        .and_then(|v| {
+            serde_json::from_value(v).map_err(|e| McpError::invalid_params(e.to_string()))
+        })?;
+    match crate::library_registry::get_cached(&args.url) {
+        Some((url, manifest)) => envelope(json!({
+            "url": url,
+            "publisher": manifest.publisher,
+            "description": manifest.description,
+            "items": manifest.items,
+        })),
+        None => envelope(json!({"status": "not_found", "url": args.url})),
     }
 }
 

@@ -48,6 +48,7 @@ pub mod config;
 pub mod fetch;
 pub mod git_fetch;
 pub mod manifest;
+pub mod signature;
 pub mod url_parser;
 
 pub use config::LibrarySource;
@@ -101,6 +102,27 @@ pub enum LibraryError {
         expected: String,
         actual: String,
     },
+
+    #[error(
+        "cosign signature verification failed for {url}: {reason} — \
+         either the manifest was tampered with, the publisher rotated their signing identity, \
+         or `identity_regexp` / `oidc_issuer` in the library_sources entry no longer matches \
+         what the publisher emits"
+    )]
+    SignatureRejected { url: String, reason: String },
+
+    #[error(
+        "require_signature = true for {url} but signature companions are missing: {reason}. \
+         Either ship `manifest.json.sig` + `manifest.json.pem` next to the manifest, \
+         or set `require_signature = false` in the library_sources entry (recommended only for development)"
+    )]
+    SignatureCompanionsMissing { url: String, reason: String },
+
+    #[error(
+        "require_signature = true for {url} but cosign is not installed on PATH. \
+         Install cosign or set `require_signature = false`"
+    )]
+    CosignMissing { url: String },
 }
 
 impl LibraryError {
@@ -114,6 +136,9 @@ impl LibraryError {
             LibraryError::Io(_) => "io",
             LibraryError::RemoteRefused { .. } => "remote_refused",
             LibraryError::ManifestShaMismatch { .. } => "manifest_sha_mismatch",
+            LibraryError::SignatureRejected { .. } => "signature_rejected",
+            LibraryError::SignatureCompanionsMissing { .. } => "signature_companions_missing",
+            LibraryError::CosignMissing { .. } => "cosign_missing",
         }
     }
 }
@@ -331,24 +356,17 @@ pub fn sync(source: &LibrarySource) -> Result<SyncReport, LibraryError> {
         );
     }
 
-    // Review item 12 (P1). `require_signature = true` is the default
-    // but v1 has no cosign enforcement — operators reading the
-    // schema reasonably believe Sigstore protects them. Surface the
-    // unenforced state loudly until phase 5 ships, otherwise the
-    // documented trust contract is silently broken.
-    if source.require_signature && telemetry_on {
-        tracing::warn!(
-            event = "library.signature_unenforced",
+    // PRD-054 phase 5 — `require_signature = true` now actually
+    // verifies via cosign in `fetch_and_parse` above. By the time we
+    // reach this branch, either signature verification succeeded OR
+    // we served the cached copy (in which case we re-verified at the
+    // original sync time — disk cache only ever holds verified
+    // manifests). Emit a success signal so operators can graph
+    // "what fraction of library fetches verified cleanly."
+    if source.require_signature && !from_cache && telemetry_on {
+        tracing::info!(
+            event = "library.signature.verified",
             url = %crate::network::redact_credentials(&source.url),
-            advice = "cosign verification is scaffolded but NOT enforced in v1 — \
-                      pin a manifest_sha256 or set require_signature = false to \
-                      silence this warning until phase 5 ships",
-        );
-        eprintln!(
-            "  Warning: library {} declares `require_signature = true` but \
-             cosign verification is not yet enforced (PRD-054 phase 5). \
-             Pin a `manifest_sha256` or accept the URL on trust until then.",
-            crate::network::redact_credentials(&source.url),
         );
     }
 
@@ -374,6 +392,18 @@ fn fetch_and_parse(source: &LibrarySource) -> Result<Manifest, LibraryError> {
             });
         }
     }
+    // PRD-054 phase 5 — cosign signature enforcement. When
+    // `require_signature = true` we fetch `manifest.json.sig` +
+    // `manifest.json.pem`, run cosign verify-blob, and refuse on
+    // failure. `require_signature = false` short-circuits — the
+    // `library.signature_disabled` warning lives in `sync()`.
+    signature::verify_manifest_signature(
+        &url,
+        &body,
+        source.require_signature,
+        source.identity_regexp.as_deref(),
+        source.oidc_issuer.as_deref(),
+    )?;
     let manifest: Manifest = serde_json::from_slice(&body).map_err(|e| LibraryError::Parse {
         url: crate::network::redact_credentials(&url).into_owned(),
         source: e,
@@ -446,16 +476,18 @@ pub fn resolve_skill(name: &str) -> Option<LibrarySkillItem> {
 }
 
 /// Summary view of every cached library — used by `jarvy library list`.
-#[derive(Debug, Clone)]
-#[allow(dead_code)] // Reserved for `jarvy library list` (PRD-054 phase 6)
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct CachedLibrary {
     pub url: String,
     pub publisher: String,
     pub description: String,
-    pub item_counts: (usize, usize, usize), // (ai_hooks, mcp_servers, skills)
+    pub ai_hook_count: usize,
+    pub mcp_server_count: usize,
+    pub skill_count: usize,
 }
 
-#[allow(dead_code)] // Reserved for `jarvy library list` (PRD-054 phase 6)
+/// Snapshot every manifest currently in the process cache plus a
+/// summary of its item counts. Consumed by `jarvy library list`.
 pub fn list_cached() -> Vec<CachedLibrary> {
     let snapshot = snapshot_entries();
     snapshot
@@ -475,17 +507,72 @@ pub fn list_cached() -> Vec<CachedLibrary> {
                 url,
                 publisher: m.publisher.clone(),
                 description: m.description.clone(),
-                item_counts: (ai, mcp, sk),
+                ai_hook_count: ai,
+                mcp_server_count: mcp,
+                skill_count: sk,
             }
         })
         .collect()
 }
 
-/// Wipe the process cache. Used by tests and by `jarvy library clean`.
-#[allow(dead_code)] // Reserved for `jarvy library clean` (PRD-054 phase 6) + tests
+/// Resolve one cached library by URL. `url` is the source URL declared
+/// in `[<subsystem>.library_sources]`. Consumed by `jarvy library show`.
+pub fn get_cached(url: &str) -> Option<(String, Arc<Manifest>)> {
+    snapshot_entries().into_iter().find(|(u, _)| u == url)
+}
+
+/// Wipe the process cache. Consumed by `jarvy library clean` (clears
+/// in-memory cache only — the disk cache lives under
+/// `~/.jarvy/library.d/` and is wiped by [`clear_disk_cache`]). Also
+/// used by every cache-mutating test.
 pub fn clear_cache() {
     let mut guard = MANIFEST_CACHE.lock().unwrap_or_else(|p| p.into_inner());
     *guard = None;
+}
+
+/// Wipe the on-disk library cache (`~/.jarvy/library.d/`).
+///
+/// Returns `(removed_count, removed_bytes)` so the caller can report
+/// what was reclaimed. Process cache is wiped too (so the next sync
+/// re-fetches into a clean slot).
+pub fn clear_disk_cache() -> std::io::Result<(usize, u64)> {
+    let root = cache::cache_root()?;
+    let mut removed = 0usize;
+    let mut bytes = 0u64;
+    if !root.exists() {
+        clear_cache();
+        return Ok((0, 0));
+    }
+    for entry in std::fs::read_dir(&root)? {
+        let entry = entry?;
+        let path = entry.path();
+        bytes += dir_size(&path).unwrap_or(0);
+        if path.is_dir() {
+            std::fs::remove_dir_all(&path)?;
+        } else {
+            std::fs::remove_file(&path)?;
+        }
+        removed += 1;
+    }
+    clear_cache();
+    Ok((removed, bytes))
+}
+
+fn dir_size(path: &std::path::Path) -> std::io::Result<u64> {
+    if path.is_file() {
+        return Ok(std::fs::metadata(path)?.len());
+    }
+    let mut total = 0;
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        let p = entry.path();
+        if p.is_dir() {
+            total += dir_size(&p)?;
+        } else {
+            total += std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+        }
+    }
+    Ok(total)
 }
 
 /// Snapshot just the `Arc<Manifest>` handles, drop the lock, then let

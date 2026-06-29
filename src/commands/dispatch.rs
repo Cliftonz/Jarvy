@@ -120,6 +120,7 @@ pub fn run(cli: &Cli, global_config: &init::CliConfig) -> i32 {
             output_format,
         }) => crate::discover::commands::run_discover(file, *apply, *missing, output_format),
         Some(Commands::Workspace { file, action }) => commands::run_workspace(action, file),
+        Some(Commands::Library { action }) => commands::run_library(action),
         Some(Commands::Services { action, file }) => commands::run_services(action, file),
         Some(Commands::Doctor {
             file,
@@ -468,13 +469,10 @@ fn handle_audit(tool: &Option<String>, output_format: &str) -> i32 {
 }
 
 fn handle_migrate(file: &str, apply: bool, output_format: &str) -> i32 {
-    if apply {
-        eprintln!(
-            "Error: --apply is not yet implemented. The current `jarvy migrate` only reports \
-             suggested rewrites; apply them by hand. Re-run without --apply to see the report."
-        );
-        return error_codes::CONFIG_ERROR;
-    }
+    // `--apply` rewrites auto-applicable migrations (today: the
+    // `[tools]` → `[provisioner]` section rename) via an atomic
+    // tmp+rename. Non-applicable migrations (unknown-tool warnings)
+    // are reported only — they need a human decision.
     let result = commands::migrate::run_migrate(file, apply);
     crate::output::print_and_exit(result, output_format)
 }

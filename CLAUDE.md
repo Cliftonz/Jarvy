@@ -188,6 +188,7 @@ OTEL-based, **opt-out by default**. Config in `~/.jarvy/config.toml::[telemetry]
 | `library.git_skill.skipped` | SKILL.md missing required frontmatter | `path`, `reason` (missing name / version / parse fail) |
 | `library.file_url_refused` | `file://` URL points outside cache root (review item 3) | `reason = "outside_cache_root"` |
 | `library.sync.failed` | every sync error path (review item 8) | `url`, `scheme = "manifest" \| "git"`, `error_kind`, `error` |
+| `library.signature.verified` | `require_signature = true` + cosign-verified successfully (PRD-054 phase 5) | `url`. Per-fetch — cached hits don't re-emit. |
 | `discover.applied` | `jarvy discover --apply` succeeded (PRD-044) | `tools_added`, `recommended_added`, `already_configured`, `target = "merged" \| "noop" \| "bailed_to_fresh"`, `duration_ms` |
 | `workspace.validate_completed` | `jarvy workspace validate` finished (PRD-047) | `status = "ok" \| "warnings" \| "invalid"`, `members`, `errors`, `warnings`, `duration_ms`. `warn!` level when `errors > 0`, else `info!` |
 | `workspace.member_invalid` | per-member validation failure | `error_kind = "escapes_workspace_root" \| "dir_missing" \| "toml_parse_fail"` (member name NOT logged — it's attacker-controllable in a hostile root config) |

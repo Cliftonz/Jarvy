@@ -40,6 +40,91 @@ the same format. PRD-049 (skills) rides on it; PRD-048 / 052 (git
 hooks, spinners) shipped earlier in the day. No user-visible behavior
 changes for existing configs — all new surface is additive.
 
+### Added — close-out of every half-baked surface flagged in the audit
+
+A single bundled commit retires the partial-feature list surfaced by
+the codebase audit. Net: ~3,100 LOC added, ~210 removed, 7 commits
+worth of work folded into one.
+
+**PRD-054 phase 6 — `jarvy library` cache CLI (`src/commands/library_cmd.rs`).**
+New top-level command with four subcommands:
+- `library list` — every cached library (URL, publisher, item counts)
+- `library show <url>` — items inside one cached library
+- `library clean [--dry-run]` — wipe `~/.jarvy/library.d/` and the
+  process cache (atomic via the existing `clear_disk_cache` helper)
+- `library sync --file <jarvy.toml>` — force-refresh every declared
+  `[<subsystem>.library_sources]` entry, honoring the
+  remote-config trust gate
+
+All four support `--format json`. New `library_registry::list_cached`,
+`get_cached`, and `clear_disk_cache` helpers (the dead-coded
+internals from earlier phases are now wired). 4 unit tests.
+
+**Husky framework handler (`src/git_hooks/husky.rs`).** PRD-048's
+declared-but-unwired Husky variant now ships a full handler:
+`npm install --save-dev husky` + `npx husky install` for `install`,
+re-run for `update`, walks `.husky/<name>` for `run` and `list`. 5
+unit tests covering the missing-package.json / missing-`.husky/` /
+unknown-hook-id error paths.
+
+**Lefthook framework handler (`src/git_hooks/lefthook.rs`).** Single
+Go-binary alternative to pre-commit / husky. Permissive YAML parse
+(top-level `BTreeMap<String, Value>`) so non-stage keys like
+`skip_output:` don't break the lister. `lefthook self-update` is
+treated as advisory — non-zero exit doesn't fail the update path
+(brew users update via `brew upgrade`). 5 unit tests.
+
+**Native git hooks handler (`src/git_hooks/native.rs`).** No framework
+process between git and your script: hook bodies live in
+`[git_hooks.native.hooks.<stage>]` and get written straight into
+`.git/hooks/<stage>` with a `# managed by jarvy` marker. Refuses to
+overwrite hand-rolled hooks (any `.git/hooks/<name>` without the
+marker is preserved). Atomic tmp+rename + `chmod +x` so a mid-write
+crash leaves the prior hook intact. User-supplied shebangs are
+honored; a missing `#!` line gets `#!/bin/sh` injected. 7 unit tests.
+
+**Husky migration docs (`docs/replace-husky.md`).** Three paths laid
+out — wrap (zero migration), switch to pre-commit, switch to
+lefthook — with a decision tree, sample configs for each, and the
+caveats per path. Linked from the git-hooks doc.
+
+**`jarvy diagnose --apply` fixes the "not yet implemented" placeholder.**
+Auto-applicable fixes now actually shell out via `sh -c` and surface
+the exit status. Manual-fix items still print the suggestion — they
+need human review. Trust posture: `Fix::command` comes from the
+tool's own `ToolSpec` (first-party data, not remote-fetched), same
+trust we already extend to the printed-for-copy variant.
+
+**`jarvy migrate --apply` rewrites `[tools]` → `[provisioner]`.**
+Atomic tmp+rename + post-write TOML round-trip check (refuses to
+write garbage). Unknown-tool advisories still report-only — human
+decision required. 4 unit tests pinning the rewrite, no-op, and
+report-only paths.
+
+**`jarvy_discover_*` / `jarvy_workspace_*` / `jarvy_library_*` MCP
+tools.** Seven new first-class MCP tools so AI agents don't have to
+shell out to the CLI for these surfaces:
+`jarvy_discover_scan`, `jarvy_discover_apply` (mutating — runs
+through the standard rate-limit + audit + confirmation gate),
+`jarvy_workspace_list`, `jarvy_workspace_show`, `jarvy_workspace_validate`,
+`jarvy_library_list`, `jarvy_library_show`.
+
+**PRD-054 phase 5 — cosign signature enforcement
+(`src/library_registry/signature.rs`).** `require_signature = true`
+now actually verifies. We fetch `<url>.sig` + `<url>.pem`, feed
+them to the existing `crate::update::signature::verify_sigstore_signature_with_identity`,
+and refuse on failure with structured errors:
+`SignatureRejected`, `SignatureCompanionsMissing`, or
+`CosignMissing`. The previous "scaffolded but not enforced" warning
+is gone — replaced by a per-fetch `library.signature.verified`
+success event so operators can graph the verified fraction.
+Cached hits don't re-verify (the cache only ever holds previously-
+verified manifests). `require_signature = false` short-circuits as
+documented — `library.signature_disabled` warning still fires.
+
+CLAUDE.md event taxonomy table updated for the new
+`library.signature.verified` event.
+
 ### Added — parallel-review hardening for PRD-044 / 047 / 051 (25 review items)
 
 Follow-up sweep against the parallel-code-review enhancement plan that
