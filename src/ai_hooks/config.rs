@@ -92,60 +92,16 @@ impl AiHooksConfig {
     }
 }
 
-/// Each provisioned AI agent. `serde` rename matches the user-facing string
-/// in `jarvy.toml`.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[repr(u8)]
-pub enum AgentTarget {
-    ClaudeCode = 0,
-    Cursor = 1,
-    Codex = 2,
-    Windsurf = 3,
-    Cline = 4,
-    Continue = 5,
-}
-
-impl AgentTarget {
-    pub const ALL: &'static [AgentTarget] = &[
-        AgentTarget::ClaudeCode,
-        AgentTarget::Cursor,
-        AgentTarget::Codex,
-        AgentTarget::Windsurf,
-        AgentTarget::Cline,
-        AgentTarget::Continue,
-    ];
-
-    pub const COUNT: usize = 6;
-
-    /// Stable telemetry / CLI identifier.
-    pub fn slug(self) -> &'static str {
-        match self {
-            AgentTarget::ClaudeCode => "claude-code",
-            AgentTarget::Cursor => "cursor",
-            AgentTarget::Codex => "codex",
-            AgentTarget::Windsurf => "windsurf",
-            AgentTarget::Cline => "cline",
-            AgentTarget::Continue => "continue",
-        }
-    }
-
-    /// Reverse of [`Self::slug`]. Reserved for future CLI parsing
-    /// (`jarvy ai-hooks apply --agents claude-code,cursor` etc.).
-    #[allow(dead_code)]
-    pub fn from_slug(slug: &str) -> Option<AgentTarget> {
-        AgentTarget::ALL
-            .iter()
-            .copied()
-            .find(|a| a.slug().eq_ignore_ascii_case(slug))
-    }
-}
-
-impl std::fmt::Display for AgentTarget {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.slug())
-    }
-}
+/// Each provisioned AI agent. Re-export of the canonical
+/// [`crate::agents::Agent`] enum (review item 19) — historically a
+/// per-subsystem enum lived here, but the three copies (here,
+/// `mcp_register::McpAgentTarget`, `skills::SkillAgent`) carried the
+/// same six variants and the same slug mapping with only per-subsystem
+/// method bolt-ons differing. Consolidating to one type makes
+/// cross-subsystem drift impossible (a Cursor variant added in one but
+/// not another) while preserving every prior API (`ALL`, `COUNT`,
+/// `slug`, `from_slug`, `Display`, kebab-case serde shape).
+pub use crate::agents::Agent as AgentTarget;
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

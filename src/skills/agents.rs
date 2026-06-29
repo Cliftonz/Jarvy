@@ -1,77 +1,13 @@
-//! AI agent detection for skill installation.
-//!
-//! Same agent set as `crate::ai_hooks::AgentTarget` (claude-code,
-//! cursor, codex, windsurf, cline, continue) but with skills-specific
-//! filesystem paths. Kept independent so changes to one subsystem
-//! don't accidentally break the other.
+//! AI agent detection for skill installation. Re-exports the canonical
+//! [`crate::agents::Agent`] enum as `SkillAgent` (review item 19) — the
+//! prior independent enum carried the same six variants and the same
+//! filesystem-path mapping as the merged canonical type. Cross-subsystem
+//! drift is now a compile error (a new variant added in one place lights
+//! up everywhere).
 
-use std::path::PathBuf;
+pub use crate::agents::Agent as SkillAgent;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum SkillAgent {
-    ClaudeCode,
-    Cursor,
-    Codex,
-    Windsurf,
-    Cline,
-    Continue,
-}
-
-impl SkillAgent {
-    pub const ALL: &'static [SkillAgent] = &[
-        SkillAgent::ClaudeCode,
-        SkillAgent::Cursor,
-        SkillAgent::Codex,
-        SkillAgent::Windsurf,
-        SkillAgent::Cline,
-        SkillAgent::Continue,
-    ];
-
-    pub fn slug(self) -> &'static str {
-        match self {
-            SkillAgent::ClaudeCode => "claude-code",
-            SkillAgent::Cursor => "cursor",
-            SkillAgent::Codex => "codex",
-            SkillAgent::Windsurf => "windsurf",
-            SkillAgent::Cline => "cline",
-            SkillAgent::Continue => "continue",
-        }
-    }
-
-    pub fn from_slug(slug: &str) -> Option<SkillAgent> {
-        Self::ALL
-            .iter()
-            .copied()
-            .find(|a| a.slug().eq_ignore_ascii_case(slug))
-    }
-
-    /// Agent's config directory under `$HOME` (or `JARVY_HOME` for
-    /// tests). Returns `None` if home lookup fails.
-    pub fn config_dir(self) -> Option<PathBuf> {
-        let home = home_dir()?;
-        Some(match self {
-            SkillAgent::ClaudeCode => home.join(".claude"),
-            SkillAgent::Cursor => home.join(".cursor"),
-            SkillAgent::Codex => home.join(".codex"),
-            SkillAgent::Windsurf => home.join(".windsurf"),
-            SkillAgent::Cline => home.join(".cline"),
-            SkillAgent::Continue => home.join(".continue"),
-        })
-    }
-
-    /// Where skills land for this agent.
-    pub fn skills_dir(self) -> Option<PathBuf> {
-        self.config_dir().map(|p| p.join("skills"))
-    }
-
-    /// `true` when the agent's config directory exists on disk —
-    /// proxy for "agent is installed."
-    pub fn is_installed(self) -> bool {
-        self.config_dir().map(|p| p.exists()).unwrap_or(false)
-    }
-}
-
-/// Detect every installed agent. Returns in `ALL` order.
+/// Detect every installed agent. Returns in `Agent::ALL` order.
 pub fn detect_agents() -> Vec<SkillAgent> {
     SkillAgent::ALL
         .iter()
@@ -80,28 +16,10 @@ pub fn detect_agents() -> Vec<SkillAgent> {
         .collect()
 }
 
-/// Honors `JARVY_HOME` for tests; otherwise standard `HOME` /
-/// `USERPROFILE` lookup.
-fn home_dir() -> Option<PathBuf> {
-    if let Some(v) = std::env::var_os("JARVY_HOME") {
-        return Some(PathBuf::from(v));
-    }
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
-
-    #[test]
-    fn slug_round_trips() {
-        for a in SkillAgent::ALL {
-            assert_eq!(SkillAgent::from_slug(a.slug()), Some(*a));
-        }
-    }
 
     #[test]
     #[serial_test::serial(jarvy_home_env)]

@@ -7,6 +7,7 @@
 use clap::Parser;
 use std::fs;
 
+mod agents;
 mod ai_hooks;
 mod analytics;
 mod bootstrap;

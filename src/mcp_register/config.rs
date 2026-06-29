@@ -127,66 +127,12 @@ pub enum McpRegistrationScope {
     Project,
 }
 
-/// Which agent to register with. Mirrors `AgentTarget` in ai_hooks but
-/// kept separate so the two subsystems don't accidentally diverge on
-/// support matrices.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[repr(u8)]
-pub enum McpAgentTarget {
-    ClaudeCode = 0,
-    Cursor = 1,
-    Codex = 2,
-    Windsurf = 3,
-    Cline = 4,
-    Continue = 5,
-}
-
-impl McpAgentTarget {
-    /// Every variant in stable order. Used by tests; reserved for
-    /// future per-agent CLI flags.
-    #[allow(dead_code)]
-    pub const ALL: &'static [McpAgentTarget] = &[
-        McpAgentTarget::ClaudeCode,
-        McpAgentTarget::Cursor,
-        McpAgentTarget::Codex,
-        McpAgentTarget::Windsurf,
-        McpAgentTarget::Cline,
-        McpAgentTarget::Continue,
-    ];
-
-    #[allow(dead_code)]
-    pub const COUNT: usize = 6;
-
-    pub fn slug(self) -> &'static str {
-        match self {
-            McpAgentTarget::ClaudeCode => "claude-code",
-            McpAgentTarget::Cursor => "cursor",
-            McpAgentTarget::Codex => "codex",
-            McpAgentTarget::Windsurf => "windsurf",
-            McpAgentTarget::Cline => "cline",
-            McpAgentTarget::Continue => "continue",
-        }
-    }
-
-    /// Whether this agent supports project-scope registration. Windsurf,
-    /// Cline, and Continue (in its current single-file mode) do not.
-    /// Currently informational — registrars fall back to user scope
-    /// with a warning when project is requested.
-    #[allow(dead_code)]
-    pub fn supports_project_scope(self) -> bool {
-        matches!(
-            self,
-            McpAgentTarget::ClaudeCode | McpAgentTarget::Cursor | McpAgentTarget::Codex
-        )
-    }
-}
-
-impl std::fmt::Display for McpAgentTarget {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.slug())
-    }
-}
+/// Which agent to register MCP servers with. Re-export of the canonical
+/// [`crate::agents::Agent`] enum (review item 19) — see the rationale on
+/// `ai_hooks::AgentTarget`. `supports_project_scope` lives on the
+/// canonical type so cross-subsystem changes (a new agent variant)
+/// land everywhere atomically.
+pub use crate::agents::Agent as McpAgentTarget;
 
 #[cfg(test)]
 mod tests {

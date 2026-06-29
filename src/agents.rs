@@ -1,0 +1,209 @@
+//! Canonical agent enum shared by every subsystem that targets the
+//! six AI dev agents (Claude Code, Cursor, Codex, Windsurf, Cline,
+//! Continue). Review item 19 (maint P1) — previously three near-
+//! identical enums (`ai_hooks::AgentTarget`, `mcp_register::McpAgentTarget`,
+//! `skills::SkillAgent`) carried the same six variants and the same
+//! slug mapping, with only per-subsystem method bolt-ons differing.
+//!
+//! The merged shape exposes the superset of methods on one enum.
+//! Each subsystem calls only the methods it needs; the maintainability
+//! cost of an unused method is far smaller than the cost of
+//! cross-subsystem drift (a Cursor variant added here but not there
+//! is now impossible).
+//!
+//! The serde representation (`rename_all = "kebab-case"`) matches the
+//! prior shapes byte-for-byte so existing `jarvy.toml` configs deserialise
+//! unchanged. `#[repr(u8)]` matches the prior layout so the
+//! `[T; Agent::COUNT]` fixed-size-array pattern used by
+//! `ai_hooks::runner` keeps working.
+
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default,
+)]
+#[serde(rename_all = "kebab-case")]
+#[repr(u8)]
+pub enum Agent {
+    #[default]
+    ClaudeCode = 0,
+    Cursor = 1,
+    Codex = 2,
+    Windsurf = 3,
+    Cline = 4,
+    Continue = 5,
+}
+
+impl Agent {
+    /// Every variant in stable order. Used by setup loops, agent-flag
+    /// completion, and as the iteration source for fixed-size-array
+    /// indexing patterns (`[T; Agent::COUNT]`).
+    pub const ALL: &'static [Agent] = &[
+        Agent::ClaudeCode,
+        Agent::Cursor,
+        Agent::Codex,
+        Agent::Windsurf,
+        Agent::Cline,
+        Agent::Continue,
+    ];
+
+    /// Number of variants. Held as a const so call sites can declare
+    /// `[T; Agent::COUNT]` without pulling in a separate constant.
+    pub const COUNT: usize = 6;
+
+    /// Stable telemetry / CLI identifier. Used everywhere a string
+    /// representation of the agent is needed — telemetry tags,
+    /// `jarvy.toml` keys, CLI flag values.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Agent::ClaudeCode => "claude-code",
+            Agent::Cursor => "cursor",
+            Agent::Codex => "codex",
+            Agent::Windsurf => "windsurf",
+            Agent::Cline => "cline",
+            Agent::Continue => "continue",
+        }
+    }
+
+    /// Reverse of [`Self::slug`]. Case-insensitive match so a user
+    /// typing `Cursor` resolves to `cursor`.
+    pub fn from_slug(slug: &str) -> Option<Agent> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|a| a.slug().eq_ignore_ascii_case(slug))
+    }
+
+    /// Whether this agent supports project-scope MCP-server
+    /// registration. Windsurf, Cline, and Continue (in its current
+    /// single-file mode) do not — registrars fall back to user scope
+    /// with a warning when project is requested.
+    ///
+    /// Used by `mcp_register`; inert for `ai_hooks` / `skills`.
+    /// Currently consulted only by the project-scope unit tests + the
+    /// registrar fallback logic; reserved for future per-agent CLI
+    /// flags that would surface "this agent doesn't support project
+    /// scope, falling back to user" up-front.
+    #[allow(dead_code)]
+    pub fn supports_project_scope(self) -> bool {
+        matches!(self, Agent::ClaudeCode | Agent::Cursor | Agent::Codex)
+    }
+
+    /// Agent's config directory under `$HOME` (or `JARVY_HOME` for
+    /// tests). Returns `None` if home lookup fails.
+    ///
+    /// Used by `skills` to compute the per-agent `skills/` install path;
+    /// also the proxy for "is this agent installed on this machine?"
+    /// via [`Self::is_installed`].
+    pub fn config_dir(self) -> Option<PathBuf> {
+        let home = home_dir()?;
+        Some(match self {
+            Agent::ClaudeCode => home.join(".claude"),
+            Agent::Cursor => home.join(".cursor"),
+            Agent::Codex => home.join(".codex"),
+            Agent::Windsurf => home.join(".windsurf"),
+            Agent::Cline => home.join(".cline"),
+            Agent::Continue => home.join(".continue"),
+        })
+    }
+
+    /// Where skills land for this agent.
+    pub fn skills_dir(self) -> Option<PathBuf> {
+        self.config_dir().map(|p| p.join("skills"))
+    }
+
+    /// `true` when the agent's config directory exists on disk —
+    /// proxy for "agent is installed."
+    pub fn is_installed(self) -> bool {
+        self.config_dir().map(|p| p.exists()).unwrap_or(false)
+    }
+}
+
+impl std::fmt::Display for Agent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.slug())
+    }
+}
+
+/// Honors `JARVY_HOME` for tests; otherwise standard `HOME` /
+/// `USERPROFILE` lookup. Mirrors the prior helper that lived in
+/// `skills::agents`.
+fn home_dir() -> Option<PathBuf> {
+    if let Some(v) = std::env::var_os("JARVY_HOME") {
+        return Some(PathBuf::from(v));
+    }
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn slug_round_trips() {
+        for a in Agent::ALL {
+            assert_eq!(Agent::from_slug(a.slug()), Some(*a));
+        }
+    }
+
+    #[test]
+    fn from_slug_is_case_insensitive() {
+        assert_eq!(Agent::from_slug("Cursor"), Some(Agent::Cursor));
+        assert_eq!(Agent::from_slug("CLAUDE-CODE"), Some(Agent::ClaudeCode));
+    }
+
+    #[test]
+    fn from_slug_unknown_returns_none() {
+        assert_eq!(Agent::from_slug("zed"), None);
+    }
+
+    #[test]
+    fn supports_project_scope_matches_prior_matrix() {
+        assert!(Agent::ClaudeCode.supports_project_scope());
+        assert!(Agent::Cursor.supports_project_scope());
+        assert!(Agent::Codex.supports_project_scope());
+        assert!(!Agent::Windsurf.supports_project_scope());
+        assert!(!Agent::Cline.supports_project_scope());
+        assert!(!Agent::Continue.supports_project_scope());
+    }
+
+    #[test]
+    fn count_matches_all_len() {
+        assert_eq!(Agent::COUNT, Agent::ALL.len());
+    }
+
+    #[test]
+    fn display_matches_slug() {
+        assert_eq!(format!("{}", Agent::ClaudeCode), "claude-code");
+        assert_eq!(format!("{}", Agent::Continue), "continue");
+    }
+
+    #[test]
+    fn serde_kebab_case_round_trip() {
+        let raw = "\"claude-code\"";
+        let a: Agent = serde_json::from_str(raw).unwrap();
+        assert_eq!(a, Agent::ClaudeCode);
+        assert_eq!(serde_json::to_string(&a).unwrap(), raw);
+    }
+
+    #[test]
+    #[serial_test::serial(jarvy_home_env)]
+    fn config_dir_honors_jarvy_home() {
+        // SAFETY: scoped JARVY_HOME for this test only.
+        #[allow(unsafe_code)]
+        unsafe {
+            let tmp = tempdir().unwrap();
+            std::env::set_var("JARVY_HOME", tmp.path());
+            let dir = Agent::ClaudeCode.config_dir().unwrap();
+            assert_eq!(dir, tmp.path().join(".claude"));
+            assert!(!Agent::ClaudeCode.is_installed());
+            std::fs::create_dir(&dir).unwrap();
+            assert!(Agent::ClaudeCode.is_installed());
+            std::env::remove_var("JARVY_HOME");
+        }
+    }
+}
