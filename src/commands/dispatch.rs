@@ -302,23 +302,38 @@ fn handle_doctor(
     // not the user passed `--file`: `cd apps/web && jarvy doctor`
     // should "just work" without making the user spell out the path.
     //
-    // Search anchor is the user-supplied `--file` when present;
-    // otherwise we walk up from `./jarvy.toml` (the same default the
-    // rest of the CLI uses).
-    let anchor = file.clone().unwrap_or_else(|| "./jarvy.toml".to_string());
-    let resolved_config: Option<Config> = {
-        let auto_redirect = commands::setup_cmd::auto_detect_project(&anchor)
-            .and_then(|member| {
-                commands::setup_cmd::resolve_workspace_project(&anchor, &member).ok()
-            })
-            .and_then(|p| p.to_str().map(str::to_string));
-        match (file.as_ref(), auto_redirect) {
-            (_, Some(s)) => Some(Config::new(&s)),
-            (Some(f), None) => Some(Config::new(f)),
-            (None, None) => None,
+    // Anchor is the user-supplied `--file` when present, otherwise
+    // the canonical CLI default. `effective_config_path` returns the
+    // anchor verbatim when no workspace context is detected.
+    let anchor: &str = file.as_deref().unwrap_or(crate::cli::DEFAULT_CONFIG_FILE);
+    let resolved_path = commands::setup_cmd::effective_config_path(anchor);
+    let resolved_str = resolved_path.to_string_lossy().into_owned();
+    let auto_redirected = resolved_str != anchor;
+    if auto_redirected {
+        if crate::observability::telemetry_gate::is_enabled() {
+            tracing::info!(
+                event = "doctor.context.auto_redirected",
+                resolved = %resolved_str,
+                reason = "cwd_inside_workspace_member",
+            );
         }
-    };
-    let config = resolved_config;
+        if file.is_none() {
+            eprintln!(
+                "  Detected workspace member — scoping doctor to `{}`. \
+                 Pass --file explicitly to override.",
+                resolved_str
+            );
+        }
+    }
+    // Preserve pre-PRD-047 behavior: when --file is omitted AND no
+    // workspace redirect fires AND ./jarvy.toml doesn't exist, run
+    // with no config (doctor is still useful for tool sanity checks).
+    let config: Option<Config> =
+        if file.is_none() && !auto_redirected && !std::path::Path::new(&resolved_str).exists() {
+            None
+        } else {
+            Some(Config::new(&resolved_str))
+        };
     let specific_tools = tools.as_ref().map(|t| {
         t.split(',')
             .map(|s| s.trim().to_string())

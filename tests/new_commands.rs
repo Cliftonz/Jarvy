@@ -52,17 +52,18 @@ fn explain_known_tool_succeeds() {
 }
 
 #[test]
-fn migrate_apply_flag_rejected_until_implemented() {
-    // The --apply flag is plumbed through CLI but not yet implemented.
-    // Refusing with a clear error is better than silently treating it as
-    // a dry-run, which would mislead users.
+fn migrate_apply_succeeds_on_already_current_config() {
+    // PRD half-baked close-out (CHANGELOG v0.4.0): `migrate --apply`
+    // now rewrites legacy `[tools]` blocks into `[provisioner]`. A
+    // config that's already current is a no-op success — no
+    // migrations needed, exit 0.
     let tmp = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(tmp.path(), "[provisioner]\ngit = \"latest\"\n").unwrap();
     let mut c = jarvy();
     c.args(["migrate", "--file"]).arg(tmp.path()).arg("--apply");
     c.assert()
-        .failure()
-        .stderr(predicate::str::contains("not yet implemented"));
+        .success()
+        .stdout(predicate::str::contains("No migrations needed"));
 }
 
 #[test]

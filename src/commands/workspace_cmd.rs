@@ -51,11 +51,7 @@ fn resolve_member(root_dir: &Path, member: &str) -> Option<PathBuf> {
 }
 
 pub fn run_workspace(action: &WorkspaceAction, file: &str) -> i32 {
-    let project_dir = Path::new(file)
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
+    let project_dir = crate::paths::config_parent_dir(file);
 
     let ctx = match workspace::find_workspace_root(&project_dir) {
         Some(c) => c,

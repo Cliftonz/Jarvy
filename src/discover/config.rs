@@ -13,10 +13,16 @@
 //! Custom rules are APPENDED to the built-in set — they can't remove
 //! or override built-in rules. That posture is intentional: a user
 //! tree shouldn't be able to silence a real ecosystem detection.
+//!
+//! `rules` paths are refused if absolute or contain `..` components —
+//! prevents a hostile `jarvy.toml` from coercing a victim into reading
+//! `/etc/shadow` or escaping the project root. Parse-error advisories
+//! redact the underlying `toml::de::Error` body so non-TOML target
+//! file contents can't escape to stderr (Sec F4).
 
 use super::rules::DetectionRule;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Component, Path};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct DiscoverConfig {
@@ -65,6 +71,24 @@ pub fn load_effective_rules(
         return (combined, advisories);
     };
 
+    // Refuse absolute paths and any `..` component — both are
+    // pre-existing arbitrary-read pitfalls surfaced by the new
+    // `--rules` CLI override (Sec F4). A hostile `jarvy.toml` cannot
+    // coerce a victim into reading `/etc/shadow` or escaping the
+    // project root.
+    let candidate = Path::new(rules_path);
+    if candidate.is_absolute()
+        || candidate
+            .components()
+            .any(|c| matches!(c, Component::ParentDir))
+    {
+        advisories.push(format!(
+            "[discover] rules file `{rules_path}` refused: absolute paths and `..` traversal \
+             are not allowed (built-in rules only)"
+        ));
+        return (combined, advisories);
+    }
+
     let path = project_dir.join(rules_path);
     let content = match std::fs::read_to_string(&path) {
         Ok(s) => s,
@@ -81,9 +105,14 @@ pub fn load_effective_rules(
         Ok(parsed) => {
             combined.extend(parsed.rules);
         }
-        Err(e) => {
+        Err(_) => {
+            // Intentionally redacted — `toml::de::Error::Display` echoes
+            // bytes from the source, which leaks the contents of a
+            // hostile target file (e.g. `/etc/shadow` lines visible in
+            // the "expected '=' at line 2, column 5: 'root:x:0:0...'"
+            // form). Carry the path only.
             advisories.push(format!(
-                "[discover] rules file `{}` failed to parse: {e} (built-in rules only)",
+                "[discover] rules file `{}` failed to parse (built-in rules only)",
                 path.display()
             ));
         }
@@ -155,5 +184,59 @@ file = ".custom-marker"
         let (_rules, adv) = load_effective_rules(tmp.path(), Some(&cfg));
         assert_eq!(adv.len(), 1);
         assert!(adv[0].contains("failed to parse"));
+    }
+
+    /// Sec F4 — `[discover] rules = "/etc/shadow"` must be refused
+    /// before `read_to_string` runs. A hostile `jarvy.toml` (PR,
+    /// scaffold template, dependency repo) shouldn't be able to
+    /// coerce a victim into reading arbitrary absolute paths.
+    #[test]
+    fn absolute_rules_path_is_refused() {
+        let tmp = tempdir().unwrap();
+        let cfg = DiscoverConfig {
+            rules: Some("/etc/hostname".into()),
+            ignore_dirs: vec![],
+        };
+        let (rules, adv) = load_effective_rules(tmp.path(), Some(&cfg));
+        assert!(!rules.is_empty(), "built-ins still loaded");
+        assert_eq!(adv.len(), 1);
+        assert!(adv[0].contains("refused"), "got: {}", adv[0]);
+    }
+
+    /// Sec F4 — `..` traversal in rules path is refused. Pre-fix this
+    /// would read e.g. `<project>/../../../home/user/.ssh/id_rsa`.
+    #[test]
+    fn parent_traversal_rules_path_is_refused() {
+        let tmp = tempdir().unwrap();
+        let cfg = DiscoverConfig {
+            rules: Some("../../etc/passwd".into()),
+            ignore_dirs: vec![],
+        };
+        let (rules, adv) = load_effective_rules(tmp.path(), Some(&cfg));
+        assert!(!rules.is_empty());
+        assert_eq!(adv.len(), 1);
+        assert!(adv[0].contains("refused"));
+    }
+
+    /// Sec F4 defense-in-depth — the parse-error advisory must NOT
+    /// echo the source bytes of the target file. Pre-fix, the
+    /// `toml::de::Error` body would leak content of a hostile target
+    /// (e.g. `/etc/shadow` lines visible in the error message).
+    #[test]
+    fn malformed_file_advisory_redacts_target_bytes() {
+        let tmp = tempdir().unwrap();
+        let secret = "ROOT_PASSWORD_HASH=$6$secret\nhostile content\n";
+        fs::write(tmp.path().join("bad.toml"), secret).unwrap();
+        let cfg = DiscoverConfig {
+            rules: Some("bad.toml".into()),
+            ignore_dirs: vec![],
+        };
+        let (_rules, adv) = load_effective_rules(tmp.path(), Some(&cfg));
+        assert_eq!(adv.len(), 1);
+        assert!(
+            !adv[0].contains("ROOT_PASSWORD_HASH") && !adv[0].contains("hostile"),
+            "advisory must not echo target file bytes; got: {}",
+            adv[0]
+        );
     }
 }

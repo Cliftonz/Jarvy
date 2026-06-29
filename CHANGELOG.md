@@ -98,11 +98,31 @@ code-review enhancement plan that ran against the new surface.
 
 **Test counts:** 974 lib + 1442 bin + 54 integration suites green.
 
+**Behavior changes:**
+- `jarvy discover --watch` now exits **CONFIG_ERROR (2)** instead of
+  `0` when the filesystem watcher backend dies (inotify exhausted,
+  permission revoked, channel closed). CI wrappers and cargo-watch-
+  style shells chaining on `$?` will now correctly see the failure
+  instead of treating a silent watcher death as success.
+- `jarvy setup --project <name>` now stages synthesized member
+  configs under `~/.jarvy/cache/synthesized/<sha>.toml` (content-
+  addressed, overwritten per run) instead of leaking persistent
+  `jarvy-setup-project-*.toml` files into `/tmp`. CI bots that
+  previously accumulated these in their tmpfs can clear them.
+- `[discover] rules = "<path>"` now refuses absolute paths and `..`
+  traversal components. Parse-error advisories also redact source
+  bytes from the target file so a hostile `jarvy.toml` cannot
+  exfiltrate `/etc/shadow` content via the error message.
+
 **Migration notes:**
 - `jarvy migrate --apply` will auto-rewrite legacy `[tools]` blocks
   to `[provisioner]` for users still on the pre-v0.2 schema.
 - `setup --project current` is the natural one-liner for monorepo
   contributors who `cd` into their working subdir.
+- Workspace members without a per-member `jarvy.toml` will see their
+  synthesized config moved from `/tmp/jarvy-setup-project-*.toml` to
+  `~/.jarvy/cache/synthesized/`. The contents are equivalent; only
+  the storage path changed.
 
 ## [Unreleased] — Close out PRD-011/013/014/037/038/039/048/049/052/054/055 + library registry + git skill sources + skills + git hooks + progress (2026-06-28)
 

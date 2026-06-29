@@ -1755,6 +1755,21 @@ fn capture_drift_baseline_borrowed(
     }
 }
 
+/// Resolve the effective jarvy.toml path for a command, applying
+/// PRD-047 workspace auto-context. If cwd sits inside a declared
+/// workspace member, returns that member's jarvy.toml (synthesizing
+/// from workspace defaults when the member has no per-member config).
+/// Otherwise returns `file` verbatim.
+///
+/// Centralized so the `auto_detect_project → resolve_workspace_project →
+/// fallback` glue lives in one place instead of being re-inlined per
+/// command (was: setup arm + doctor + drift + context).
+pub(crate) fn effective_config_path(file: &str) -> std::path::PathBuf {
+    auto_detect_project(file)
+        .and_then(|m| resolve_workspace_project(file, &m).ok())
+        .unwrap_or_else(|| std::path::PathBuf::from(file))
+}
+
 /// Auto-context detection (PRD-047 phase 2). When `jarvy setup` is
 /// invoked without `--project` AND cwd sits inside a declared
 /// workspace member, return that member's name so the caller can
@@ -1762,12 +1777,8 @@ fn capture_drift_baseline_borrowed(
 /// - the file argument's parent already IS the workspace root, OR
 /// - no `[workspace]` section is found walking up, OR
 /// - cwd doesn't sit inside any declared member.
-pub fn auto_detect_project(file: &str) -> Option<String> {
-    let project_dir = std::path::Path::new(file)
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(std::path::Path::to_path_buf)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+pub(crate) fn auto_detect_project(file: &str) -> Option<String> {
+    let project_dir = crate::paths::config_parent_dir(file);
     let ctx = crate::workspace::find_workspace_root(&project_dir)?;
     let root_dir = ctx.root_config.parent()?;
     // Only return Some(member) when the supplied `file` actually
@@ -1797,16 +1808,11 @@ pub fn auto_detect_project(file: &str) -> Option<String> {
 ///   for setup which runs once and exits.
 /// - On any failure (no workspace, unknown member, traversal): return
 ///   a structured error so dispatch can produce a clean diagnostic.
-pub fn resolve_workspace_project(
+pub(crate) fn resolve_workspace_project(
     root_file: &str,
     name: &str,
 ) -> Result<std::path::PathBuf, String> {
-    let root_path = std::path::Path::new(root_file);
-    let project_dir = root_path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(std::path::Path::to_path_buf)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let project_dir = crate::paths::config_parent_dir(root_file);
 
     let ctx = crate::workspace::find_workspace_root(&project_dir).ok_or_else(|| {
         format!(
@@ -1855,8 +1861,14 @@ pub fn resolve_workspace_project(
         return Ok(member_toml);
     }
 
-    // No per-member jarvy.toml. Synthesize the merged config from the
-    // root and stash it in a tempfile.
+    // No per-member jarvy.toml. Synthesize the merged config and
+    // stash it in a content-addressed cache under ~/.jarvy/cache/
+    // synthesized/ instead of /tmp. Previously this called
+    // `NamedTempFile::keep()` which discards the auto-delete handler;
+    // every workspace-defaults setup run permanently leaked a file to
+    // /tmp (review item 7 / Sec F3). The cache path is hashed by
+    // (workspace root + member name) so re-runs reuse the same file
+    // and concurrent processes never collide.
     let raw = std::fs::read_to_string(&ctx.root_config)
         .map_err(|e| format!("read {}: {e}", ctx.root_config.display()))?;
     let root_value: toml::Value =
@@ -1869,29 +1881,96 @@ pub fn resolve_workspace_project(
     let serialized =
         toml::to_string_pretty(&merged).map_err(|e| format!("serialize merged config: {e}"))?;
 
-    use std::io::Write;
-    let mut tmp = tempfile::Builder::new()
-        .prefix("jarvy-setup-project-")
-        .suffix(".toml")
-        .tempfile()
-        .map_err(|e| format!("tempfile: {e}"))?;
-    tmp.write_all(serialized.as_bytes())
-        .map_err(|e| format!("write tempfile: {e}"))?;
-    let (_, path) = tmp.keep().map_err(|e| format!("persist tempfile: {e}"))?;
+    let path = synthesized_cache_path(&workspace_root, &target_member)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
+    }
+    std::fs::write(&path, &serialized).map_err(|e| format!("write {}: {e}", path.display()))?;
     Ok(path)
 }
 
-/// True iff `dir` looks like a child of the OS temp dir. Used to
-/// detect when `setup --project <name>` synthesized a merged-config
-/// tempfile so the continuous-discovery phase can scan the real
-/// project tree instead of `/tmp` (see `run_continuous_discover_phase`).
-fn is_synthesized_tempfile(dir: &std::path::Path) -> bool {
-    let Ok(tmp) = std::env::temp_dir().canonicalize() else {
+/// Stable cache path for a synthesized member config. Lives under
+/// `~/.jarvy/cache/synthesized/` so it survives the process (the
+/// downstream setup phases read it via path, not handle) without
+/// leaking into the global /tmp namespace. Hash key = canonical
+/// workspace root + member name; the file is overwritten on every
+/// run, which keeps it in sync with edits to the root config.
+fn synthesized_cache_path(
+    workspace_root: &std::path::Path,
+    member: &str,
+) -> Result<std::path::PathBuf, String> {
+    use sha2::{Digest, Sha256};
+    let canonical = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.to_string_lossy().as_bytes());
+    hasher.update(b"\0");
+    hasher.update(member.as_bytes());
+    let digest = hasher.finalize();
+    let hex = hex::encode(&digest[..12]);
+    let base = dirs::home_dir()
+        .ok_or_else(|| "no home directory; cannot stage synthesized config".to_string())?
+        .join(".jarvy")
+        .join("cache")
+        .join("synthesized");
+    Ok(base.join(format!("{hex}.toml")))
+}
+
+/// True iff `dir` is the synthesized-config cache root used by
+/// `resolve_workspace_project` when a member has no per-member
+/// `jarvy.toml`. The continuous-discovery phase reads this to scan
+/// the real project tree instead of `~/.jarvy/cache/synthesized/`.
+///
+/// Inner helper `is_synthesized_cache_dir_in` takes an explicit
+/// `cache_root` so unit tests can pass a fake root without polluting
+/// the user's real `~/.jarvy/`. The public wrapper resolves the real
+/// cache root and delegates.
+fn is_synthesized_cache_dir(dir: &std::path::Path) -> bool {
+    let Some(cache_root) = synthesized_cache_root() else {
         return false;
     };
-    dir.canonicalize()
-        .map(|d| d.starts_with(&tmp))
-        .unwrap_or(false)
+    is_synthesized_cache_dir_in(dir, &cache_root)
+}
+
+fn is_synthesized_cache_dir_in(dir: &std::path::Path, cache_root: &std::path::Path) -> bool {
+    // Compare canonical paths so a symlink-into-cache or
+    // `~/.jarvy/cache/synthesized/../synthesized/` both resolve
+    // correctly. Returning `false` on canonicalize failure is the
+    // safe default: we'd rather skip the scan-root redirect (and
+    // pick up no marker files) than redirect to cwd erroneously.
+    let canon_dir = match dir.canonicalize() {
+        Ok(d) => d,
+        Err(e) => {
+            if crate::observability::telemetry_gate::is_enabled() {
+                tracing::debug!(
+                    event = "discover.tempfile_detect.canonicalize_failed",
+                    target = "project_dir",
+                    path = %dir.display(),
+                    error = %e,
+                );
+            }
+            return false;
+        }
+    };
+    let canon_root = match cache_root.canonicalize() {
+        Ok(r) => r,
+        Err(_) => {
+            // Cache root doesn't exist yet — common case (first run).
+            // The dir under test can't possibly be inside it.
+            return false;
+        }
+    };
+    canon_dir.starts_with(&canon_root)
+}
+
+fn synthesized_cache_root() -> Option<std::path::PathBuf> {
+    Some(
+        dirs::home_dir()?
+            .join(".jarvy")
+            .join("cache")
+            .join("synthesized"),
+    )
 }
 
 /// Continuous discovery (PRD-044 phase 2). After `jarvy setup`
@@ -1912,18 +1991,24 @@ fn run_continuous_discover_phase(file: &str) {
     }
 
     // Pick the directory to SCAN for marker files. Normally this is
-    // the parent of `file` — but when `file` is a synthesized tempfile
-    // from `setup --project <name>` (path under `std::env::temp_dir()`),
-    // the parent is `/tmp/...` and the scan finds nothing. In that
-    // case, fall back to cwd, which is where the user actually
-    // launched `jarvy setup`.
-    let raw_parent = std::path::Path::new(file)
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(std::path::Path::to_path_buf)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let project_dir = if is_synthesized_tempfile(&raw_parent) {
-        std::env::current_dir().unwrap_or(raw_parent)
+    // the parent of `file` — but when `file` is a synthesized
+    // member-config from `setup --project <name>` (path under
+    // `~/.jarvy/cache/synthesized/`), the parent isn't the project
+    // tree. In that case, fall back to cwd, which is where the user
+    // actually launched `jarvy setup`.
+    let raw_parent = crate::paths::config_parent_dir(file);
+    let scan_root_redirected = is_synthesized_cache_dir(&raw_parent);
+    let project_dir = if scan_root_redirected {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| raw_parent.clone());
+        if crate::observability::telemetry_gate::is_enabled() {
+            tracing::debug!(
+                event = "discover.setup_advisory.scan_root_redirected",
+                from = %raw_parent.display(),
+                to = %cwd.display(),
+                reason = "synthesized_member_config",
+            );
+        }
+        cwd
     } else {
         raw_parent
     };
@@ -1951,6 +2036,8 @@ fn run_continuous_discover_phase(file: &str) {
             event = "discover.setup_advisory",
             new_tools = new_count,
             uninstallable = report.uninstallable.len(),
+            scan_root = %project_dir.display(),
+            scan_root_redirected,
         );
     }
 
@@ -1972,6 +2059,58 @@ mod tests {
     //! signature drift and panics — not the full install behavior.
 
     use super::*;
+
+    // -------------------------------------------------------------
+    // `is_synthesized_cache_dir_in` — pure-function variant of the
+    // tempfile-detection predicate. Uses an injected `cache_root` so
+    // tests don't pollute `~/.jarvy/cache/synthesized/` (QA F4/F8 +
+    // Maint F6 — keep `unwrap_or(false)` semantics, DI the cache root).
+    // -------------------------------------------------------------
+
+    #[test]
+    fn is_synthesized_cache_dir_matches_dir_under_cache_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache_root = tmp.path().join("cache").join("synthesized");
+        std::fs::create_dir_all(&cache_root).unwrap();
+        // A file laid down inside the cache root canonicalizes under it.
+        let probe = cache_root.join("abc123.toml");
+        std::fs::write(&probe, "").unwrap();
+        // Function tests the PARENT directory of the probe file,
+        // which is the cache root itself.
+        assert!(is_synthesized_cache_dir_in(&cache_root, &cache_root));
+    }
+
+    #[test]
+    fn is_synthesized_cache_dir_rejects_unrelated_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache_root = tmp.path().join("cache").join("synthesized");
+        std::fs::create_dir_all(&cache_root).unwrap();
+        let unrelated = tmp.path().join("project");
+        std::fs::create_dir_all(&unrelated).unwrap();
+        assert!(!is_synthesized_cache_dir_in(&unrelated, &cache_root));
+    }
+
+    #[test]
+    fn is_synthesized_cache_dir_rejects_missing_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache_root = tmp.path().join("cache").join("synthesized");
+        std::fs::create_dir_all(&cache_root).unwrap();
+        let missing = tmp.path().join("does-not-exist");
+        // canonicalize fails → false (safe default — don't redirect
+        // scan root when we can't be sure).
+        assert!(!is_synthesized_cache_dir_in(&missing, &cache_root));
+    }
+
+    #[test]
+    fn is_synthesized_cache_dir_rejects_when_cache_root_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let probe = tmp.path().join("project");
+        std::fs::create_dir_all(&probe).unwrap();
+        let missing_cache_root = tmp.path().join("cache").join("synthesized");
+        // Cache root doesn't exist (first run) — function returns false
+        // so the dir under test is treated as a normal project dir.
+        assert!(!is_synthesized_cache_dir_in(&probe, &missing_cache_root));
+    }
 
     // -------------------------------------------------------------
     // `render_package_preview` — pure-function variant of the dry-run

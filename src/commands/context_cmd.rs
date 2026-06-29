@@ -8,11 +8,7 @@
 use std::path::Path;
 
 pub fn run_context(file: &str, output_format: &str) -> i32 {
-    let project_dir = Path::new(file)
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let project_dir = crate::paths::config_parent_dir(file);
     let cwd = std::env::current_dir().ok();
 
     let workspace_ctx = crate::workspace::find_workspace_root(&project_dir);

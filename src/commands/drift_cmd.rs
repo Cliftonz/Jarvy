@@ -41,23 +41,22 @@ pub fn run_drift(file: &str, action: &DriftAction) -> i32 {
 
 /// Apply workspace auto-context (PRD-047 phase 2). Returns the
 /// effective config file path and the directory drift should treat
-/// as the project root (where `.jarvy/state.json` lives). If cwd
-/// sits inside a workspace member, we redirect to that member's
-/// `jarvy.toml`; otherwise the user-supplied path stands.
+/// as the project root (where `.jarvy/state.json` lives). Glue is
+/// centralized in `setup_cmd::effective_config_path` so any future
+/// changes to the auto-context rule land in one place instead of
+/// being replayed across setup / doctor / drift / context.
 fn workspace_aware_path(file: &str) -> (String, std::path::PathBuf) {
-    if let Some(member) = crate::commands::setup_cmd::auto_detect_project(file) {
-        if let Ok(resolved) = crate::commands::setup_cmd::resolve_workspace_project(file, &member) {
-            let dir = resolved.parent().unwrap_or(Path::new(".")).to_path_buf();
-            if let Some(s) = resolved.to_str() {
-                return (s.to_string(), dir);
-            }
-        }
+    let resolved = crate::commands::setup_cmd::effective_config_path(file);
+    let dir = resolved.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let path = resolved.to_string_lossy().into_owned();
+    if path != file && crate::observability::telemetry_gate::is_enabled() {
+        tracing::info!(
+            event = "drift.context.auto_redirected",
+            resolved = %path,
+            reason = "cwd_inside_workspace_member",
+        );
     }
-    let dir = Path::new(file)
-        .parent()
-        .unwrap_or(Path::new("."))
-        .to_path_buf();
-    (file.to_string(), dir)
+    (path, dir)
 }
 
 /// Run drift check command

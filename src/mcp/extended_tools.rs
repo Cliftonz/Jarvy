@@ -407,7 +407,7 @@ struct PathArgs {
 fn config_path(args: &PathArgs) -> String {
     args.config_path
         .clone()
-        .unwrap_or_else(|| "./jarvy.toml".to_string())
+        .unwrap_or_else(|| crate::cli::DEFAULT_CONFIG_FILE.to_string())
 }
 
 fn project_dir(args: &PathArgs) -> PathBuf {
@@ -453,7 +453,7 @@ pub fn handle_ai_hooks_list(arguments: Option<Value>) -> McpResult<Value> {
     }
     let file = args
         .config_path
-        .unwrap_or_else(|| "./jarvy.toml".to_string());
+        .unwrap_or_else(|| crate::cli::DEFAULT_CONFIG_FILE.to_string());
     let Some(cfg) = load_ai_hooks(&file) else {
         return envelope(json!({
             "configured": false,
@@ -539,7 +539,7 @@ pub fn handle_ai_hooks_apply(arguments: Option<Value>, ctx: &MutationCtx<'_>) ->
     let args: ApplyArgs = parse(arguments)?;
     let file = args
         .config_path
-        .unwrap_or_else(|| "./jarvy.toml".to_string());
+        .unwrap_or_else(|| crate::cli::DEFAULT_CONFIG_FILE.to_string());
     let Some(cfg) = load_ai_hooks(&file) else {
         return envelope(json!({ "configured": false, "config_path": file }));
     };
@@ -680,7 +680,7 @@ pub fn handle_mcp_register_apply(
     let args: ApplyArgs = parse(arguments)?;
     let file = args
         .config_path
-        .unwrap_or_else(|| "./jarvy.toml".to_string());
+        .unwrap_or_else(|| crate::cli::DEFAULT_CONFIG_FILE.to_string());
     let Some(cfg) = load_mcp_register(&file) else {
         return envelope(json!({ "configured": false, "config_path": file }));
     };
@@ -838,7 +838,7 @@ pub fn handle_roles_show(arguments: Option<Value>) -> McpResult<Value> {
         .and_then(|v| serde_json::from_value(v).map_err(McpError::from))?;
     let file = args
         .config_path
-        .unwrap_or_else(|| "./jarvy.toml".to_string());
+        .unwrap_or_else(|| crate::cli::DEFAULT_CONFIG_FILE.to_string());
     let Some(roles) = load_roles(&file) else {
         return envelope(json!({ "configured": false, "config_path": file }));
     };
@@ -1252,7 +1252,9 @@ pub fn handle_discover_scan(arguments: Option<Value>) -> McpResult<Value> {
         .map_err(|e| McpError::invalid_params(e.to_string()))?
         .unwrap_or_default();
     let project_dir = std::path::PathBuf::from(args.project_dir.unwrap_or_else(|| ".".into()));
-    let config_path = args.config_path.unwrap_or_else(|| "./jarvy.toml".into());
+    let config_path = args
+        .config_path
+        .unwrap_or_else(|| crate::cli::DEFAULT_CONFIG_FILE.into());
 
     let existing_text = std::fs::read_to_string(&config_path).ok();
     let already_configured: std::collections::HashSet<String> = existing_text
@@ -1299,7 +1301,9 @@ pub fn handle_discover_apply(arguments: Option<Value>, ctx: &MutationCtx) -> Mcp
             config_path: None,
             dry_run: true,
         });
-    let config_path = args.config_path.unwrap_or_else(|| "./jarvy.toml".into());
+    let config_path = args
+        .config_path
+        .unwrap_or_else(|| crate::cli::DEFAULT_CONFIG_FILE.into());
 
     // Workspace containment — refuse a config_path that escapes the
     // mutation ctx's workspace root (consistent with templates_use
@@ -1349,12 +1353,10 @@ pub fn handle_workspace_list(arguments: Option<Value>) -> McpResult<Value> {
         .transpose()
         .map_err(|e| McpError::invalid_params(e.to_string()))?
         .unwrap_or_default();
-    let config_path = args.config_path.unwrap_or_else(|| "./jarvy.toml".into());
-    let project_dir = std::path::Path::new(&config_path)
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(std::path::Path::to_path_buf)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let config_path = args
+        .config_path
+        .unwrap_or_else(|| crate::cli::DEFAULT_CONFIG_FILE.into());
+    let project_dir = crate::paths::config_parent_dir(&config_path);
 
     match crate::workspace::find_workspace_root(&project_dir) {
         Some(ctx) => {
@@ -1385,12 +1387,10 @@ pub fn handle_workspace_show(arguments: Option<Value>) -> McpResult<Value> {
         .and_then(|v| {
             serde_json::from_value(v).map_err(|e| McpError::invalid_params(e.to_string()))
         })?;
-    let config_path = args.config_path.unwrap_or_else(|| "./jarvy.toml".into());
-    let project_dir = std::path::Path::new(&config_path)
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(std::path::Path::to_path_buf)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let config_path = args
+        .config_path
+        .unwrap_or_else(|| crate::cli::DEFAULT_CONFIG_FILE.into());
+    let project_dir = crate::paths::config_parent_dir(&config_path);
 
     let ctx = match crate::workspace::find_workspace_root(&project_dir) {
         Some(c) => c,
@@ -1425,12 +1425,10 @@ pub fn handle_workspace_validate(arguments: Option<Value>) -> McpResult<Value> {
         .transpose()
         .map_err(|e| McpError::invalid_params(e.to_string()))?
         .unwrap_or_default();
-    let config_path = args.config_path.unwrap_or_else(|| "./jarvy.toml".into());
-    let project_dir = std::path::Path::new(&config_path)
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(std::path::Path::to_path_buf)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let config_path = args
+        .config_path
+        .unwrap_or_else(|| crate::cli::DEFAULT_CONFIG_FILE.into());
+    let project_dir = crate::paths::config_parent_dir(&config_path);
 
     let ctx = match crate::workspace::find_workspace_root(&project_dir) {
         Some(c) => c,

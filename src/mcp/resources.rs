@@ -291,7 +291,7 @@ fn extract_version_number(output: &str) -> Option<String> {
 
 /// Read the project's jarvy.toml as JSON
 fn read_project_config() -> McpResult<String> {
-    let config_path = "./jarvy.toml";
+    let config_path = crate::cli::DEFAULT_CONFIG_FILE;
     let content = std::fs::read_to_string(config_path)
         .map_err(|e| McpError::internal_error(format!("Cannot read {}: {}", config_path, e)))?;
     let parsed: toml::Value = toml::from_str(&content)

@@ -9,10 +9,23 @@
 //! This is the natural seam for future XDG migration and for a
 //! `JARVY_HOME` env override.
 
-use std::path::{Component, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Internal constant for the base directory name.
 const JARVY_DIR: &str = ".jarvy";
+
+/// Return the directory containing `file`, treating bare filenames
+/// (empty parent component) as cwd. Centralizes the "project root
+/// from a jarvy.toml path" pattern previously inlined across many
+/// command handlers. Lives in `paths` (not `commands::setup_cmd`)
+/// because library-side modules like `discover` also need it.
+pub fn config_parent_dir(file: &str) -> PathBuf {
+    Path::new(file)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
 
 /// Returned when `dirs::home_dir()` cannot be resolved (rare; running as
 /// `nobody`, certain container images, etc.) OR when `JARVY_HOME` is

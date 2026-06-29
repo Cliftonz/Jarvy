@@ -35,11 +35,7 @@ fn run_watch_loop(opts: &DiscoverOpts<'_>) -> i32 {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    let project_dir = Path::new(opts.file)
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
+    let project_dir = crate::paths::config_parent_dir(opts.file);
 
     // First pass — surface current state immediately, then watch.
     let exit = run_discover_once(opts);
@@ -64,11 +60,24 @@ fn run_watch_loop(opts: &DiscoverOpts<'_>) -> i32 {
     }) {
         Ok(w) => w,
         Err(e) => {
+            if crate::observability::telemetry_gate::is_enabled() {
+                tracing::error!(
+                    event = "discover.watch.start_failed",
+                    error = %e,
+                );
+            }
             eprintln!("Failed to start watcher: {e}");
             return crate::error_codes::CONFIG_ERROR;
         }
     };
     if let Err(e) = watcher.watch(&project_dir, RecursiveMode::Recursive) {
+        if crate::observability::telemetry_gate::is_enabled() {
+            tracing::error!(
+                event = "discover.watch.subscribe_failed",
+                path = %project_dir.display(),
+                error = %e,
+            );
+        }
         eprintln!("Failed to watch {}: {e}", project_dir.display());
         return crate::error_codes::CONFIG_ERROR;
     }
@@ -85,6 +94,12 @@ fn run_watch_loop(opts: &DiscoverOpts<'_>) -> i32 {
         // code so wrappers (cargo-watch-style scripts, CI) see the
         // failure instead of treating a silent exit as success.
         if rx.recv().is_err() {
+            if crate::observability::telemetry_gate::is_enabled() {
+                tracing::error!(
+                    event = "discover.watch.channel_closed",
+                    reason = "all_senders_dropped",
+                );
+            }
             eprintln!("watcher channel closed unexpectedly — exiting");
             return crate::error_codes::CONFIG_ERROR;
         }
@@ -123,11 +138,7 @@ fn run_discover_once(opts: &DiscoverOpts<'_>) -> i32 {
     let apply = opts.apply;
     let missing = opts.missing;
     let output_format = opts.output_format;
-    let project_dir: PathBuf = Path::new(file)
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
+    let project_dir: PathBuf = crate::paths::config_parent_dir(file);
 
     let existing_text = std::fs::read_to_string(file).ok();
     let (already_configured, already_configured_versions) = existing_text

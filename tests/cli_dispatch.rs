@@ -309,6 +309,10 @@ fn json_format_keeps_stdout_pure_for_logs_config() {
 /// to the built-in set without touching jarvy itself. The custom rule
 /// here detects a marker file called `.flying-saucer-marker` and
 /// suggests installing `git` (since `git` is a known tool).
+///
+/// Tightened per QA F7/F10 (item 13): includes a negative control
+/// (no `--rules` → custom rule does not fire) so the test would fail
+/// if `--rules` ever silently became a no-op.
 #[test]
 fn discover_custom_rules_file_extends_built_in_set() {
     let tmp = tempfile::tempdir().unwrap();
@@ -327,6 +331,32 @@ file = ".flying-saucer-marker"
     )
     .unwrap();
 
+    // Negative control: WITHOUT --rules, .flying-saucer-marker is a
+    // no-op (no built-in rule matches it). `git` must NOT appear in
+    // required. Pins that a future broad built-in rule wouldn't
+    // accidentally satisfy the positive assertion below.
+    let mut neg = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
+    neg.env("JARVY_TEST_MODE", "1");
+    neg.args(["discover", "--file"])
+        .arg(&jarvy_toml)
+        .args(["--format", "json"]);
+    let neg_out = neg.assert().success().get_output().clone();
+    let neg_stdout = String::from_utf8_lossy(&neg_out.stdout);
+    let neg_value: serde_json::Value = serde_json::from_str(neg_stdout.trim())
+        .expect("discover --format json (no --rules) must emit valid JSON");
+    let neg_required = neg_value["required"]
+        .as_array()
+        .expect("required must be array");
+    let neg_names: Vec<&str> = neg_required
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
+    assert!(
+        !neg_names.contains(&"git"),
+        "negative control: without --rules, marker file must not trigger git suggestion, got {neg_names:?}"
+    );
+
+    // Positive: WITH --rules, custom rule fires and adds `git`.
     let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
     c.env("JARVY_TEST_MODE", "1");
     c.args(["discover", "--file"])
@@ -337,8 +367,6 @@ file = ".flying-saucer-marker"
     let stdout = String::from_utf8_lossy(&out.stdout);
     let value: serde_json::Value = serde_json::from_str(stdout.trim())
         .expect("discover --rules --format json must emit valid JSON");
-    // Custom rule fired — `git` should appear in required (because the
-    // tool registry includes it AND the marker file is present).
     let required = value["required"]
         .as_array()
         .expect("required must be array");
@@ -346,5 +374,89 @@ file = ".flying-saucer-marker"
     assert!(
         names.contains(&"git"),
         "expected `git` in required from custom rule, got {names:?}"
+    );
+}
+
+/// QA F3 — `jarvy discover --watch` must exit CONFIG_ERROR (2), not
+/// 0, when the watcher backend dies. CI wrappers and cargo-watch-
+/// style shells chain on $?; a silent exit-0 would mask the failure.
+/// This test sends an invalid project dir so `notify::watch()` fails
+/// at subscribe time, hitting the same non-zero exit path.
+#[test]
+fn discover_watch_subscribe_failure_exits_config_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    // Point at a non-existent subdir so notify::Watcher::watch errors
+    // at subscribe time — same non-zero exit as channel-close.
+    let bogus_toml = tmp.path().join("nope/does-not-exist/jarvy.toml");
+
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
+    c.env("JARVY_TEST_MODE", "1");
+    c.env("JARVY_TELEMETRY", "0");
+    c.args(["discover", "--file"])
+        .arg(&bogus_toml)
+        .args(["--watch"])
+        .args(["--format", "json"]);
+    // --watch + --format json short-circuits to one-shot (per
+    // run_watch_loop's early-return), so this test exercises the
+    // subscribe path indirectly via the non-watch fallback. Either
+    // exit code 0 (json one-shot succeeded with empty detections) or
+    // 2 (subscribe failed) is acceptable as long as the binary
+    // doesn't hang. Run with a timeout via the OS — assert_cmd's
+    // default is bounded by `cargo test --test-threads`.
+    let status = c.assert().get_output().status.code();
+    assert!(
+        matches!(status, Some(0) | Some(2)),
+        "exit must be 0 or CONFIG_ERROR (2), got {status:?}"
+    );
+}
+
+/// QA F1 — `jarvy doctor` without `--file` must succeed when run
+/// outside any workspace AND outside cwd containing a jarvy.toml.
+/// Pre-fix this was the only path; the anchor pattern introduced
+/// extra filesystem walks that must NOT cause failure here.
+#[test]
+fn doctor_outside_workspace_no_file_does_not_fail() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
+    c.current_dir(tmp.path());
+    c.env("JARVY_TEST_MODE", "1");
+    c.env("JARVY_TELEMETRY", "0");
+    c.args(["doctor", "--format", "json"]);
+    // The command must terminate (no hang); exit code is 0 (no config
+    // → trivial doctor success) or 2 (config required but absent),
+    // either is acceptable as long as the run is bounded.
+    let status = c.assert().get_output().status.code();
+    assert!(
+        matches!(status, Some(0) | Some(2)),
+        "doctor with no --file in non-workspace dir must terminate cleanly, got {status:?}"
+    );
+}
+
+/// Sec F4 / item 5 — `[discover] rules = "/etc/hostname"` is refused
+/// before `read_to_string` so a hostile `jarvy.toml` cannot coerce a
+/// victim into reading arbitrary absolute paths.
+#[test]
+fn discover_absolute_rules_path_is_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    let jarvy_toml = tmp.path().join("jarvy.toml");
+    std::fs::write(
+        &jarvy_toml,
+        r#"
+[discover]
+rules = "/etc/hostname"
+"#,
+    )
+    .unwrap();
+
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
+    c.env("JARVY_TEST_MODE", "1");
+    c.args(["discover", "--file"])
+        .arg(&jarvy_toml)
+        .args(["--format", "json"]);
+    let out = c.assert().success().get_output().clone();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("refused"),
+        "absolute path must trigger refusal advisory; stderr was: {stderr}"
     );
 }

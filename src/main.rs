@@ -266,7 +266,7 @@ fn extract_config_path(cli: &Cli) -> Option<String> {
         | Some(Commands::Services { file, .. }) => Some(file.clone()),
         _ => {
             // Try default path for commands that don't have a --file flag
-            let default = "./jarvy.toml";
+            let default = crate::cli::DEFAULT_CONFIG_FILE;
             if std::path::Path::new(default).exists() {
                 Some(default.to_string())
             } else {

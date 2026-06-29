@@ -9,6 +9,46 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use super::subcommands::*;
 
+/// Canonical default path for the project's `jarvy.toml`. Referenced
+/// from runtime fallbacks (dispatch.rs anchor, MCP tool config-path
+/// defaults, interactive menus) so future changes (e.g., honoring
+/// `JARVY_CONFIG`) only need to update one place. Clap `default_value`
+/// macros use the same string literal directly — `default_value_test`
+/// below asserts they stay in sync.
+pub const DEFAULT_CONFIG_FILE: &str = "./jarvy.toml";
+
+#[cfg(test)]
+mod default_value_test {
+    use super::*;
+    use clap::CommandFactory;
+
+    /// Regression guard for Maint F3 — every clap arg whose
+    /// `default_value` is meant to be the project's jarvy.toml MUST
+    /// match `DEFAULT_CONFIG_FILE`. If someone changes the const but
+    /// forgets a clap site (or vice versa), the CLI silently desyncs.
+    #[test]
+    fn clap_file_defaults_match_const() {
+        fn walk(cmd: &clap::Command) {
+            for arg in cmd.get_arguments() {
+                if arg.get_id() == "file" {
+                    if let Some(d) = arg.get_default_values().first() {
+                        assert_eq!(
+                            d.to_str(),
+                            Some(DEFAULT_CONFIG_FILE),
+                            "clap --file default in `{}` must match DEFAULT_CONFIG_FILE",
+                            cmd.get_name(),
+                        );
+                    }
+                }
+            }
+            for sub in cmd.get_subcommands() {
+                walk(sub);
+            }
+        }
+        walk(&super::Cli::command());
+    }
+}
+
 #[derive(Parser)]
 #[clap(
     name = "jarvy",
