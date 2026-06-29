@@ -156,7 +156,14 @@ impl ReleaseClient {
             self.owner, self.repo
         );
 
-        let response = crate::net::agent()
+        // `github_api_agent` follows up to 3 redirects so a repo rename
+        // (e.g. `bearbinary/jarvy` → `Cliftonz/jarvy`, 2026-06-26) doesn't
+        // brick auto-update on previously-installed binaries — GitHub
+        // responds 301 to the canonical `/repositories/<id>/releases`
+        // endpoint on the same host. The default `agent()` pins
+        // `max_redirects(0)` and would surface the 301 body as a JSON
+        // parse error, which the install path swallows as "up to date".
+        let response = crate::net::github_api_agent()
             .get(&url)
             .header("User-Agent", crate::net::USER_AGENT)
             .header("Accept", "application/vnd.github.v3+json")
@@ -197,7 +204,8 @@ impl ReleaseClient {
             self.owner, self.repo, tag
         );
 
-        let response = crate::net::agent()
+        // See `fetch_releases` for the rationale on `github_api_agent`.
+        let response = crate::net::github_api_agent()
             .get(&url)
             .header("User-Agent", crate::net::USER_AGENT)
             .header("Accept", "application/vnd.github.v3+json")

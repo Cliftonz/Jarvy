@@ -81,8 +81,17 @@ pub fn init_logging(cfg: &crate::telemetry::TelemetryConfig) {
     // don't flood `~/.jarvy/logs/jarvy.log` and OTLP exports
     // (round-2 obs P1). Operators get a `RUST_LOG` escape hatch; the
     // default is "warn at the global floor, info inside our own crate."
-    let env_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn,jarvy=info"));
+    //
+    // `opentelemetry*` directives silence the `BatchLogProcessor.ExportError`
+    // chatter that the SDK emits at ERROR when the configured OTLP
+    // endpoint is unreachable. Users with no Alloy/collector running
+    // were seeing those lines as the last output of an otherwise
+    // successful command (e.g. `jarvy update`), making it look like the
+    // command itself failed. The exporter's own degradation is already
+    // surfaced via `jarvy telemetry status` (`TelemetryBootstrapState`).
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new("warn,jarvy=info,opentelemetry=off,opentelemetry_sdk=off")
+    });
 
     // Console output goes to stderr at every level. Stdout is reserved
     // for command output (e.g. `jarvy tools --index --format json`,
