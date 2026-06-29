@@ -93,6 +93,10 @@ Usage: jarvy setup [OPTIONS]
 
 Options:
   -f, --file <FILE>            Path to the configuration file [default: ./jarvy.toml]
+  -P, --project <NAME>         Run setup against one workspace member (PRD-047). Pass the member name from
+                               `[workspace] members`, or `current` to auto-detect from cwd. Without --project,
+                               setup auto-detects whether cwd sits inside a member; pass --project at the
+                               workspace root to disambiguate.
       --from <URL>             Fetch configuration from a URL (e.g., GitHub raw URL, gist, HTTP endpoint)
       --role <ROLE>            Override role assignment for this run (temporary, doesn't modify config)
       --no-hooks               Skip all hook execution
@@ -772,15 +776,24 @@ Options:
   -f, --file <FILE>          Path to the configuration file to read / update [default: ./jarvy.toml]
       --apply                Write suggestions into jarvy.toml (creates if missing, merges if not)
       --missing              Show only tools that aren't already pinned (one `name = "version"` per line)
+      --rules <PATH>         Custom rules TOML file appended to the built-in set (overrides
+                             `[discover] rules = "..."` from jarvy.toml)
+      --watch                Re-run discover whenever a project file changes (notify-driven,
+                             750 ms debounce; Ctrl-C to exit). Falls through to one-shot mode
+                             under `--format json`.
   -F, --format <OUTPUT_FORMAT>  Output format: json, pretty [default: pretty]
   -h, --help                 Print help
 ```
 
 Dry-run by default. `--apply` is append-only: hand-pinned tools in
 `[provisioner]` survive unchanged; new tools land after the existing
-block, before any subsequent `[section]`. See
-[`docs/discover.md`](discover.md) for the full detection rule list
-and trust posture.
+block, before any subsequent `[section]`. Detected ecosystems jarvy
+can't install (maven, gradle, dotnet, …) surface in an
+`uninstallable` bucket — never silently dropped. After `jarvy setup`
+runs, a continuous-discovery advisory fires for any tool implied by
+the project tree but not yet in `[provisioner]`. See
+[`docs/discover.md`](discover.md) for `[discover]` config, custom
+rules shape, version-range narrowing, and the trust posture.
 
 ### `jarvy workspace`
 
@@ -800,11 +813,49 @@ Options:
 ```
 
 Read-only inspection of `[workspace] members = [...]` declarations.
-`show` annotates each tool with `(inherited)` / `(overridden)` so it's
-clear where each version came from. Workspace-aware `jarvy setup
---project <name>` is deferred to a follow-up PRD. See
-[`docs/workspace.md`](workspace.md) for inheritance semantics and the
-deferred items.
+Supports glob patterns (`apps/*`) and `exclude = [...]` in
+`[workspace]`. `show` annotates each tool with `(inherited)` /
+`(overridden)` so it's clear where each version came from. For
+actually provisioning a member, use `jarvy setup --project <name>`
+or rely on auto-context detection (`cd apps/web && jarvy setup`).
+See [`docs/workspace.md`](workspace.md) for inheritance semantics.
+
+### `jarvy context`
+
+```text
+Show the current execution context (workspace root, member, resolved config path)
+
+Usage: jarvy context [OPTIONS]
+
+Options:
+  -f, --file <FILE>             Path to the configuration file [default: ./jarvy.toml]
+  -F, --format <OUTPUT_FORMAT>  Output format: json, pretty [default: pretty]
+  -h, --help                    Print help
+```
+
+Read-only diagnostic — what would `jarvy setup` actually do from here?
+Lists detected workspace members (current marked with `→`),
+auto-detected `--project`, and the resolved setup file.
+
+### `jarvy library`
+
+```text
+Inspect / clean the shared library-registry cache (PRD-054 phase 6)
+
+Usage: jarvy library [OPTIONS] <COMMAND>
+
+Commands:
+  list   List every cached library (URL, publisher, item counts)
+  show   Show the items inside one cached library
+  clean  Wipe `~/.jarvy/library.d/` (and the process cache). Supports --dry-run.
+  sync   Force-refresh every library_sources entry declared in jarvy.toml
+```
+
+`list` / `show` / `clean` are read-only or local-disk operations.
+`sync` walks `[ai_hooks] library_sources`, `[mcp_register]
+library_sources`, and `[skills] library_sources` and refetches each
+one (honoring the remote-config trust gate and cosign signature
+verification — see PRD-054).
 
 ### `jarvy help`
 

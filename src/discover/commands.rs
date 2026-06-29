@@ -78,8 +78,15 @@ fn run_watch_loop(opts: &DiscoverOpts<'_>) -> i32 {
         // Block on the first event, then drain everything that's
         // landed in a 750ms quiet period so a bulk rewrite (git
         // checkout, npm install) re-runs discover only once.
+        //
+        // `rx.recv()` only fails when EVERY sender has been dropped —
+        // which here means the watcher backend died (permissions
+        // revoked, watch limit exhausted, …). Exit with a non-zero
+        // code so wrappers (cargo-watch-style scripts, CI) see the
+        // failure instead of treating a silent exit as success.
         if rx.recv().is_err() {
-            return 0;
+            eprintln!("watcher channel closed unexpectedly — exiting");
+            return crate::error_codes::CONFIG_ERROR;
         }
         let debounce_until = std::time::Instant::now() + Duration::from_millis(750);
         while let Ok(()) =

@@ -177,7 +177,8 @@ nav:
   - Guides:
     - Roles guide: roles.md
     - Hooks guide: hooks.md
-    - Git hooks (pre-commit): git-hooks.md
+    - Git hooks (pre-commit / husky / lefthook / native): git-hooks.md
+    - Replacing Husky with Jarvy: replace-husky.md
     - AI hooks: ai-hooks.md
     - MCP registration: mcp-registration.md
     - AI agent skills: skills.md

@@ -304,3 +304,47 @@ fn json_format_keeps_stdout_pure_for_logs_config() {
     let _v: serde_json::Value = serde_json::from_str(stdout.trim())
         .expect("stdout must be a single JSON document with no human text mixed in");
 }
+
+/// PRD-044 phase 2 — `--rules <path>` appends a custom detection rule
+/// to the built-in set without touching jarvy itself. The custom rule
+/// here detects a marker file called `.flying-saucer-marker` and
+/// suggests installing `git` (since `git` is a known tool).
+#[test]
+fn discover_custom_rules_file_extends_built_in_set() {
+    let tmp = tempfile::tempdir().unwrap();
+    let jarvy_toml = tmp.path().join("jarvy.toml");
+    std::fs::write(tmp.path().join(".flying-saucer-marker"), "").unwrap();
+    std::fs::write(
+        tmp.path().join("custom-rules.toml"),
+        r#"
+[[rules]]
+name = "git"
+category = "dev"
+
+[[rules.detect]]
+file = ".flying-saucer-marker"
+"#,
+    )
+    .unwrap();
+
+    let mut c = Command::new(assert_cmd::cargo::cargo_bin!("jarvy"));
+    c.env("JARVY_TEST_MODE", "1");
+    c.args(["discover", "--file"])
+        .arg(&jarvy_toml)
+        .args(["--rules", "custom-rules.toml"])
+        .args(["--format", "json"]);
+    let out = c.assert().success().get_output().clone();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let value: serde_json::Value = serde_json::from_str(stdout.trim())
+        .expect("discover --rules --format json must emit valid JSON");
+    // Custom rule fired — `git` should appear in required (because the
+    // tool registry includes it AND the marker file is present).
+    let required = value["required"]
+        .as_array()
+        .expect("required must be array");
+    let names: Vec<&str> = required.iter().filter_map(|s| s["name"].as_str()).collect();
+    assert!(
+        names.contains(&"git"),
+        "expected `git` in required from custom rule, got {names:?}"
+    );
+}

@@ -297,20 +297,28 @@ fn handle_doctor(
     extended: bool,
     report: &Option<String>,
 ) -> i32 {
-    // PRD-047 phase 2 — when an explicit --file is given AND cwd is
-    // inside a declared workspace member, auto-redirect to that
-    // member's jarvy.toml. Without this the user would need to
-    // manually point `--file apps/web/jarvy.toml` every time.
-    let config = file.as_ref().map(|f| {
-        if let Some(member) = commands::setup_cmd::auto_detect_project(f) {
-            if let Ok(resolved) = commands::setup_cmd::resolve_workspace_project(f, &member) {
-                if let Some(s) = resolved.to_str() {
-                    return Config::new(s);
-                }
-            }
+    // PRD-047 phase 2 — auto-redirect to the current workspace
+    // member's jarvy.toml when one is detected. Triggers whether or
+    // not the user passed `--file`: `cd apps/web && jarvy doctor`
+    // should "just work" without making the user spell out the path.
+    //
+    // Search anchor is the user-supplied `--file` when present;
+    // otherwise we walk up from `./jarvy.toml` (the same default the
+    // rest of the CLI uses).
+    let anchor = file.clone().unwrap_or_else(|| "./jarvy.toml".to_string());
+    let resolved_config: Option<Config> = {
+        let auto_redirect = commands::setup_cmd::auto_detect_project(&anchor)
+            .and_then(|member| {
+                commands::setup_cmd::resolve_workspace_project(&anchor, &member).ok()
+            })
+            .and_then(|p| p.to_str().map(str::to_string));
+        match (file.as_ref(), auto_redirect) {
+            (_, Some(s)) => Some(Config::new(&s)),
+            (Some(f), None) => Some(Config::new(f)),
+            (None, None) => None,
         }
-        Config::new(f)
-    });
+    };
+    let config = resolved_config;
     let specific_tools = tools.as_ref().map(|t| {
         t.split(',')
             .map(|s| s.trim().to_string())

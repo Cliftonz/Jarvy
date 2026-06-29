@@ -1881,6 +1881,19 @@ pub fn resolve_workspace_project(
     Ok(path)
 }
 
+/// True iff `dir` looks like a child of the OS temp dir. Used to
+/// detect when `setup --project <name>` synthesized a merged-config
+/// tempfile so the continuous-discovery phase can scan the real
+/// project tree instead of `/tmp` (see `run_continuous_discover_phase`).
+fn is_synthesized_tempfile(dir: &std::path::Path) -> bool {
+    let Ok(tmp) = std::env::temp_dir().canonicalize() else {
+        return false;
+    };
+    dir.canonicalize()
+        .map(|d| d.starts_with(&tmp))
+        .unwrap_or(false)
+}
+
 /// Continuous discovery (PRD-044 phase 2). After `jarvy setup`
 /// finishes its install phases we run `discover::analyze` and warn
 /// when project marker files imply tools that aren't pinned in
@@ -1898,11 +1911,22 @@ fn run_continuous_discover_phase(file: &str) {
         return;
     }
 
-    let project_dir = std::path::Path::new(file)
+    // Pick the directory to SCAN for marker files. Normally this is
+    // the parent of `file` — but when `file` is a synthesized tempfile
+    // from `setup --project <name>` (path under `std::env::temp_dir()`),
+    // the parent is `/tmp/...` and the scan finds nothing. In that
+    // case, fall back to cwd, which is where the user actually
+    // launched `jarvy setup`.
+    let raw_parent = std::path::Path::new(file)
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .map(std::path::Path::to_path_buf)
         .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let project_dir = if is_synthesized_tempfile(&raw_parent) {
+        std::env::current_dir().unwrap_or(raw_parent)
+    } else {
+        raw_parent
+    };
 
     let existing_text = std::fs::read_to_string(file).ok();
     let already_configured: std::collections::HashSet<String> = existing_text

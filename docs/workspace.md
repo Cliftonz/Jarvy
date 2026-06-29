@@ -100,6 +100,89 @@ Validate exits `0` when there are no errors (warnings are advisory)
 and `CONFIG_ERROR` (2) when any member's directory is missing or its
 jarvy.toml fails to parse.
 
+## Glob member patterns
+
+`members = ["apps/*"]` expands at config-load time to every immediate
+subdirectory of `apps/`. Skips `.dotfile` directories. Exact paths
+and globs can mix:
+
+```toml
+[workspace]
+members = [
+    "apps/*",          # expand all immediate children
+    "packages/shared", # plus this exact member
+]
+exclude = [
+    "apps/legacy",
+    "apps/*-deprecated",
+]
+```
+
+Glob support is intentionally minimal: only `*` (any path component
+run, no `/`), no `**`, no `?`, no character classes. The patterns
+real monorepos write (`apps/*`, `packages/*-server`) all work; if you
+need more, fall back to exact paths.
+
+`exclude = [...]` is applied AFTER expansion using the same matcher
+so `apps/*` + `exclude = ["apps/legacy"]` gives you every sibling of
+`legacy` minus `legacy` itself.
+
+## `jarvy setup --project <name>`
+
+```bash
+# Setup one member explicitly:
+jarvy setup --project apps/web
+
+# Auto-detect from cwd:
+cd apps/web && jarvy setup
+
+# Same as `--project current`:
+jarvy setup --project current
+```
+
+The runner reads the member's own `jarvy.toml` (with workspace
+inheritance applied). Members WITHOUT a per-member `jarvy.toml` get a
+synthesized merged config written to a tempfile so setup still has
+something to install against.
+
+Auto-context detection: when invoked WITHOUT `--project`, setup
+walks up from cwd to find a workspace root and checks whether cwd
+sits inside a declared member. If so, setup scopes implicitly and
+prints `Detected workspace member \`apps/web\` — scoping setup to
+this member.` to stderr. Pass `--project <name>` (or run from the
+workspace root) to override.
+
+The same auto-context applies to `jarvy drift` and `jarvy doctor` —
+both honor cwd's enclosing member so `cd apps/web && jarvy drift
+check` "just works."
+
+## `jarvy context`
+
+Read-only diagnostic that shows what jarvy thinks the current
+execution context is. Useful as a sanity check before running setup
+in a new repo.
+
+```bash
+$ cd apps/web
+$ jarvy context --file /repo/jarvy.toml
+Jarvy execution context
+=======================
+Working dir:   /repo/apps/web
+--file arg:    /repo/jarvy.toml
+Workspace:     /repo
+Root config:   /repo/jarvy.toml
+Members (3):
+      apps/api
+   →  apps/web
+      packages/shared
+Current member: apps/web
+
+Auto-context:  `jarvy setup` would scope to `apps/web` (override with --project).
+Resolved setup file: /repo/apps/web/jarvy.toml
+```
+
+Supports `--format json` for AI agents / CI.
+
 ## Inheritance semantics
 
 Member configs merge with the root via
@@ -111,24 +194,17 @@ Member configs merge with the root via
 - For sections NOT in `inherit`, the member gets only what's in its
   own jarvy.toml.
 
-If `inherit = []` (or omitted), `jarvy workspace show` / `list` treat
-it as `["provisioner"]` for display so the most common monorepo case
-works without extra config. The underlying `merge_configs` function
-still honors the explicit empty-list semantics — only the `workspace`
-CLI surface widens the default.
+If `inherit = []` (or omitted), BOTH the `workspace` CLI surface AND
+the production setup resolver treat it as `["provisioner"]` — the
+common monorepo case (members share the root toolset) works without
+explicit config. Routed through `WorkspaceConfig::effective_inherit()`
+so CLI display and production setup cannot disagree.
 
 ## What's deferred
 
-Items from PRD-047 that v1 does NOT ship:
-
-- Glob patterns in `[workspace] members` (e.g. `apps/*`). Exact paths
-  only.
-- `[workspace] exclude = [...]` patterns.
-- Auto-context detection (running `jarvy setup` from a subdir
-  automatically scoping to that member).
-- `jarvy setup --project <name>` workspace-aware orchestration.
-- A standalone `jarvy context` command.
-
-Open an issue if you need any of these — the foundation is already in
-place (`workspace::find_workspace_root` + `merge_configs`), so they're
-small follow-ups.
+- Per-member install parallelism — `jarvy setup --project apps/*`
+  runs members sequentially today. The existing per-tool parallelism
+  (PRD-001 / rayon) stops at the workspace member boundary.
+- `[workspace.members.<name>]` inline overrides — alternative to
+  per-member `jarvy.toml`. Per-member files cover the case adequately
+  for now.

@@ -27,6 +27,83 @@ for the full release process and
 [`docs/release-quirks-jarvy.md`](https://github.com/Cliftonz/jarvy/blob/main/docs/release-quirks-jarvy.md)
 for divergences from generic release skills.
 
+## [v0.4.0] — Library registry / monorepo / discover / git hooks / 25-item review sweep (2026-06-29)
+
+The biggest single milestone since v0.2.0 — eleven PRDs closed
+across a multi-day push, plus the full close-out of the parallel-
+code-review enhancement plan that ran against the new surface.
+
+**Highlights:**
+
+- **PRD-044 auto-discovery (full)** — `jarvy discover` scans the
+  project tree, suggests tools, optionally `--apply`s into
+  `jarvy.toml`. `[discover]` config block supports custom rule files;
+  `--rules <path>` CLI flag overrides per-run. `--watch` mode
+  re-runs on filesystem events. `FileContaining` detection pattern.
+  Version-range narrowing suppresses re-suggestions when the pinned
+  range already covers the detected version. `uninstallable` bucket
+  surfaces ecosystems jarvy can't install (maven/gradle/dotnet)
+  instead of silently dropping them. Continuous discovery in
+  `jarvy setup` emits an advisory when new markers appear.
+- **PRD-047 monorepo (full)** — `[workspace] members = [...]` with
+  glob expansion (`apps/*`) + `exclude = [...]`. `jarvy setup
+  --project <name>` runs setup against one member; `name = "current"`
+  auto-detects. Implicit auto-context when cwd sits inside a declared
+  member. New `jarvy context` diagnostic command. `jarvy drift` and
+  `jarvy doctor` honor the same auto-context.
+- **PRD-051 universal `--format json`** — every command that prints
+  to stdout accepts `--format json`. Per-subcommand placement on
+  drift/logs/ticket/services/workspace; exit codes match human path.
+- **PRD-054 library registry (phase 5 + phase 6)** — cosign signature
+  enforcement (real, not scaffolded). `jarvy library list/show/clean/sync`
+  CLI + matching MCP tools.
+- **PRD-048 git hook frameworks (full)** — pre-commit, husky,
+  lefthook, native all ship as first-class handlers behind the
+  unified `HookFramework` enum. `docs/replace-husky.md` walks
+  through three migration paths.
+- **PRD-055 git skill sources** — `git+https://...@<ref>[#<subpath>]`
+  + `github:owner/repo@<ref>` URL schemes for `[skills]
+  library_sources`. Argv-injection refused, symlink walks refused,
+  `file://` scoped to the cache root.
+- **`jarvy diagnose --apply`** + **`jarvy migrate --apply`** —
+  previously "(Fix application not yet implemented)" / "--apply is
+  not yet implemented" placeholders now actually do the work.
+- **25-item parallel-review hardening** — strict version allowlists,
+  filename sanitizer, workspace path-traversal refusal, atomic-write
+  for discover --apply, `MergeOutcome` enum, telemetry-gate
+  consistency, perf wins (Arc<Manifest> snapshot, cmd_satisfies
+  cache), QA + observability rounds.
+- **Half-baked surface close-out** — every dead-coded
+  `#[allow(dead_code)] // Reserved for ...` either shipped or got an
+  explicit deferral note in CHANGELOG.
+
+**Breaking-shape additions (all opt-in, no existing config breaks):**
+
+- `[discover]` block in `jarvy.toml` — optional, drives custom
+  detection rules.
+- `[git_hooks.native]` block — only consumed when
+  `framework = "native"`.
+- `[[ai_hooks/mcp_register/skills.library_sources]]` entries now
+  accept `manifest_sha256 = "<hex>"`.
+- Cargo feature `test-bypass` — gates the
+  `JARVY_{LIBRARY,REGISTRY}_ALLOW_INSECURE_FETCH` + `JARVY_TEST_HOME`
+  test escape hatches out of release builds. Release builds are
+  inert against those env vars.
+
+**New events (CLAUDE.md taxonomy stable contract):**
+- `discover.applied`, `discover.setup_advisory`
+- `workspace.validate_completed`, `workspace.member_invalid`
+- `library.sync.failed`, `library.signature.verified`
+- `git_hooks.{install,update}_{started,completed}`
+
+**Test counts:** 974 lib + 1442 bin + 54 integration suites green.
+
+**Migration notes:**
+- `jarvy migrate --apply` will auto-rewrite legacy `[tools]` blocks
+  to `[provisioner]` for users still on the pre-v0.2 schema.
+- `setup --project current` is the natural one-liner for monorepo
+  contributors who `cd` into their working subdir.
+
 ## [Unreleased] — Close out PRD-011/013/014/037/038/039/048/049/052/054/055 + library registry + git skill sources + skills + git hooks + progress (2026-06-28)
 
 A documentation + maintainability + ecosystem-breadth pass that closes
